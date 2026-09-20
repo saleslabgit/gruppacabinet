@@ -137,19 +137,39 @@ Never claim something was tested unless it was actually tested.
 
 # Code Quality Rules
 
-## UI / Design System
+## UI / Approved Blade Pages
 
-For every interface or frontend task, before implementation:
+This project does not use a separate abstract `DESIGN_SYSTEM.md` or `uikit/` as mandatory UI sources. The approved interface is created as the complete set of real Blade pages described by the specification.
 
-- read `DESIGN_SYSTEM.md`;
-- inspect the relevant approved visual reference in `uikit/index.html`;
-- identify the shared design-system components and tokens that the task must reuse.
+### During Stage 3
 
-Implement UI by composing shared reusable Blade components and approved tokens, not page-specific visual copies. Use only the approved component variants, spacing, typography, colors, radii, states, responsive behavior, and page patterns. Do not restyle or "improve" approved components based on personal preference, and do not introduce a new visual variant or one-off design primitive without an explicit approved design-system change.
+For the full frontend/prototype stage:
 
-For visual questions, explicit numeric values and implementation rules in `DESIGN_SYSTEM.md` take priority over `uikit/index.html`; the visual reference governs approved visual intent not already resolved by that document. If a required pattern or value is absent or explicitly unresolved, stop and report the gap for a user decision rather than inventing it.
+- use the UI requirements and page catalogue in `SPEC.md`, especially sections 24 and 25;
+- build pages directly in the final `application/resources/views/` structure;
+- use real Blade layouts, partials, and reusable components;
+- create the shared CSS variables/tokens and reusable visual primitives as part of the actual pages, not as a separate abstract UI-kit deliverable;
+- use fixture/mock data and development-only prototype routes to show all required states without depending on unfinished backend flows;
+- cover the required status variants, validation/error/empty/success states, destructive confirmations, long-content cases, pagination where applicable, and desktop/tablet/mobile layouts;
+- keep prototype routes available only in `local`/`testing`;
+- do not create disposable HTML copies that would later need to be ported into Blade.
 
-Treat `uikit/` as reference material only, not production runtime code or a dependency. Continue to obey all project-level stack, architecture, security, runtime, and asset-delivery constraints; a design reference cannot silently override them.
+The purpose of Stage 3 is to finish and approve the real page structure and visual behavior before the main backend CRUD work begins.
+
+### After Stage 3 Is Approved
+
+Before every task that affects UI, layout, frontend components, or responsive behavior:
+
+- inspect the relevant approved Blade views, layouts, partials, and components;
+- inspect the shared CSS/tokens actually used by those pages;
+- inspect `docs/ui-pages.md` for the approved page and state catalogue;
+- reuse the existing page structure and shared components instead of creating parallel markup or alternate visual implementations.
+
+Backend tasks should primarily replace fixture data with real data, connect routes/actions, validation, authorization, and state-dependent behavior to the already approved views.
+
+Small changes required by real backend integration are allowed when they preserve the approved structure and visual intent. A material change to page structure, interaction model, visual hierarchy, or responsive behavior must not be introduced silently. If such a change is required, stop and report it for an explicit user decision or a separately approved task.
+
+If a required page or materially different UI state was not covered by the approved Stage 3 pages, do not invent a new product/UX pattern silently. Report the gap and obtain a decision when it materially affects behavior or scope.
 
 ## Prefer Explicit Code
 
