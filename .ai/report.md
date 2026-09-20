@@ -1,113 +1,78 @@
-# Report: TASK-2026-09-20-03
+# Report: TASK-2026-09-20-04
 
 Status: done
 
 ## Summary
 
-Implemented the Stage 2 MySQL data and domain foundation. The application now
-has the required `gp_*`, database-session, and database-queue schema; Eloquent
-models and relationships; explicit lifecycle enums and transition services;
-atomic group status history; business audit storage; immutable generated group
-UUIDs; centralized compatibility `accept` derivation; typed cached settings;
-and idempotent local/testing seed data.
+Corrected both rejected Stage 2 group-creation invariants at the Eloquent model
+creation boundary.
 
-No Stage 3+ UI, controllers, authentication flow, public integration, mail,
-scheduler behavior, WEBPAY requests, provider logic, or credentials were added.
+Every new group now loads its persisted owner by `owner_id` and snapshots the
+owner's current `free` value. Every creation also unconditionally replaces any
+candidate `public_uuid` with a new application-generated UUID v4. Existing
+post-create UUID mutation protection remains unchanged.
+
+No migration, documentation change, Stage 3 work, controller, payment flow, or
+other product behavior was added.
 
 ## Changed Files
 
-- `application/database/migrations/2026_09_20_000001_create_domain_tables.php`:
-  complete ordered Stage 2 schema, foreign keys, generated active-email column,
-  required indexes, sessions, jobs, batches, and failed jobs.
-- `application/app/Models/*`: models, explicit `gp_*` tables, casts, soft deletes,
-  and required relationships.
-- `application/app/Enums/*`: exhaustive user, group, and payment transition
-  matrices.
-- `application/app/Services/*`: user/group/payment transition services,
-  `AuditService`, and typed cached `SettingService`.
-- `application/app/Domain/Compatibility/AcceptFromStatus.php`: single mapping
-  for compatibility `accept` values.
-- `application/app/Exceptions/InvalidStatusTransition.php`: clear invalid
-  transition exception.
-- `application/database/seeders/DatabaseSeeder.php`: idempotent dictionary
-  containers, typed settings, and local/testing administrator.
-- `application/tests/Unit/Enums/StatusTransitionMatrixTest.php`: every allowed
-  and forbidden status pair.
-- `application/tests/Feature/Domain/*`: MySQL schema/index/generated-column,
-  constraint, UUID, transaction, relationship, audit, settings, and seed tests.
-- `application/.env.example`: database session and queue defaults.
-- `docs/architecture.md`, `docs/development.md`, `docs/project-status.md`: actual
-  Stage 2 architecture, setup, seed behavior, scope, and remaining unknowns.
+- `application/app/Models/Group.php`: guarded application-owned `free` and
+  `public_uuid`; creation now resolves the persisted owner, copies its current
+  tariff, and always generates a fresh UUID v4.
+- `application/tests/Feature/Domain/GroupCreationInvariantTest.php`: focused
+  MySQL-backed coverage for tariff snapshots, caller input, tariff changes,
+  generated UUID ownership, uniqueness, format, immutability, persisted values,
+  and missing-owner failure.
 - `.ai/report.md`: this report.
 
 ## Checks
 
-- Docker services: MySQL and PHP healthy; web running.
-- Effective destructive-check target, bootstrapped through Laravel:
-  `mysql gruppa_cabinet_test`.
-- `APP_ENV=testing DB_DATABASE=gruppa_cabinet_test php artisan migrate:fresh
-  --seed --force`: passed on the dedicated test database.
-- Repeated `php artisan migrate --force`: `Nothing to migrate`.
-- Repeated `php artisan db:seed --force`: passed without duplicates. Metadata
-  query after repeated seeds returned 3 dictionaries, 7 settings, and 1 admin.
-- `docker compose exec -T php php artisan test`: passed, 131 tests and 246
-  assertions, using MySQL `gruppa_cabinet_test`.
-- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 51 files.
+- `docker compose exec -T php php artisan test
+  tests/Feature/Domain/GroupCreationInvariantTest.php`: passed, 8 tests and 11
+  assertions.
+- `docker compose exec -T php php artisan test`: passed, 139 tests and 257
+  assertions.
+- The full suite's `TestDatabaseConnectionTest` passed and confirmed the
+  `mysql` driver with database `gruppa_cabinet_test`.
+- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 52 files.
 - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
   passed, no errors.
 - `docker compose exec -T php composer check-platform-reqs`: passed on PHP
   8.2.32, including `pdo_mysql`.
-- `docker compose config -q`: passed.
-- MySQL `information_schema` inspection confirmed `active_email` is `STORED
-  GENERATED`, has the expected expression and unique index, and confirmed the
-  required domain indexes.
-- MySQL schema inspection confirmed both `gruppa_cabinet` and
-  `gruppa_cabinet_test` still exist; only the test database was reset.
-- Repository searches found no WEBPAY credentials/provider code, frontend
-  tooling, or Stage 3+ implementation in the new scope. PHPUnit remains forced
-  to MySQL `gruppa_cabinet_test`; no SQLite test path was introduced.
 - `git diff --check` and `git diff --cached --check`: passed. Staged inspection
-  contains 32 task files only; governance/spec/task files, secrets, and runtime
-  artifacts are not staged.
-
-Intermediate verification found and resolved two test/schema issues (JSON key
-order and explicitly required standalone indexes) plus Larastan enum property
-typing. The final checks above are the post-fix results.
+  contains only the model correction, focused test, and this report.
+- Scope scan found no migration, Stage 3/UI file, WEBPAY code, credential,
+  dependency, or unrelated product change.
 
 ## Facts
 
-- Active-email uniqueness is enforced by MySQL rather than application-only
-  validation, and soft-deleted emails can be reused.
-- Group status changes and history inserts share one database transaction and
-  a failed history write rolls back the status change.
-- `accept` is derived from status during model saves; seeds and services do not
-  set it independently.
-- Payment and meeting money fields use unsigned integer minor units and integer
-  casts; no float/decimal money storage was added.
-- Multiple `NULL` payment transaction IDs are allowed; duplicate non-null IDs
-  and duplicate order numbers are rejected by unique indexes.
-- Local/testing seed credentials are intentionally fixed only outside
-  production and are documented in `docs/development.md`.
+- `Group::$guarded` now includes `public_uuid` and `free`, so normal mass
+  assignment does not accept caller ownership of those fields.
+- The `creating` model event uses `User::query()->findOrFail(owner_id)`, so the
+  snapshot comes from the persisted owner and a missing owner fails clearly.
+- The same event assigns `Str::uuid()` unconditionally and copies the persisted
+  owner's boolean `free` value immediately before INSERT. This also overrides
+  values assigned directly before the first save.
+- Tests refresh persisted models before asserting snapshot and UUID values.
+- Changing a user's tariff does not update existing group snapshots; groups
+  created afterward receive the new tariff.
+- The existing `saving` check still throws when `public_uuid` is changed after
+  creation, and the database value remains unchanged.
+- The existing UUID unique index and all Stage 2 migrations are unchanged.
+- `docs/project-status.md` already describes generated immutable UUIDs at the
+  appropriate high level and remains truthful, so it was not changed.
 
 ## Assumptions
 
-- The task-approved column names are the conventional English snake_case names
-  implemented in the migration.
-- `participant_capacity` represents the single group-size field specified as
-  “количество человек”.
-- A payment always belongs to the group whose placement or extension it pays
-  for, so `gp_payments.group_id` is non-nullable.
+- A soft-deleted owner is not a valid owner for new group creation because the
+  normal `User` query scope does not resolve it.
 
 ## Unknowns
 
-- Placement and extension price values remain explicitly `NULL`.
-- Dictionary item display values remain unseeded because no approved values are
-  specified.
-- Production infrastructure, SMTP, public-site integration, queue worker, and
-  WEBPAY behavior remain unverified and out of scope.
+- None for this correction.
 
 ## Risks / Next Step
 
-Stage 2 is complete. The next planned milestone may build the approved Stage 3
-Blade prototypes on this schema without introducing real authentication, CRUD,
-or WEBPAY behavior prematurely.
+Both review blockers are corrected. Stage 2 can be reviewed again; Stage 3 was
+not started.

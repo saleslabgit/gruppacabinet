@@ -18,7 +18,7 @@ class Group extends Model
 
     protected $table = 'gp_groups';
 
-    protected $guarded = ['id'];
+    protected $guarded = ['id', 'public_uuid', 'free'];
 
     protected $attributes = [
         'status' => 'draft',
@@ -27,7 +27,10 @@ class Group extends Model
     protected static function booted(): void
     {
         static::creating(function (self $group): void {
-            $group->public_uuid ??= (string) Str::uuid();
+            $owner = User::query()->findOrFail($group->owner_id);
+
+            $group->public_uuid = (string) Str::uuid();
+            $group->free = $owner->free;
         });
 
         static::saving(function (self $group): void {
