@@ -139,7 +139,7 @@ Never claim something was tested unless it was actually tested.
 
 ## UI / Approved Blade Pages
 
-This project does not use a separate abstract `DESIGN_SYSTEM.md` or `uikit/` as mandatory UI sources. The approved interface is created as the complete set of real Blade pages described by the specification.
+The approved interface is the complete set of real Blade pages described by the specification and accepted during the frontend/prototype stage.
 
 ### During Stage 3
 
