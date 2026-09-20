@@ -41,6 +41,8 @@ docker compose exec php ./vendor/bin/phpstan analyse
 docker compose exec php composer check-platform-reqs
 ```
 
+The test command connects to the dedicated `gruppa_cabinet_test` database on the Compose MySQL service. Compose creates it automatically and keeps it separate from the `gruppa_cabinet` development database.
+
 Stop the stack without removing MySQL data:
 
 ```bash

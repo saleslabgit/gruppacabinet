@@ -15,6 +15,17 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
 
+  mysql-provision:
+    image: mysql:8.4
+    environment:
+      MYSQL_PWD: root_local
+    depends_on:
+      mysql:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/provision-test-database.sh"]
+    volumes:
+      - ./docker/mysql/provision-test-database.sh:/provision-test-database.sh:ro
+
   php:
     build:
       context: .
@@ -31,8 +42,8 @@ services:
       DB_USERNAME: cabinet
       DB_PASSWORD: cabinet_local
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-provision:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 9000) ? 0 : 1);"]
       interval: 10s

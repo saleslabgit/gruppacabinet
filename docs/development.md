@@ -36,6 +36,8 @@ docker compose exec php ./vendor/bin/phpstan analyse
 docker compose exec php composer check-platform-reqs
 ```
 
+`php artisan test` uses MySQL in Docker with the dedicated `gruppa_cabinet_test` database. The one-shot `mysql-provision` Compose service creates that database and grants the local application user access on every stack start, so both fresh and existing MySQL volumes are supported without touching the `gruppa_cabinet` development database.
+
 Composer resolves dependencies for the production target configured as PHP `8.2.32`. Larastan uses the committed `application/phpstan.neon` at level 5. Pint uses `application/pint.json`.
 
 ## Troubleshooting

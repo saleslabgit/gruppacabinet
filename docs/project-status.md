@@ -9,7 +9,7 @@ Stage 1 provides:
 - real `/cabinet/` base-path handling in local Nginx and Laravel-generated URLs;
 - a minimal Blade/MySQL smoke page with locally committed Bootstrap 5.3.8, project CSS, and project JavaScript;
 - UTC application time plus shared Minsk date/time and integer-minor-unit money formatters;
-- PHPUnit, Pint, and Larastan level 5 configuration;
+- PHPUnit on a dedicated Docker MySQL test database, Pint, and Larastan level 5 configuration;
 - a PHP `8.2.32` Composer platform target and explicit runtime extension requirements.
 
 The exact check results for this implementation iteration are recorded in `.ai/report.md`.

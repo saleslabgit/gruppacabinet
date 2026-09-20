@@ -1,65 +1,54 @@
-# Report: TASK-2026-09-20-01
+# Report: TASK-2026-09-20-02
 
 Status: done
 
 ## Summary
 
-Bootstrapped the Stage 1 Laravel foundation as a standalone application in `application/` with local-only Docker infrastructure at the repository root. The application runs on PHP 8.2.32 with MySQL and Nginx, is served and URL-generated under `/cabinet`, uses locally committed Bootstrap 5.3.8 without a frontend build pipeline, and includes tested UTC/Minsk date-time and integer-minor-unit money display helpers.
+Corrected the Stage 1 Laravel test environment to use the dedicated `gruppa_cabinet_test` database on the Compose MySQL 8.4 service. SQLite and `:memory:` were removed from the committed PHPUnit configuration.
 
-Added the required PHPUnit, Pint, Larastan, Composer platform configuration, environment example, runtime smoke page, repository hygiene, and foundation documentation. No Stage 2 domain schema or later product/integration functionality was added.
+Added an idempotent one-shot Compose provisioning service outside `application/`. It creates the test database and grants the local `cabinet` user access on every stack start, including when the normal MySQL volume already exists. The PHP service starts only after provisioning succeeds.
 
 ## Changed Files
 
-- `application/`: Laravel 12.69.2 application skeleton, locked Composer dependencies, configuration, Blade smoke page, local public assets, display helpers, tests, Pint, and Larastan.
-- `compose.yaml`: local MySQL, PHP-FPM, and Nginx services with health-gated startup and named MySQL storage.
-- `docker/php/`: PHP 8.2.32 image and fail-fast startup entrypoint.
-- `docker/nginx/default.conf`: `/cabinet` public-path handling, static assets, front controller, and safe redirects.
-- `README.md`, `docs/architecture.md`, `docs/development.md`, `docs/project-status.md`: implemented Stage 1 setup, boundaries, commands, and status.
-- `.gitignore`, `.gitattributes`: repository hygiene and portable line endings.
-- `.ai/report.md`: this execution report.
+- `compose.yaml`: added `mysql-provision` and gated PHP startup on successful provisioning.
+- `docker/mysql/provision-test-database.sh`: idempotent test-database creation and local-user grant.
+- `application/phpunit.xml`: forced MySQL connection parameters and the dedicated test database for PHPUnit.
+- `application/tests/Feature/TestDatabaseConnectionTest.php`: runtime proof of the MySQL driver, selected database, and real query.
+- `README.md`, `docs/development.md`, `docs/project-status.md`: documented the Docker MySQL test path and separation from development data.
+- `.ai/report.md`: this report.
+
+## Test Database Setup
+
+- Development database: `gruppa_cabinet`.
+- Automated-test database: `gruppa_cabinet_test`.
+- Both use the local-only `cabinet` / `cabinet_local` Compose account.
+- `mysql-provision` connects with the existing local-only Compose root credential, runs `CREATE DATABASE IF NOT EXISTS`, and grants access only to `gruppa_cabinet_test`.
+- PHPUnit uses forced `<server>` values because the PHP container already exposes development DB values in `$_SERVER`; this prevents the standard `php artisan test` command from inheriting `gruppa_cabinet`.
 
 ## Checks
 
-- `docker compose up --build -d` from the repository root: passed; MySQL and PHP became healthy and Nginx started.
-- PHP startup readiness: verified that Nginx remains gated while Composer/entrypoint work is still running; the PHP healthcheck becomes healthy only after PHP-FPM accepts connections, with a first-install grace period.
-- Isolated fresh-checkout simulation in `/tmp` without `application/vendor` or `application/.env`, using the exact `docker compose up --build -d` command: passed; 108 locked packages installed, `.env` and an application key were created, MySQL/PHP became healthy, and `/cabinet/` returned HTTP 200 with MySQL `OK`. The temporary containers, network, volume, and files were removed afterward.
-- HTTP runtime smoke:
-  - `/`: HTTP 302 with relative `Location: /cabinet/`.
-  - `/cabinet/`: HTTP 200, Blade output, MySQL `OK`, and generated route/asset URLs containing `/cabinet`.
-  - `/cabinet/redirect-check`: HTTP 302 to `http://127.0.0.1:8080/cabinet`.
-  - Bootstrap CSS/JS and project `app.css`/`app.js`: HTTP 200 under `/cabinet/`.
-- `docker compose exec -T php php artisan test`: passed, 7 tests and 11 assertions, including UTC to `Europe/Minsk`, zero/non-whole/negative money values, smoke-page rendering, and base-path URL generation.
-- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 23 files.
-- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`: passed at configured level 5, no errors.
-- `docker compose exec -T php composer check-platform-reqs`: passed on PHP 8.2.32; declared extensions succeeded.
-- `docker compose exec -T php composer validate --strict`: passed; `composer.json` is valid.
-- Container inspection: PHP `8.2.32`, timezone `UTC`, and `mbstring`, `pdo_mysql`, and `zip` loaded.
-- Direct PDO connection from PHP to the Compose MySQL service: passed.
-- `php artisan route:list --except-vendor`: only the Stage 1 foundation and redirect-check routes are present.
-- Repository inspection: no package manager/Vite manifests, no Stage 2 migrations/models, no required Node/npm path, no WEBPAY/SMTP/public-site credentials, and generated `.env`, `vendor`, caches, logs, views, and sessions are ignored.
+- `docker compose config -q`: passed.
+- Existing-volume provisioning via `docker compose up --force-recreate mysql-provision`: exited 0; rerunning normal `docker compose up -d` started and completed the provisioner again.
+- Existing-volume schema query: returned both `gruppa_cabinet` and `gruppa_cabinet_test` after repeated provisioning.
+- Fresh-volume provisioning under isolated Compose project `gruppacabinet-fresh-check`: created a new MySQL volume, MySQL became healthy, provisioner exited 0, and both databases existed. The `cabinet` user connected to `gruppa_cabinet_test` and `SELECT DATABASE(), 1` returned `gruppa_cabinet_test` and `1`. The isolated containers, network, and volume were then removed.
+- `docker compose exec -T php php artisan test`: passed, 8 tests and 15 assertions.
+- `TestDatabaseConnectionTest` proved from inside the Laravel suite that the driver is `mysql`, `Connection::getDatabaseName()` is `gruppa_cabinet_test`, `SELECT DATABASE()` returns `gruppa_cabinet_test`, and a real `SELECT 1` succeeds.
+- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 24 files.
+- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`: passed, no errors.
+- `docker compose exec -T php composer check-platform-reqs`: passed on PHP 8.2.32, including `pdo_mysql`.
 
 ## Facts
 
-- Laravel is locked at 12.69.2 and Larastan at 3.12.2.
-- Composer platform PHP is pinned to `8.2.32`.
-- Bootstrap 5.3.8 CSS, bundle JavaScript, and license are committed locally.
-- Docker configuration is outside `application/`; no Docker file exists in the deployable application tree.
-- MySQL data uses the `gruppacabinet_mysql-data` named volume outside `application/`.
-- Production deployment was not performed or tested.
+- The standard Docker test command now uses MySQL and cannot silently select SQLite.
+- The normal development database and test database are distinct and both remained present during verification.
+- Provisioning is Docker-only and no Docker-specific file was added inside `application/`.
+- No Stage 2 schema, model, seeder, authentication, UI, or product functionality was added.
 
 ## Assumptions
 
-- Local developers use a running Docker Engine with the Docker Compose plugin.
-- Port 8080 is available for the documented local URL.
-- Local-only database credentials in Compose and `.env.example` are not reused in production.
+- The committed Compose credentials remain local-development-only as established in Stage 1.
 
-## Unknowns
+## Unknowns / Risks
 
-- Final production hosting paths and rewrite behavior under `https://gruppa.info/cabinet` remain unverified.
-- The production queue-worker mechanism remains unknown.
-- SMTP, public-site integration, and WEBPAY credentials remain intentionally unavailable and unused.
-
-## Risks / Next Step
-
-- Production/shared-host behavior must be validated in a later deployment stage; this report makes no production-compatibility claim beyond the application boundary and local checks.
-- Proceed to the separately planned Stage 2 domain/schema task only after this Stage 1 result is accepted.
+- Production deployment and production database provisioning remain outside Stage 1 and were not tested.
+- Later schema tests must continue to use the dedicated test database; the new runtime assertion will fail if configuration regresses to another database.
