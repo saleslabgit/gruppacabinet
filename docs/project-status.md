@@ -1,26 +1,40 @@
 # Project status
 
-## Stage 1 foundation
+## Stage 2 database and domain foundation
 
-Stage 1 provides:
+Stage 2 provides:
 
-- a standalone Laravel 12 application in `application/` with locked Composer dependencies;
-- local Docker services for Nginx, PHP 8.2/Composer, and MySQL;
-- real `/cabinet/` base-path handling in local Nginx and Laravel-generated URLs;
-- a minimal Blade/MySQL smoke page with locally committed Bootstrap 5.3.8, project CSS, and project JavaScript;
-- UTC application time plus shared Minsk date/time and integer-minor-unit money formatters;
-- PHPUnit on a dedicated Docker MySQL test database, Pint, and Larastan level 5 configuration;
-- a PHP `8.2.32` Composer platform target and explicit runtime extension requirements.
+- the complete MySQL schema for users/documents, groups/status history,
+  business audit, payments/notification journal, participant applications,
+  dictionaries, settings, sessions, and database queues;
+- MySQL generated-column enforcement of one active user per email;
+- Eloquent models, casts, and the required domain relationships;
+- explicit user, group, and payment status enums and transition services;
+- atomic group status/history transitions, centralized compatibility `accept`
+  derivation, and immutable generated group UUIDs;
+- typed cached settings access with explicit cache invalidation and nullable
+  unconfigured prices;
+- an explicit audit-write service;
+- idempotent seed data for settings, dictionary containers, and a local/testing
+  administrator;
+- MySQL integration coverage for schema constraints, indexes, transitions,
+  relationships, settings, audit records, UUID behavior, and seed idempotency.
 
-The exact check results for this implementation iteration are recorded in `.ai/report.md`.
+The exact verification results for this implementation iteration are recorded
+in `.ai/report.md`.
 
 ## Intentionally not implemented
 
-No Stage 2+ domain tables, models, enums, authentication, role access, CRUD, complete UI prototypes, registration, mail, queue jobs, public-site integration, group/payment flows, or WEBPAY behavior and credentials are present.
+No Stage 3+ UI prototypes, authentication flow, CRUD controllers, uploads,
+public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
+requests, signatures, credentials, callbacks, and payment effects are present.
 
 ## External prerequisites and unknowns
 
 - Local execution requires a working Docker Engine and Compose plugin.
-- Production hosting paths, rewrite behavior under `gruppa.info`, and the queue-worker mechanism have not been validated.
-- Production deployment has not been performed or verified.
-- SMTP, public-site, and WEBPAY credentials are neither required nor included.
+- Placement and extension prices remain intentionally unconfigured until the
+  product values are supplied.
+- Dictionary item display values remain empty until approved values are
+  supplied.
+- Production hosting, queue-worker operation, SMTP, public-site integration,
+  and WEBPAY remain unverified and belong to later stages.

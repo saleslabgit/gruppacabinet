@@ -1,54 +1,113 @@
-# Report: TASK-2026-09-20-02
+# Report: TASK-2026-09-20-03
 
 Status: done
 
 ## Summary
 
-Corrected the Stage 1 Laravel test environment to use the dedicated `gruppa_cabinet_test` database on the Compose MySQL 8.4 service. SQLite and `:memory:` were removed from the committed PHPUnit configuration.
+Implemented the Stage 2 MySQL data and domain foundation. The application now
+has the required `gp_*`, database-session, and database-queue schema; Eloquent
+models and relationships; explicit lifecycle enums and transition services;
+atomic group status history; business audit storage; immutable generated group
+UUIDs; centralized compatibility `accept` derivation; typed cached settings;
+and idempotent local/testing seed data.
 
-Added an idempotent one-shot Compose provisioning service outside `application/`. It creates the test database and grants the local `cabinet` user access on every stack start, including when the normal MySQL volume already exists. The PHP service starts only after provisioning succeeds.
+No Stage 3+ UI, controllers, authentication flow, public integration, mail,
+scheduler behavior, WEBPAY requests, provider logic, or credentials were added.
 
 ## Changed Files
 
-- `compose.yaml`: added `mysql-provision` and gated PHP startup on successful provisioning.
-- `docker/mysql/provision-test-database.sh`: idempotent test-database creation and local-user grant.
-- `application/phpunit.xml`: forced MySQL connection parameters and the dedicated test database for PHPUnit.
-- `application/tests/Feature/TestDatabaseConnectionTest.php`: runtime proof of the MySQL driver, selected database, and real query.
-- `README.md`, `docs/development.md`, `docs/project-status.md`: documented the Docker MySQL test path and separation from development data.
+- `application/database/migrations/2026_09_20_000001_create_domain_tables.php`:
+  complete ordered Stage 2 schema, foreign keys, generated active-email column,
+  required indexes, sessions, jobs, batches, and failed jobs.
+- `application/app/Models/*`: models, explicit `gp_*` tables, casts, soft deletes,
+  and required relationships.
+- `application/app/Enums/*`: exhaustive user, group, and payment transition
+  matrices.
+- `application/app/Services/*`: user/group/payment transition services,
+  `AuditService`, and typed cached `SettingService`.
+- `application/app/Domain/Compatibility/AcceptFromStatus.php`: single mapping
+  for compatibility `accept` values.
+- `application/app/Exceptions/InvalidStatusTransition.php`: clear invalid
+  transition exception.
+- `application/database/seeders/DatabaseSeeder.php`: idempotent dictionary
+  containers, typed settings, and local/testing administrator.
+- `application/tests/Unit/Enums/StatusTransitionMatrixTest.php`: every allowed
+  and forbidden status pair.
+- `application/tests/Feature/Domain/*`: MySQL schema/index/generated-column,
+  constraint, UUID, transaction, relationship, audit, settings, and seed tests.
+- `application/.env.example`: database session and queue defaults.
+- `docs/architecture.md`, `docs/development.md`, `docs/project-status.md`: actual
+  Stage 2 architecture, setup, seed behavior, scope, and remaining unknowns.
 - `.ai/report.md`: this report.
-
-## Test Database Setup
-
-- Development database: `gruppa_cabinet`.
-- Automated-test database: `gruppa_cabinet_test`.
-- Both use the local-only `cabinet` / `cabinet_local` Compose account.
-- `mysql-provision` connects with the existing local-only Compose root credential, runs `CREATE DATABASE IF NOT EXISTS`, and grants access only to `gruppa_cabinet_test`.
-- PHPUnit uses forced `<server>` values because the PHP container already exposes development DB values in `$_SERVER`; this prevents the standard `php artisan test` command from inheriting `gruppa_cabinet`.
 
 ## Checks
 
+- Docker services: MySQL and PHP healthy; web running.
+- Effective destructive-check target, bootstrapped through Laravel:
+  `mysql gruppa_cabinet_test`.
+- `APP_ENV=testing DB_DATABASE=gruppa_cabinet_test php artisan migrate:fresh
+  --seed --force`: passed on the dedicated test database.
+- Repeated `php artisan migrate --force`: `Nothing to migrate`.
+- Repeated `php artisan db:seed --force`: passed without duplicates. Metadata
+  query after repeated seeds returned 3 dictionaries, 7 settings, and 1 admin.
+- `docker compose exec -T php php artisan test`: passed, 131 tests and 246
+  assertions, using MySQL `gruppa_cabinet_test`.
+- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 51 files.
+- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
+  passed, no errors.
+- `docker compose exec -T php composer check-platform-reqs`: passed on PHP
+  8.2.32, including `pdo_mysql`.
 - `docker compose config -q`: passed.
-- Existing-volume provisioning via `docker compose up --force-recreate mysql-provision`: exited 0; rerunning normal `docker compose up -d` started and completed the provisioner again.
-- Existing-volume schema query: returned both `gruppa_cabinet` and `gruppa_cabinet_test` after repeated provisioning.
-- Fresh-volume provisioning under isolated Compose project `gruppacabinet-fresh-check`: created a new MySQL volume, MySQL became healthy, provisioner exited 0, and both databases existed. The `cabinet` user connected to `gruppa_cabinet_test` and `SELECT DATABASE(), 1` returned `gruppa_cabinet_test` and `1`. The isolated containers, network, and volume were then removed.
-- `docker compose exec -T php php artisan test`: passed, 8 tests and 15 assertions.
-- `TestDatabaseConnectionTest` proved from inside the Laravel suite that the driver is `mysql`, `Connection::getDatabaseName()` is `gruppa_cabinet_test`, `SELECT DATABASE()` returns `gruppa_cabinet_test`, and a real `SELECT 1` succeeds.
-- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 24 files.
-- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`: passed, no errors.
-- `docker compose exec -T php composer check-platform-reqs`: passed on PHP 8.2.32, including `pdo_mysql`.
+- MySQL `information_schema` inspection confirmed `active_email` is `STORED
+  GENERATED`, has the expected expression and unique index, and confirmed the
+  required domain indexes.
+- MySQL schema inspection confirmed both `gruppa_cabinet` and
+  `gruppa_cabinet_test` still exist; only the test database was reset.
+- Repository searches found no WEBPAY credentials/provider code, frontend
+  tooling, or Stage 3+ implementation in the new scope. PHPUnit remains forced
+  to MySQL `gruppa_cabinet_test`; no SQLite test path was introduced.
+- `git diff --check` and `git diff --cached --check`: passed. Staged inspection
+  contains 32 task files only; governance/spec/task files, secrets, and runtime
+  artifacts are not staged.
+
+Intermediate verification found and resolved two test/schema issues (JSON key
+order and explicitly required standalone indexes) plus Larastan enum property
+typing. The final checks above are the post-fix results.
 
 ## Facts
 
-- The standard Docker test command now uses MySQL and cannot silently select SQLite.
-- The normal development database and test database are distinct and both remained present during verification.
-- Provisioning is Docker-only and no Docker-specific file was added inside `application/`.
-- No Stage 2 schema, model, seeder, authentication, UI, or product functionality was added.
+- Active-email uniqueness is enforced by MySQL rather than application-only
+  validation, and soft-deleted emails can be reused.
+- Group status changes and history inserts share one database transaction and
+  a failed history write rolls back the status change.
+- `accept` is derived from status during model saves; seeds and services do not
+  set it independently.
+- Payment and meeting money fields use unsigned integer minor units and integer
+  casts; no float/decimal money storage was added.
+- Multiple `NULL` payment transaction IDs are allowed; duplicate non-null IDs
+  and duplicate order numbers are rejected by unique indexes.
+- Local/testing seed credentials are intentionally fixed only outside
+  production and are documented in `docs/development.md`.
 
 ## Assumptions
 
-- The committed Compose credentials remain local-development-only as established in Stage 1.
+- The task-approved column names are the conventional English snake_case names
+  implemented in the migration.
+- `participant_capacity` represents the single group-size field specified as
+  “количество человек”.
+- A payment always belongs to the group whose placement or extension it pays
+  for, so `gp_payments.group_id` is non-nullable.
 
-## Unknowns / Risks
+## Unknowns
 
-- Production deployment and production database provisioning remain outside Stage 1 and were not tested.
-- Later schema tests must continue to use the dedicated test database; the new runtime assertion will fail if configuration regresses to another database.
+- Placement and extension price values remain explicitly `NULL`.
+- Dictionary item display values remain unseeded because no approved values are
+  specified.
+- Production infrastructure, SMTP, public-site integration, queue worker, and
+  WEBPAY behavior remain unverified and out of scope.
+
+## Risks / Next Step
+
+Stage 2 is complete. The next planned milestone may build the approved Stage 3
+Blade prototypes on this schema without introducing real authentication, CRUD,
+or WEBPAY behavior prematurely.

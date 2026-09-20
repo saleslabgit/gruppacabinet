@@ -1,5 +1,36 @@
 # Architecture
 
+## Stage 2 data and domain foundation
+
+The application persists its business data in the `gp_*` MySQL tables. Users,
+groups, and payments use string-backed PHP enums for lifecycle status; each enum
+owns its explicit transition matrix. Application code performs lifecycle changes
+through the corresponding small transition service. A group status change and
+its `gp_group_status_history` record are committed in one transaction.
+
+`status` is the lifecycle source of truth. The legacy `accept` columns on users
+and groups are derived on every model save by the central
+`AcceptFromStatus` mapping and are not an independent workflow input.
+
+Active user email uniqueness is enforced by the MySQL stored generated column
+`gp_users.active_email`: it contains the email for non-deleted rows and `NULL`
+for soft-deleted rows. A unique index on that technical column allows an email
+to be reused after soft deletion while preventing two active matches.
+
+Groups receive a random UUID v4 integration identifier when created. The model
+rejects subsequent changes to that identifier. Internal numeric IDs remain the
+keys for database relationships.
+
+Settings are stored in `gp_settings` and read through `SettingService`, which
+provides unit-specific typed methods, cached reads, and explicit invalidation.
+Unknown prices remain `NULL`; they are never interpreted as zero. Non-status
+administrative events can be written through `AuditService` using stable entity
+and action codes with limited, non-sensitive metadata.
+
+Soft deletion applies to users, groups, and payments. Foreign keys do not
+cascade-delete payment, application, document, audit, or status-history data.
+Database-backed session and queue tables are part of the application schema.
+
 ## Stage 1 topology
 
 The repository has a strict runtime boundary:

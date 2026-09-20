@@ -19,6 +19,17 @@ docker compose logs php web mysql
 
 Visit `http://localhost:8080/cabinet/`. A successful page shows `OK` for the MySQL connection. The local root URL redirects to this base path.
 
+The normal local configuration uses the database drivers for sessions and
+queues. The first startup copies these values from `.env.example`:
+
+```dotenv
+SESSION_DRIVER=database
+QUEUE_CONNECTION=database
+```
+
+For an existing local `.env` created before Stage 2, update those two values
+manually.
+
 Stop services while keeping database data:
 
 ```bash
@@ -35,6 +46,31 @@ docker compose exec php ./vendor/bin/pint --test
 docker compose exec php ./vendor/bin/phpstan analyse
 docker compose exec php composer check-platform-reqs
 ```
+
+## Database schema and seed data
+
+Run application migrations and the idempotent local seed:
+
+```bash
+docker compose exec php php artisan migrate
+docker compose exec php php artisan db:seed
+```
+
+To rebuild only the disposable development database:
+
+```bash
+docker compose exec php php artisan migrate:fresh --seed
+```
+
+Never run `migrate:fresh` against a database containing data that must be kept.
+Automated tests use `gruppa_cabinet_test` and perform their own migrations.
+
+The seed creates empty dictionary containers for education type, group format,
+and gender; it does not invent display values. It also creates typed business
+settings. Placement and extension prices are intentionally unconfigured
+(`NULL`). In `local` and `testing` only, the seed creates the development
+administrator `admin@gruppa.test` with password `password`; production seeding
+does not create this known-password account.
 
 `php artisan test` uses MySQL in Docker with the dedicated `gruppa_cabinet_test` database. The one-shot `mysql-provision` Compose service creates that database and grants the local application user access on every stack start, so both fresh and existing MySQL volumes are supported without touching the `gruppa_cabinet` development database.
 
