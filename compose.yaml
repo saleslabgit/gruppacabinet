@@ -1,0 +1,57 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: gruppa_cabinet
+      MYSQL_USER: cabinet
+      MYSQL_PASSWORD: cabinet_local
+      MYSQL_ROOT_PASSWORD: root_local
+      TZ: UTC
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  php:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080/cabinet
+      APP_TIMEZONE: UTC
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: gruppa_cabinet
+      DB_USERNAME: cabinet
+      DB_PASSWORD: cabinet_local
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 9000) ? 0 : 1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5m
+    volumes:
+      - ./application:/var/www/application
+
+  web:
+    image: nginx:1.28-alpine
+    ports:
+      - "8080:80"
+    depends_on:
+      php:
+        condition: service_healthy
+    volumes:
+      - ./application:/var/www/application:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  mysql-data:

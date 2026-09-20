@@ -1,0 +1,12 @@
+:root {
+    color-scheme: light;
+}
+
+body {
+    background: #f4f6f8;
+}
+
+.foundation-card {
+    max-width: 48rem;
+    margin: 0 auto;
+}
