@@ -23,9 +23,22 @@ Stage 2 provides:
 The exact verification results for this implementation iteration are recorded
 in `.ai/report.md`.
 
+## Stage 3 frontend prototypes
+
+The final Blade view tree covers all 31 page groups with 249 direct catalog
+variants, shared layouts/components, local Montserrat 500/600 with Cyrillic,
+fixed CSS tokens, responsive lists/forms, and confirmation dialogs.
+Development-only GET routes render synthetic data without business database
+records. UUID copying is functional; business actions remain no-op. Payment
+wording distinguishes an unknown browser-return outcome from trusted success.
+
+The page and state index is `docs/ui-pages.md`. The implementation is awaiting
+Stage 3 acceptance; exact automated and browser verification results are in
+`.ai/report.md`. Stages 4 and later are not started.
+
 ## Intentionally not implemented
 
-No Stage 3+ UI prototypes, authentication flow, CRUD controllers, uploads,
+No authentication flow, CRUD controllers, uploads,
 public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 

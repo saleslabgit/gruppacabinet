@@ -11,3 +11,5 @@ Route::get('/', function () {
 
 Route::get('/redirect-check', fn () => redirect()->route('foundation'))
     ->name('foundation.redirect');
+
+require __DIR__.'/prototype.php';

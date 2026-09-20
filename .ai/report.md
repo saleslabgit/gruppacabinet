@@ -1,78 +1,113 @@
-# Report: TASK-2026-09-20-04
+# Report: TASK-2026-09-20-05
 
 Status: done
 
 ## Summary
 
-Corrected both rejected Stage 2 group-creation invariants at the Eloquent model
-creation boundary.
+Implemented the Stage 3 frontend in the final Blade view tree: all 31 page
+groups, 249 directly linked variants, shared layouts and components, responsive
+lists/forms, local Montserrat 500/600 with Cyrillic, and the required visual tokens.
+The local catalog is http://localhost:8080/cabinet/_prototype/.
 
-Every new group now loads its persisted owner by `owner_id` and snapshots the
-owner's current `free` value. Every creation also unconditionally replaces any
-candidate `public_uuid` with a new application-generated UUID v4. Existing
-post-create UUID mutation protection remains unchanged.
-
-No migration, documentation change, Stage 3 work, controller, payment flow, or
-other product behavior was added.
+Business controls remain explicitly demonstrational. Navigation, Bootstrap
+confirmations/dropdowns and the group UUID clipboard action work. No real
+authentication, CRUD, document transfer, email or WEBPAY operation was added.
+Implementation is complete; visual/product acceptance remains with the user.
 
 ## Changed Files
 
-- `application/app/Models/Group.php`: guarded application-owned `free` and
-  `public_uuid`; creation now resolves the persisted owner, copies its current
-  tariff, and always generates a fresh UUID v4.
-- `application/tests/Feature/Domain/GroupCreationInvariantTest.php`: focused
-  MySQL-backed coverage for tariff snapshots, caller input, tariff changes,
-  generated UUID ownership, uniqueness, format, immutability, persisted values,
-  and missing-owner failure.
-- `.ai/report.md`: this report.
+- `application/app/Support/PrototypeCatalog.php`, `PrototypeFixtures.php`,
+  `UiStatus.php`: page/state catalog, deterministic synthetic data and status labels.
+- `application/routes/prototype.php`, `routes/web.php`: GET-only local/testing
+  routes to the actual product views; absent on a production application boot.
+- `application/resources/views/layouts`, `components`, `shared`: three surfaces,
+  reusable controls, responsive tables/cards, status/date/money presentation,
+  validation, notices, navigation and confirmation dialogs.
+- `application/resources/views/auth`, `errors`, `psychologist`, `admin`: all
+  required product pages. `prototype/index.blade.php` is only the catalog.
+- `application/public/ui.css`, `ui.js`, `fonts/montserrat`: shared tokens/styles,
+  minimal client behavior and two licensed static WOFF2 font weights with source
+  attribution and SIL OFL license.
+- `application/tests/Feature/PrototypeTest.php`: six focused contract tests.
+- `docs/ui-pages.md`: all 249 exact URLs, final views, shared components,
+  responsive notes and intentionally non-functional actions for all 31 groups.
+- `docs/architecture.md`, `development.md`, `project-status.md`: implemented
+  frontend boundary, browsing instructions and Stage 3 acceptance status.
 
 ## Checks
 
-- `docker compose exec -T php php artisan test
-  tests/Feature/Domain/GroupCreationInvariantTest.php`: passed, 8 tests and 11
-  assertions.
-- `docker compose exec -T php php artisan test`: passed, 139 tests and 257
-  assertions.
-- The full suite's `TestDatabaseConnectionTest` passed and confirmed the
-  `mysql` driver with database `gruppa_cabinet_test`.
-- `docker compose exec -T php ./vendor/bin/pint --test`: passed, 52 files.
+- Docker PHP/MySQL/web runtime verified healthy; real pages opened through
+  `/cabinet/_prototype/` on port 8080.
+- `docker compose exec -T php php artisan test`: **145 passed, 1045 assertions**,
+  90.79 seconds. Includes existing Stage 2 tests and the dedicated MySQL database
+  connection assertion. The command wrapper subsequently ended with signal 143;
+  the complete PHPUnit summary was recorded, and remaining checks were run
+  independently.
+- `docker compose exec -T php ./vendor/bin/pint --test`: **PASS, 57 files**.
 - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
-  passed, no errors.
-- `docker compose exec -T php composer check-platform-reqs`: passed on PHP
-  8.2.32, including `pdo_mysql`.
-- `git diff --check` and `git diff --cached --check`: passed. Staged inspection
-  contains only the model correction, focused test, and this report.
-- Scope scan found no migration, Stage 3/UI file, WEBPAY code, credential,
-  dependency, or unrelated product change.
+  **PASS, no errors**.
+- `docker compose exec -T php composer check-platform-reqs`: **PASS**, PHP 8.2.32
+  and all extension requirements, including pdo_mysql.
+- `docker compose exec -T php php artisan view:cache`: **PASS**.
+- Contract tests render the index and every variant with an intentionally
+  unavailable database connection, assert final view names, reject unknown
+  variants/POST, verify no production prototype routes, local `/cabinet` assets,
+  key statuses, safe payment wording and UUID integration controls. A regression
+  check ensures an unrefunded payment blocks deletion even for a historically
+  free group. All five error views also render without prototype data.
+- External Python Playwright/Chromium against the real Docker HTTP runtime:
+  **747 page checks (249 variants × 1440/1024/390 px)**, all successful. No JS
+  exceptions, external requests, page horizontal overflow or visible action
+  controls extending horizontally outside the viewport; Montserrat loaded.
+- After fixture/text corrections, **366 additional checks** repeated 122 affected
+  variants at the same three widths, with fresh full-page screenshots.
+- Visually reviewed desktop/tablet/mobile screenshot contact sheets covering all
+  variants, with individual views for forms, mobile cards and open confirmations.
+  Checked hierarchy, status text, empty/error states, wrapping and mobile table
+  transformations. Final mobile login errors, empty application counters and
+  moderation/confirmation dialogs were inspected separately.
+- **24 modal interaction checks** (eight dialog states × three widths): visible
+  within viewport and closed by Cancel. Clipboard content and feedback verified
+  at all three widths; dropdown access and Escape tested; login button/Enter
+  verified without form HTTP requests.
+- All eight local assets (Bootstrap CSS/JS, app CSS/JS, UI CSS/JS and both fonts)
+  returned HTTP 200 under `/cabinet`. Catalog links exactly match the **249 URLs**
+  in `docs/ui-pages.md`.
+- Font metadata verified: genuine Montserrat static weights 500/600, 1312 glyphs
+  each including Cyrillic; original source hash and conversion recorded.
+- `git diff --check`, scoped file/diff review and staged-content review performed
+  before commit. Browser tools, screenshots and logs remain outside the repo.
 
 ## Facts
 
-- `Group::$guarded` now includes `public_uuid` and `free`, so normal mass
-  assignment does not accept caller ownership of those fields.
-- The `creating` model event uses `User::query()->findOrFail(owner_id)`, so the
-  snapshot comes from the persisted owner and a missing owner fails clearly.
-- The same event assigns `Str::uuid()` unconditionally and copies the persisted
-  owner's boolean `free` value immediately before INSERT. This also overrides
-  values assigned directly before the first save.
-- Tests refresh persisted models before asserting snapshot and UUID values.
-- Changing a user's tariff does not update existing group snapshots; groups
-  created afterward receive the new tariff.
-- The existing `saving` check still throws when `public_uuid` is changed after
-  creation, and the database value remains unchanged.
-- The existing UUID unique index and all Stage 2 migrations are unchanged.
-- `docs/project-status.md` already describes generated immutable UUIDs at the
-  appropriate high level and remains truthful, so it was not changed.
+- The work started from the current planner commit `f0856a2` with a clean tree.
+- Prototype GET routes omit session, shared-session-errors and CSRF middleware
+  together to avoid session/database dependencies; other routes retain theirs.
+- Fixtures use fake identities, document/payment identifiers and UUIDs. Display
+  prices and dictionary labels do not change seed/configuration values.
+- Browser cancel/unknown outcomes say «Оплата подтверждается WEBPAY»; only the
+  separate server-confirmed fixture represents confirmed cancellation/success.
+- Paid rejection/refund accounting, deletion restrictions, extension windows and
+  manual republication are represented visually without changing domain rules.
+- No migrations, dependencies, frontend build system or Stage 4+ flows were added.
+- `.ai/task.md`, SPEC.md, AGENTS.md and WORKFLOW.md were not changed.
 
 ## Assumptions
 
-- A soft-deleted owner is not a valid owner for new group creation because the
-  normal `User` query scope does not resolve it.
+- Existing Stage 1 diagnostics remain at the application root.
+- Fixture navigation/actions will be connected to real controllers, validation
+  and authorization in later stages while reusing these views.
 
 ## Unknowns
 
-- None for this correction.
+- Approved dictionary values and actual prices remain unavailable, as specified
+  by the task. Examples are visibly marked as fictional.
+- Real provider responses and authentication/backend outcomes remain outside
+  this frontend stage.
 
 ## Risks / Next Step
 
-Both review blockers are corrected. Stage 2 can be reviewed again; Stage 3 was
-not started.
+No unresolved Stage 3 runtime or visual blocker was found. Browser verification
+used Chromium with desktop/tablet/phone viewport sizes, not physical devices or
+an exhaustive cross-browser/accessibility certification. Review and accept the
+Stage 3 interface before starting the backend integration stages.

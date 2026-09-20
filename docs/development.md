@@ -81,3 +81,31 @@ Composer resolves dependencies for the production target configured as PHP `8.2.
 - If `docker` inside WSL reports that the command cannot be found and asks for WSL integration, enable Docker Desktop integration for that distribution and reopen the shell.
 - If startup fails while waiting for MySQL, inspect `docker compose logs mysql php`; the PHP entrypoint deliberately exits after 30 failed connection attempts.
 - If port 8080 is already occupied, stop the conflicting local service before starting this stack. The documented URL and `APP_URL` intentionally use port 8080.
+
+
+## Browse Stage 3 prototypes
+
+With the existing Docker stack running, open:
+
+`http://localhost:8080/cabinet/_prototype/`
+
+The catalog links to all 31 page groups and their direct state variants.
+`docs/ui-pages.md` lists the view files and URLs. These pages work without
+business records or seed data. Examples of prices, dictionaries, names,
+phones, UUIDs, documents and payment identifiers are synthetic and do not
+configure the database. The technical foundation remains at `/cabinet/`.
+
+Forms, upload/download, logout, moderation and payment buttons do not perform
+business operations. Modal confirmations, navigation and copying the group UUID
+can be exercised. There are no outgoing WEBPAY requests. Prototype routes do
+not register in production.
+
+Run the route/view/asset contract test with:
+
+```bash
+docker compose exec -T php php artisan test tests/Feature/PrototypeTest.php
+```
+
+Review the catalog at 1440, 1024 and 390 px, including long content and open
+confirmations. Browser tools are external verification tools, not application
+dependencies; screenshots and temporary browser artifacts are not committed.

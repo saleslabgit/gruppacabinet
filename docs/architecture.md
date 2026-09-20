@@ -58,3 +58,34 @@ Money remains integer minor units. `App\Support\MoneyFormatter` splits and group
 ## Frontend delivery
 
 There is no frontend build pipeline. Bootstrap 5.3.8 CSS and bundle JS are committed under `application/public/vendor/bootstrap/5.3.8/`; project-owned `app.css` and `app.js` are also served directly from `public/`. Node.js, npm, Vite, and runtime asset compilation are not used.
+
+
+## Stage 3 Blade frontend
+
+The product views live in `resources/views/auth`, `errors`, `psychologist`, and
+`admin`. Public, psychologist and admin layouts share `layouts/surface`.
+`components` contains the actual reused controls, panels, status badges,
+responsive tables, confirmations and formatting components; `shared` contains
+reused product sections. `prototype` contains only the navigation catalog.
+The Stage 1 diagnostic page and its assets remain separate.
+
+Product layouts load local `ui.css`, `ui.js`, Bootstrap 5.3.8, and static
+Montserrat 500/600 WOFF2 files with Cyrillic. Font source, SHA-256 and SIL OFL
+license are under `public/fonts/montserrat`. There is no frontend build step.
+Date and money components use the existing shared formatters.
+
+`routes/prototype.php` registers GET-only routes under `/_prototype` only in
+`local` or `testing`; production has no such routes. The development catalog
+and fixture provider supply deterministic synthetic arrays, navigation links
+and visual variants directly to the final product views. They do not query
+models or write data. Prototype routes omit session/error-sharing/CSRF
+middleware as a unit, so their GET rendering neither needs database sessions
+nor emits session-dependent CSRF cookies. Other routes keep their middleware.
+
+The views show final forms, state-dependent actions and confirmations, but
+mutating controls are explicitly no-op. JavaScript only handles prototype
+feedback, suppression of form submission, Bootstrap confirmation examples and
+UUID clipboard copying. There is no authentication, CRUD or provider request.
+Later controllers must supply actual view data/links and connect validation,
+authorization and actions to these same templates. See `docs/ui-pages.md` for
+all direct variants; page structure is awaiting Stage 3 acceptance.
