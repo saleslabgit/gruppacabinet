@@ -18,7 +18,7 @@ Add two versioned incoming API flows:
 
 Both flows must use the same integration security boundary:
 
-- HMAC-SHA256 over the exact HTTP request body;
+- HMAC-SHA256 over a canonical signed envelope; JSON signs a raw-body digest, while multipart signs a JSON manifest that cryptographically binds every uploaded file by SHA-256;
 - `X-Timestamp` with a ±5 minute acceptance window;
 - constant-time signature comparison with `hash_equals`;
 - required `X-Request-Id`;
@@ -71,6 +71,125 @@ Do not revert or overwrite the current UI baseline.
 - Stage 12 owns approval email/password setup; Stage 11 sends no email.
 - Current UI must remain the design baseline; this task is API/backend integration, not another UI redesign.
 
+## Architecture Correction — PHP 8.2/FPM Multipart Signing
+
+This section is authoritative and replaces any earlier requirement to HMAC the raw serialized multipart body.
+
+The implementation was blocked before code changes because standard PHP 8.2 FPM consumes `POST multipart/form-data` before userland when `enable_post_data_reading=1`: Laravel receives parsed fields/files, but `php://input` is not available for verifying the original multipart bytes.
+
+Production decision:
+
+- keep standard PHP/FPM multipart handling;
+- keep `enable_post_data_reading=1`;
+- do NOT add a custom multipart parser;
+- do NOT require an Nginx/OpenResty body-HMAC module;
+- do NOT upgrade PHP solely for this task;
+- do NOT disable automatic POST parsing for the whole cabinet;
+- questionnaire multipart integrity is provided by a signed JSON manifest plus verified file hashes.
+
+This preserves the existing admin multipart upload behavior and remains compatible with PHP 8.2.32 FPM.
+
+### Canonical signing envelope
+
+Both Stage 11 endpoints use this exact signing string, UTF-8/ASCII, with LF (`\n`) separators and no trailing newline:
+
+```text
+v1
+POST
+/api/v1/<endpoint>
+<X-Timestamp>
+<X-Request-Id>
+<payload-sha256>
+```
+
+Then:
+
+```text
+X-Signature = lowercase_hex(HMAC-SHA256(signing_string, INTEGRATION_SECRET))
+```
+
+The canonical path intentionally excludes the deployment prefix `/cabinet` so the same contract works in local/staging/production. It is exactly one of:
+
+- `/api/v1/psychologists`
+- `/api/v1/group-applications`
+
+Because timestamp, request ID and endpoint are inside the HMAC, an intercepted signed payload cannot be replayed with a fresh timestamp/request ID or against another endpoint.
+
+### JSON application payload digest
+
+For `POST /api/v1/group-applications`:
+
+`payload-sha256 = lowercase_hex(SHA-256(EXACT_RAW_JSON_BODY_BYTES))`
+
+The server may read `php://input` / Laravel raw content because this request is `application/json`.
+
+### Multipart psychologist payload digest
+
+For `POST /api/v1/psychologists` keep normal PHP multipart parsing.
+
+The multipart request contains:
+
+- exactly one scalar form field named `payload`;
+- zero or more file parts whose field names are declared inside the signed payload manifest.
+
+`payload` is a compact UTF-8 JSON string. The exact string value of that form field is signed:
+
+`payload-sha256 = lowercase_hex(SHA-256(EXACT_PAYLOAD_FIELD_BYTES))`
+
+The signed JSON manifest has this logical shape:
+
+```json
+{
+  "questionnaire": {
+    "last_name": "Synthetic",
+    "first_name": "Person",
+    "email": "synthetic@example.test",
+    "education_type_code": "example_code",
+    "...": "..."
+  },
+  "documents": [
+    {
+      "field": "document_0",
+      "type": "diploma",
+      "original_name": "diploma.pdf",
+      "size": 12345,
+      "sha256": "<lowercase hex SHA-256 of file bytes>"
+    }
+  ]
+}
+```
+
+Rules:
+
+- all questionnaire scalar data lives inside `payload.questionnaire`; no duplicate unsigned questionnaire form fields;
+- every uploaded file must have exactly one signed descriptor;
+- every descriptor must point to exactly one multipart file field;
+- reject undeclared file parts;
+- reject missing declared files;
+- reject duplicate descriptor field names;
+- recompute SHA-256 and byte size from the uploaded temporary file and compare to the signed descriptor;
+- validate the document type from the signed descriptor;
+- use the signed `original_name` only after existing safe-name sanitization; do not trust multipart filename metadata as authoritative;
+- MIME is still detected server-side from actual file content and is not trusted from the manifest;
+- tampered file/type/name/size/hash causes authentication/integrity rejection before business mutation;
+- raw serialized multipart boundaries/headers are intentionally NOT part of the signature.
+
+This is the production contract to document for the public-site developer.
+
+### Semantic idempotency
+
+The idempotency fingerprint remains semantic, not transport-specific.
+
+For JSON:
+- normalized validated application fields + endpoint.
+
+For multipart:
+- normalized validated questionnaire fields;
+- each signed document descriptor using type, safe original name, size and verified SHA-256;
+- endpoint.
+
+Therefore a retry may use a new multipart boundary and still replay the original response when the logical request is identical.
+
 ## Architecture Decisions
 
 ### API endpoints
@@ -115,30 +234,21 @@ Add placeholders/defaults only to `.env.example`; never commit a real secret.
 
 The application must fail closed for signed integration routes when no secret is configured outside explicit testing overrides.
 
-### HMAC contract
+### HMAC implementation boundary
 
-`X-Signature` is lowercase hex HMAC-SHA256:
+Implement the canonical signing contract defined in the authoritative “Architecture Correction — PHP 8.2/FPM Multipart Signing” section above.
 
-`hash_hmac('sha256', RAW_HTTP_BODY_BYTES, INTEGRATION_SECRET)`
+Do not reintroduce raw serialized multipart-body verification.
 
-Rules:
+Implementation requirements:
 
-- sign the exact bytes sent on the wire;
-- do not parse/re-encode JSON before signature verification;
-- for multipart, verify the exact serialized multipart body including its boundary;
-- compare expected/provided values using `hash_equals`;
-- do not trim/normalize the body before verification;
+- JSON endpoint computes SHA-256 from exact raw request bytes;
+- multipart endpoint computes SHA-256 from the exact parsed `payload` form-field string;
+- canonical signing string binds version, method, endpoint path, timestamp, request ID and payload digest;
+- expected/provided HMAC values are compared using `hash_equals`;
 - malformed/missing signature is rejected;
-- do not log full signatures.
-
-`X-Timestamp`:
-
-- Unix epoch seconds;
-- required;
-- numeric integer;
-- reject when absolute clock difference is greater than 300 seconds by default;
-- exact ±300 second boundary is accepted;
-- future and past skew are treated symmetrically.
+- full signatures are never logged;
+- file descriptors in signed multipart payload are verified against actual uploaded file bytes before business mutation.
 
 ### Required request ID
 
@@ -316,9 +426,11 @@ Implement:
 
 Content type:
 
-- `multipart/form-data`, because documents may be included.
+- `multipart/form-data`, using the signed `payload` JSON manifest defined above because documents may be included.
 
-Accepted questionnaire fields:
+The multipart body itself contains no unsigned questionnaire fields other than the single signed `payload` string and its declared file parts.
+
+Accepted `payload.questionnaire` fields:
 
 - last_name;
 - first_name;
@@ -474,10 +586,20 @@ Do not allow repeat questionnaire to change `free`, `disabled`, `admin`, passwor
 
 ### 8. Multipart documents
 
-Contract:
+Use the signed-manifest multipart contract from the authoritative architecture correction.
 
-`documents[n][type]`
-`documents[n][file]`
+Multipart transport:
+
+- scalar field: `payload` (JSON string);
+- file fields: flat names such as `document_0`, `document_1`, each declared in `payload.documents`.
+
+Each signed descriptor contains:
+
+- field;
+- type;
+- original_name;
+- size;
+- sha256.
 
 Allowed type values are the existing stable config keys:
 
@@ -493,14 +615,16 @@ Validation must reuse the existing size/MIME policy:
 - PNG;
 - max KB from config.
 
-Security:
+Integrity/security:
 
-- content MIME, not extension only;
+- signed descriptor hash and size must match actual uploaded bytes;
+- content MIME is detected server-side, not trusted from extension/manifest/multipart headers;
 - private local storage only;
 - random path;
-- safe original filename;
-- never public URL;
-- no binary/file content in logs/idempotency journal.
+- original name comes from the signed descriptor and then passes existing safe-name sanitization;
+- never expose a public URL;
+- no binary/file content in logs/idempotency journal;
+- reject undeclared file parts and missing/duplicate descriptors.
 
 Behavior:
 
@@ -651,7 +775,7 @@ Include:
 - response/status examples;
 - error code table;
 - idempotent retry instructions;
-- multipart signing instructions: serialize body once, HMAC those exact bytes, send the same bytes and Content-Type boundary;
+- multipart signing instructions for the signed `payload` manifest and per-file SHA-256 descriptors; explicitly state that the MIME boundary/raw multipart body is not signed;
 - example signing code/pseudocode;
 - curl/test examples that do not contain real secrets or personal data;
 - operational notes for rate limit/IP allowlist.
@@ -703,7 +827,8 @@ Do not send an email when an admin later approves an API-created psychologist; S
 - Follow WORKFLOW.md and AGENTS.md.
 - Work from current HEAD `ccd546b0a484e085345aa8ddd30bc00123d05288`.
 - Keep current Stage 10 design/UI baseline.
-- HMAC verification uses raw request bytes and `hash_equals`.
+- HMAC verification follows the canonical envelope above: raw-body SHA-256 for JSON, signed-manifest SHA-256 + verified file hashes for multipart, and `hash_equals` for the final HMAC.
+- Keep production `enable_post_data_reading=1`; no custom multipart parser or special FPM/Nginx body handling.
 - Timestamp tolerance defaults to 300 seconds.
 - Durable idempotency is MySQL-backed.
 - Do not store raw integration payloads in the idempotency journal.
@@ -727,10 +852,13 @@ Cover at minimum:
 
 ### Protocol/authentication
 
-- valid signature accepted;
+- valid canonical signature accepted for JSON;
+- valid canonical signature accepted for multipart manifest;
 - missing signature;
 - invalid signature;
-- correct signature for a different body rejected;
+- signature for a different endpoint/timestamp/request-id/payload digest rejected;
+- changing multipart file bytes while keeping signed manifest rejected;
+- changing signed document type/name/size/hash rejected;
 - missing timestamp;
 - malformed timestamp;
 - timestamp exactly -300/+300 seconds accepted;
@@ -750,7 +878,7 @@ Cover at minimum:
 - duplicate does not rerun business logic;
 - same ID different endpoint -> 409;
 - same ID different semantic body -> 409;
-- multipart duplicate with different boundary but identical fields/files replays successfully;
+- multipart duplicate with a different MIME boundary but semantically identical signed payload/files replays successfully;
 - concurrent duplicate application creates one row;
 - concurrent duplicate psychologist creates/updates once;
 - failed business transaction does not leave a completed poisoned idempotency result;
@@ -817,7 +945,7 @@ Using Docker and only synthetic data:
 
 1. Set a temporary local `INTEGRATION_SECRET` through runtime env/config; do not commit it.
 2. Create/ensure an active dictionary education_type item.
-3. Send a correctly signed multipart `POST /cabinet/api/v1/psychologists`.
+3. Send a correctly signed manifest-based multipart `POST /cabinet/api/v1/psychologists` using standard PHP/FPM multipart parsing.
 4. Verify pending psychologist appears in real admin UI and private documents open through existing protected admin route.
 5. Retry same logical multipart with the same request ID and confirm no duplicate user/document.
 6. Exercise pending/rejected repeat behavior.
@@ -882,7 +1010,8 @@ Do not include the integration secret or real payloads in the report.
 1. `POST /cabinet/api/v1/psychologists` exists in production.
 2. `POST /cabinet/api/v1/group-applications` exists in production.
 3. API routes are stateless and do not use web session/CSRF auth.
-4. Valid raw-body HMAC-SHA256 signature is required.
+3a. Standard PHP 8.2 FPM multipart parsing remains enabled (`enable_post_data_reading=1`); no custom raw multipart parser/proxy module is required in production.
+4. Valid canonical HMAC-SHA256 signature is required: raw JSON body digest for group applications; signed JSON manifest plus verified file hashes for psychologist multipart.
 5. Signature comparison uses `hash_equals`.
 6. Timestamp ±300s boundary behavior is correct.
 7. Required `X-Request-Id` is validated.
@@ -915,7 +1044,7 @@ Do not include the integration secret or real payloads in the report.
 34. Idempotent application replay creates no duplicate.
 35. No Stage 11 flow sends email/queues onboarding mail.
 36. No Stage 11 flow creates payment or changes group lifecycle.
-37. `docs/integration.md` is sufficient for the public-site developer and includes full production URLs, HMAC, multipart signing, request-id retry, `cabinet_group_uuid`, and no psychologist_id rule.
+37. `docs/integration.md` is sufficient for the public-site developer and includes full production URLs, the canonical HMAC envelope, JSON raw-body digest, manifest-based multipart signing/file hashes, request-id retry, `cabinet_group_uuid`, and no psychologist_id rule.
 38. Current redesigned Stage 10 UI is preserved.
 39. Stage 4–10 regression remains green.
 40. Full MySQL suite passes.
