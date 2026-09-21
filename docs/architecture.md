@@ -391,10 +391,10 @@ the phone in the exception. This is syntactic normalization, not a country or
 subscriber validity check. No country code is guessed. digitsForSearch accepts
 phone-like punctuation and yields comparable digits (stripping the international
 00 prefix); arbitrary text yields an empty key and still uses textual search.
-Stage 11 can reuse this boundary. The synthetic factory requires an existing
+Stage 11 reuses this boundary. The synthetic factory requires an existing
 group via `for($group)`, uses reserved fictional NANP numbers and derives the
 canonical phone from its raw phone, including attribute overrides. Production
-seeds do not create applications; there is no intake/create/API route.
+seeds do not create applications; signed intake is provided by Stage 11 below.
 
 `applications:cleanup` reads the current typed retention-month setting once,
 computes a UTC calendar-month cutoff without month overflow, and physically
@@ -404,3 +404,45 @@ concurrent deletes are harmless. It includes processed/unprocessed applications
 and deleted parents, never deletes groups/users, and prints only the aggregate
 count. The daily scheduler has withoutOverlapping; groups:expire remains every
 minute. Running the scheduler/cron is still an operational prerequisite.
+
+## Stage 11 incoming API boundary
+
+`routes/api.php` registers stateless v1 intake separately from web sessions/CSRF.
+The dedicated Laravel limiter runs before `AuthenticateIntegration`; it uses
+source IP + endpoint, configured shared cache and a configurable default of
+60/minute. Optional exact-IP allowlisting uses the trusted Laravel request IP.
+`config/integration.php` is env-backed and fails closed without a secret.
+
+Authentication binds method/path/timestamp/request ID/payload digest with HMAC
+and `hash_equals`. JSON uses raw body bytes; standard FPM multipart parsing uses
+the exact signed manifest field plus verified per-file hashes/sizes. Global text
+normalizers skip the API so signed strings stay intact. `IntakeData` validates an
+explicit field whitelist and normalizes fields for semantic fingerprinting;
+unsigned query/form fields, undeclared files and protected fields are rejected.
+
+`IntakeService` owns one MySQL transaction: no-op unique-ID upsert (waits for a
+concurrent claimant), locked journal read, semantic conflict/replay decision,
+business writes and exact serialized response completion. The case-sensitive
+`gp_integration_requests.request_id` unique index is authoritative. Failed
+transactions do not persist claims. Bounded retries handle MySQL deadlocks and
+active-email insert races. No process-local lock or cache is authoritative.
+The journal stores endpoint, SHA-256 fingerprint, response status/body, completion
+and timestamps; no request payload/PII/file bytes/signature/secret. Retention is
+not automatically shortened in Stage 11.
+
+Questionnaire intake locks matching users including deleted rows, resolves
+education by dictionary code, uses `UserStatusTransitionService` for rejected
+resubmission, and reuses `PsychologistDocuments` with signed sanitized filenames.
+New private paths are tracked through transaction completion and removed on
+failure, including journal/storage failures. Application intake locks the group
+by immutable UUID, requires active/enabled, uses `PhoneNormalizer`, and creates
+through the group relationship. Existing owner/admin pages and policies provide
+visibility and isolation; no alternate UI exists.
+
+API exceptions render a safe JSON envelope; web handling is unchanged. API
+reporting suppresses default exception logging because SQL/messages/trace arguments
+may contain sensitive input. The renderer logs only reason, endpoint, safe request
+ID, IP, UTC time and exception class/source location. No payload, names, phones,
+file metadata, signatures or secrets are logged. Stage 11 has no email/password
+invitation, job, payment or group lifecycle effect. See `integration.md` for the
+external contract and deployment prerequisites.

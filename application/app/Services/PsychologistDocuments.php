@@ -25,20 +25,24 @@ class PsychologistDocuments
         ], $disposition);
     }
 
-    public function upload(User $psychologist, UploadedFile $file, string $type): UserDocument
+    public function upload(User $psychologist, UploadedFile $file, string $type, ?string $originalName = null): UserDocument
     {
         $disk = Storage::disk(config('psychologist_documents.disk'));
-        $path = $disk->putFile('psychologists/'.$psychologist->id, $file);
-        if ($path === false) {
-            throw new RuntimeException('Private document storage failed.');
-        }
+        // Know the random target before writing so even a partial write can be cleaned.
+        $directory = 'psychologists/'.$psychologist->id;
+        $name = $file->hashName();
+        $path = $directory.'/'.$name;
         try {
+            if ($disk->putFileAs($directory, $file, $name) === false) {
+                throw new RuntimeException('Private document storage failed.');
+            }
+
             return $psychologist->documents()->create([
-                'type' => $type, 'path' => $path, 'original_name' => $this->safeName($file->getClientOriginalName()),
+                'type' => $type, 'path' => $path, 'original_name' => $this->safeName($originalName ?? $file->getClientOriginalName()),
                 'mime_type' => $file->getMimeType(), 'size' => $file->getSize(),
             ]);
         } catch (Throwable $exception) {
-            if (! $disk->delete($path)) {
+            if ($disk->exists($path) && ! $disk->delete($path)) {
                 throw new RuntimeException('Private document cleanup failed.', 0, $exception);
             }
             throw $exception;

@@ -1,250 +1,190 @@
-# Report: TASK-2026-09-21-09
+# Report: TASK-2026-09-21-10
 
 Status: done
 
 ## Summary
 
-Выполнен аудит D1–D23 всех 31 групп страниц и переработаны общая система,
-навигация, структура деталей и мобильное представление. Бизнес-правила,
-маршруты, авторизация и операции Stages 1–10 не изменены. Stage 11 не добавлен.
-Все обязательные автоматические и браузерные проверки завершены.
+Реализован Stage 11: stateless server-to-server приём анкет психологов и заявок
+участников с общей HMAC-защитой, MySQL-идемпотентностью, приватными документами,
+едиными JSON-ошибками и безопасными техническими логами. UI Stage 10 сохранён.
+Полный регрессионный прогон пройден: 342 tests / 4349 assertions.
+Окончательный focused Stage 11 прогон: 20 tests / 331 assertions, все пройдены.
 
-## Повторная итерация: архив 20:29 от 21.09.2026
+## API / security contract
 
-Прямой запрос пользователя «Правки в файле», 10 замечаний из
-`visual-prompt-2026-09-21-2029.zip`. База `82a35b0`, исходное рабочее дерево чистое.
-`.ai/task.md` не изменён; исправления продолжают задачу по прямому запросу.
+Production:
 
-- № 1: убраны смещение подписи и baseline-смещение псевдоэлемента иконки;
-  иконки центрируются внутри flex-контейнера.
-- № 2–3: одинаковые 13 px / 600 для тегов; доступ голубой с иконкой замка,
-  тариф нейтральный, принятая анкета зелёная.
-- № 4: согласия используют стандартную белую панель.
-- № 5–6: законченная группа — calendar-check; в реальной карточке психолога
-  и прототипе статус находится под названием группы.
-- № 7: кнопка выбора файла заполняет высоту поля без внутренних зазоров.
-- № 8–9: существующие custom select и мобильный бургер проверены в браузере;
-  повторить их неисправность с актуальными ресурсами не удалось. Добавлена
-  версия ui.css/ui.js по filemtime для обновления ресурсов в браузере.
-  Кэш как причина исходного наблюдения — предположение, не установленный факт.
-  На desktop меню открыто; ниже 1200 px скрыто до нажатия «Меню».
-- № 10: кнопки действий справочника имеют одинаковую ширину и высоту.
+- `POST https://gruppa.info/cabinet/api/v1/psychologists`
+- `POST https://gruppa.info/cabinet/api/v1/group-applications`
 
-Изменены `public/ui.css`, `components/status`, `layouts/surface`,
-`shared/profile-data`, `admin/users/show`, `admin/dictionaries/index`,
-`docs/ui-pages.md` и этот отчёт. Backend, бизнес-формы и данные не изменены.
+Маршруты зарегистрированы через `routes/api.php`, middleware `api`,
+`throttle:integration`, `AuthenticateIntegration`; без web/session/CSRF/login.
+Production route inspection: 68 маршрутов, оба POST API присутствуют,
+`_prototype`, `_foundation`, `redirect-check` отсутствуют. Web login и страницы
+заявок сохраняют `web`/account/role middleware.
 
-Проверки текущей итерации:
-- Chromium: 2174/1440/1024/390 px; главная, список/карточка психолога,
-  документы и справочники. Проверены одинаковые шрифты и разные цвета тегов,
-  размеры кнопок, бургер/закрытие Escape/возврат фокуса, выбор документа
-  клавиатурой и локальный выбор файла без отправки на сервер.
-- Дополнительный обход: группы, редактирование психолога, настройки
-  на 1440/1024/390 px; горизонтального переполнения и ошибок JS нет.
-- Иконка законченной группы проверена на `/_prototype/group/expired`.
-  Скриншоты главной, карточки, документов и справочников просмотрены.
-- Pint, Larastan, Composer platform requirements и view:cache: PASS.
-- `docker compose exec -T php php artisan test`: **323 passed / 4130 assertions**,
-  419.36 s, dedicated MySQL test database; все 249 вариантов прототипов и
-  исключение их маршрутов в production прошли.
-- `git diff --check`: PASS.
+Подпись: lowercase hex HMAC-SHA256, `hash_equals`, шесть строк с LF без завершающего
+LF: `v1`, `POST`, `/api/v1/<endpoint>`, timestamp, request ID, SHA-256 payload.
+Префикс `/cabinet` исключён из канонического пути. JSON подписывает точные raw
+bytes; multipart — точную строку `payload` и descriptor каждого файла с hash/size.
+PHP/FPM parsing остаётся штатным, `enable_post_data_reading=1`. Boundary не
+подписывается. Global trim/null middleware пропускает API; нормализация явная в DTO.
 
-Браузерные MCP не запустились из-за отсутствующих настроенных исполняемых
-файлов; проверки выполнены через уже установленный Chromium и Playwright.
-Архив, скриншоты и проверочные скрипты находятся в /tmp, вне коммита.
+Timestamp — Unix UTC seconds; ±300 включительно, ±301 отклоняется. Request ID
+обязателен: 1–128 символов безопасного ASCII-набора, регистр значим. Секрет только
+env/config, отсутствие секрета закрывает доступ (503). Rate limit по IP + endpoint,
+по умолчанию 60/min, configurable, считает также неуспешную аутентификацию.
+Allowlist — необязательный список точных IP; пустой отключает проверку.
 
-## Дополнительная итерация: визуальные правки из архива 21.09.2026
+Ответы: `data/status + request_id`; ошибки `code/message`, опциональные `errors`,
+безопасный request ID или null. HTTP 400/401/403/404/405/409/413/415/422/429/500/503
+описаны в integration guide. Неожиданные исключения не раскрывают SQL/пути/trace.
+Для API подавлен стандартный exception report, способный включать SQL bindings;
+логируются только endpoint, безопасный ID, code, IP, UTC time, exception class и
+server-side source file/line. Тела, email/имена/телефоны, файлы и подписи не пишутся.
+Web error handling не изменён.
 
-Основание: прямой запрос пользователя «Правки в архиве» и 25 замечаний из
-`visual-prompt-2026-09-21-2005.zip`. База — `6d93169`; рабочая директория была чистой.
-`.ai/task.md` не изменён. Это разрешённое пользователем продолжение выполненной задачи.
+## Idempotency / business behavior
 
-- № 1–4, 16, 17, 20, 21, 23: выравнивание текста/иконок кнопок и меню, крошек,
-  чекбоксов и заголовков модальных окон; согласованные hover/active состояния
-  ghost-кнопок; полноценные кнопки главной и действий справочников.
-- № 5, 6, 22: размер текста полей 14 px, фокус без внешней обводки (граница меняет
-  цвет); оформленный select с клавиатурным управлением, исходным значением формы,
-  required-валидацией и обычным select при отключённом JavaScript.
-- № 7, 11–15, 18: тарифы оформлены общим компонентом `tariff`, между тегами есть
-  интервалы; пустые даты наследуют цвет текста; у черновика иконка карандаша;
-  внутренний ID убран из списка; уведомления в строках компактнее; пояснения
-  состояния группы заметнее.
-- № 8–10: белая поверхность фильтров, интервалы быстрых фильтров, раскрываемое
-  административное меню под 1200 px с Escape и возвратом фокуса.
-- № 19, 24, 25: карточка психолога показывает его группы со статусами, ссылками и
-  пагинацией по 10; история использует общую timeline; сведения о статусе, тарифе
-  и доступе перенесены внутрь анкеты, вместо отдельной панели.
+Новая таблица/модель `gp_integration_requests`:
 
-Файлы: `public/ui.css`, `public/ui.js`; общие Blade-компоненты и `shared/group-summary`;
-главная, группы, справочники и страницы психологов администратора. Единственное
-изменение загрузки данных — `PsychologistController::show`: вместо счётчика читает
-страницу групп через существующую связь владельца. Добавлен тест пустого списка,
-принадлежности групп, исключения удалённых записей, ссылок и пагинации; обновлено
-ожидание разметки кнопки в `PrototypeTest`. Каталог `docs/ui-pages.md` актуализирован.
+- unique `request_id` (128, `utf8mb4_bin`);
+- endpoint, SHA-256 semantic fingerprint;
+- response_status, точный сериализованный response_body;
+- completed_at с индексом, timestamps.
 
-Проверки этой итерации:
+Нет колонок raw payload, персональных данных, файлов или секрета. Atomic no-op
+upsert и row lock координируют конкурентные запросы. Бизнес-изменения и завершение
+журнала находятся в одной транзакции. Replay возвращает исходные status/body без
+повторного эффекта; другое содержимое/endpoint с тем же ID — 409. Откат не оставляет
+завершённого/отравленного ID. Bounded retries обрабатывают deadlock/insert race.
+Fingerprint нормализует поля и телефон заявки, сортирует descriptors и не зависит
+от JSON formatting, multipart boundary, порядка/транспортных имён файлов.
+Автоматическая очистка журнала не добавлена.
 
-- `docker compose exec -T php php artisan test`: **323 passed / 4036 assertions**,
-  405.69 s; включая все 249 вариантов прототипов и ограничение production-маршрутов.
-- `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 120 файлов.
-- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`: PASS.
-- `docker compose exec -T php composer check-platform-reqs`: PASS.
-- `docker compose exec -T php php artisan view:cache`: PASS.
-- `node --check application/public/ui.js` и `git diff --check`: PASS.
-- Chromium: реальные `/admin`, `/admin/groups`, `/admin/psychologists`,
-  `/admin/psychologists/9`, `/admin/psychologists/9/edit`, `/admin/dictionaries`,
-  `/admin/settings` при 1440/1024/390 px; дополнительно карточка `/10`, её форма и
-  открытые списки/состояния действий при 2174 px, как в архиве. HTTP 200, переполнений нет.
-- Все 31 семейство прототипов проверены при 390 px, ошибок JavaScript нет.
-- Проверены открытие/закрытие меню, Escape/возврат фокуса, клик снаружи; select:
-  мышь, стрелки/Home, Enter, Escape, Tab, поиск по первой букве, GET-фильтрация,
-  FormData, reset, required-ошибка/возврат фокуса и восстановление после выбора.
-  Проверены отмена модального окна и фокус, выравнивание, текст/фокус полей.
-- Без JavaScript доступны меню и нативные select. Firefox/Safari не запускались.
-- Изменения данных через браузер не выполнялись. Архив, скриншоты, браузерные сценарии
-  и логи находятся только в `/tmp`; в репозиторий не добавлены.
+Анкеты:
 
-## Design system
+- новый email → 201 pending, non-admin, enabled, free=false, password=null;
+- pending → 200, полная замена nullable questionnaire fields, append documents;
+- rejected → то же + domain transition в pending;
+- approved/disabled/soft-deleted match → 409, без изменения/восстановления;
+- education_type_code разрешается только в нужном словаре; новый выбор active,
+  текущий inactive code допустим при повторе;
+- consent обязателен, UTC `YYYY-MM-DDTHH:mm:ssZ`; внутренние поля запрещены;
+- доступ/тариф/пароль/admin при повторе не перезаписываются.
 
-- Отступы: 4/8/12/16/20/24/32/48 px; общие токены и Bootstrap grid.
-- Локальный Montserrat 500/600: заголовки 30/21/18 px, мобильные 25/19/17;
-  основной текст 15, controls 14, метаданные/подписи 13 px.
-- Нейтральные белые/тёплые поверхности, оранжевый primary; приглушённые
-  служебные цвета. Уточнён контраст success; смысл статуса остаётся текстом.
-- Радиусы панелей 10–12 px, controls 8 px; тень только для уместных поверхностей.
-- Основное/вторичное/контекстное/опасное действие визуально различаются;
-  hover, active, disabled и focus-visible заданы общими правилами.
-- История и согласия — вторичные секции с разделителями, без повторного chrome.
-- Формы ограничены 960 px, описания 78ch. На телефоне короткие факты используют
-  две колонки, длинные поля переносятся; таблицы превращаются в подписанные блоки.
+Документы: PDF/JPEG/PNG по фактическому MIME, configurable 10240 KiB/file,
+подписанные type/name/size/hash; safe name, случайный путь, private local storage.
+Расширен существующий `PsychologistDocuments`: signed original name и очистка
+известного случайного пути даже после частичной записи. При сбое бизнес-операции,
+следующей загрузки или завершения журнала удаляются новые файлы запроса.
 
-## Navigation / wayfinding
-
-Общие `breadcrumbs`, `navigation-link`, `icon`; предки являются реальными
-ссылками, текущий элемент — текст с aria-current. Иерархия охватывает группы,
-редактирование, продление, заявки, психологов, документы, платежи, справочники
-и редактирование элементов. На верхних уровнях лишних крошек нет.
-Отмена редактирования ведёт к объекту, создания — к списку. Документы и платёж
-имеют явный возврат. Удалена ссылка «Подробнее» на саму карточку группы.
-Возврат со страниц ошибок учитывает кабинет администратора; если неизвестный
-URL обработан без сессионного middleware, есть отдельная ссылка в админку.
-
-Административное меню выделяет текущий раздел и сохраняет все ссылки:
-слева на desktop, раскрывается кнопкой «Меню» под 1200 px. Навигация психолога
-содержит два раздела; мобильный выход перенесён к логотипу. Подсветка раздела
-сохраняется на вложенных прототипах. Пагинация имеет предыдущую/следующую
-страницу, некликабельное текущее значение и скрывается при одной странице;
-использует прежние URL с сохранёнными query parameters.
-
-## System-level and page-family fixes
-
-- Формы: единая ширина, секции, ошибки около полей, ссылки из summary,
-  обозначение обязательности без повторения «необязательно» в каждом фильтре.
-  Поля, значения, CSRF, методы и адреса бизнес-форм сохранены.
-- Группы психолога: одна кнопка создания в пустом списке; на карточке действия
-  рядом с названием и статусом, перед длинными данными. Убрано повторное
-  уведомление модерации/публикации; срок и статус сохраняют прежний смысл.
-- Продление и будущие платежи: контекстный путь, общие alerts/actions,
-  сохранено различие pending, подтверждённой оплаты и возврата из браузера.
-- Заявки обеих ролей: полный путь к родителям, согласованные действия/иконки,
-  различимые первое использование и пустая выборка фильтра.
-- Профиль/документы: контактные данные, образование, опыт/лицензия сгруппированы;
-  согласия визуально вторичны; просмотр/скачивание/загрузка различаются иконками.
-- Главная администратора: ссылки на существующие рабочие разделы вместо
-  неверного текста об их недоступности; вымышленные счётчики не добавлялись.
-- Психологи: возврат к карточке из редактирования/документов; сброс фильтров;
-  объект явно назван в подтверждениях, история вторична.
-- Группы администратора: модерация рядом с идентичностью/статусом;
-  интеграционные данные после основных; действие открытия списка вторичное.
-- Справочники/настройки: контекст при редактировании, общие формы/состояния;
-  при редактировании форма открывается сразу, без списка над ней; сохранены подтверждения и ограничения деактивации/удаления.
-- Login/password/errors/notices: общая типографика, компактные alerts,
-  локальные иконки, видимый фокус, перенос текста, работоспособный возврат.
-
-По итогам scorecard основные устранённые оценки 0–1: навигационные тупики,
-неверная доступность на главной, повторные действия/уведомления, слабая
-иерархия деталей и неоднородные интерактивные состояния. Остальные измерения
-проверены вместе с общими компонентами и репрезентативными вариантами.
-Итоговая оценка применимых D1–D23 для просмотренных реальных семейств — 2–3;
-неисправленных оценок 0–1 и навигационных тупиков не осталось.
-
-## Icon library
-
-Официальный Bootstrap Icons **1.13.1**, MIT:
-`application/public/vendor/bootstrap-icons/1.13.1/bootstrap-icons.css`,
-`fonts/bootstrap-icons.woff2`, `fonts/bootstrap-icons.woff`, `LICENSE`, `README.md`.
-CSS и шрифты из официального tag `twbs/icons/v1.13.1`, без изменения содержимого.
-CSS подключён через `asset()`; относительные font URL работают под `/cabinet`.
-Иконки декоративные (`aria-hidden="true"`), текст controls сохранён.
-
-## Verification исходного аудита (6d93169)
-
-- `docker compose exec -T php php artisan test`: **322 passed / 4018 assertions**,
-  376.05 s, отдельный окончательный прогон на dedicated MySQL test database.
-- `docker compose exec -T php ./vendor/bin/pint --test`: PASS.
-- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`: PASS.
-- `docker compose exec -T php composer check-platform-reqs`: PASS.
-- `docker compose exec -T php php artisan view:cache`: PASS в окончательном состоянии.
-- PrototypeTest в итоговом полном прогоне: **9 passed**; все 31 группы /
-  249 вариантов рендерятся без БД. Проверены навигационные предки и локальный
-  asset URL; production не регистрирует prototype/foundation/redirect-check.
-- Chromium/Playwright: 251 просмотра 103 разных адресов; все 31 группы
-  прототипов на 1440/1024/390, 29 дополнительных состояний на 390,
-  43 реальных адреса обеих ролей на всех трёх ширинах. HTTP 200, ни одного
-  page-level overflow или отсутствующего glyph, JS page errors: 0.
-- Дополнительно финально проверены реальные `/groups/16`, `/groups/16/edit`,
-  `/profile`, `/groups/10/extension`, `/groups/16/applications` и временная
-  `/groups/16/applications/31`; `/admin/psychologists` и `/1`, `/1/edit`,
-  `/1/documents`; `/admin/groups`, `/17`, `/17/edit`; `/admin/applications`
-  и `/31`; `/admin/dictionaries`, `/1/edit`, `/1/items`, `/1/items/3/edit`;
-  `/admin/settings`, `/admin/payments`; обе административные create-формы.
-  Все пути под `/cabinet`. Основные экраны — 1440/1024/390; обязательные
-  таблицы, формы, профили, модерация, ошибки и modal проверены визуально.
-- Взаимодействия PASS: ссылки summary и порядок Tab; modal focus trap,
-  Escape и возврат фокуса после анимации; копирование UUID и feedback;
-  disabled delete; previous/current pagination; hover/focus меню, кнопок,
-  текстовых ссылок; реальный фильтр/сброс; logout; обработка и обратная
-  отметка временной заявки; отмена settings/extension без изменения данных;
-  возврат администратора с неизвестного URL. Иконки загружаются локально,
-  внешних запросов и JS page errors в финальном проходе нет.
-
-## Facts / Assumptions / Unknowns
-
-Рабочая директория исходно чистая. HEAD `877c7ed` — planner этой задачи,
-его родитель — принятый `e96ce0a8c41282827513f9b3fb6fea3f140dacce`.
-Использованы локальные синтетические данные. Для отсутствующей в локальном
-наборе заявки создана одна временная синтетическая запись для проверки реальных
-страниц и обработки; после проверки запись удалена (подтверждено удаление ровно одной записи). Редкие варианты
-проверяются прототипами. Продление — существующая синтетическая группа.
-Финальная проверка console.error/pageerror/requestfailed — 0; CSS и WOFF2
-Bootstrap Icons получены с HTTP 200. Все ссылки validation-summary ведут
-к существующим полям в проверенных формах.
-Браузерные MCP не стартовали из-за отсутствующих версий Chromium;
-использован уже установленный Chromium через локальный Playwright.
-Материальных продуктовых предположений не добавлено.
+Заявка ищет только `public_uuid`; soft-deleted/unknown → 404, не active/disabled
+→ 422. Создаётся через связь найденной группы; владелец определяется group.owner_id.
+Телефон нормализует существующий `PhoneNormalizer`, processed_at=null. Внутренние
+ID/owner/status-поля не принимаются. Разные request IDs — отдельные заявки.
 
 ## Changed Files
 
-- Foundation/assets: `public/ui.css`, локальная библиотека Bootstrap Icons.
-- Components/layouts: surface; breadcrumbs/icon/navigation-link/cabinet-return; navbar/sidebar;
-  button/status/alert/empty/label/pagination/confirmation.
-- Psychologist: группы, форма/карточка/продление, заявки, будущие оплаты;
-  профиль получает изменения общих partials.
-- Admin: home, users/documents/forms, groups/moderation, applications,
-  dictionaries/items, settings, payments.
-- Public/prototypes: login/errors и общие компоненты для password/notices;
-  PrototypeFixtures меняет только подсветку навигации.
-- Support/tests/docs/report: ApplicationPages передаёт существующий URL группы;
-  PrototypeTest, ApplicationWorkflowTest, AuthenticationTest, docs/ui-pages.md,
-  .ai/report.md. Скриншоты и браузерные скрипты находятся только в /tmp.
+- `application/routes/api.php`, `bootstrap/app.php`, `AppServiceProvider`:
+  маршруты, limiter, API error boundary и сохранение signed bytes.
+- `app/Http/Middleware/AuthenticateIntegration.php`, API `IntakeController`;
+  `app/Integration/{ApiErrors,IntegrationException,IntakeData,IntakeService}`.
+- `app/Models/IntegrationRequest.php`, migration
+  `2026_09_21_000001_create_integration_requests_table.php`.
+- `config/integration.php`, `.env.example` — только placeholders/defaults.
+- `app/Services/PsychologistDocuments.php` — общая политика хранения/cleanup.
+- `IntegrationIntakeTest`, `IntegrationConcurrencyTest`, отдельный test worker;
+  Stage 10 route assertion уточнён до web, поскольку API теперь существует.
+- `docs/integration.md`, `development.md`, `architecture.md`, `project-status.md`.
+- `.ai/report.md`.
 
-## Remaining issues / Next step
+Blade/CSS/JS, scheduler, payment-код, SPEC/WORKFLOW/AGENTS и `.ai/task.md` не менялись.
 
-Нерешённых материальных UI-проблем по результатам проверки не выявлено.
-Готово к пользовательской приёмке. Проверка проводилась в Chromium;
-кроссбраузерная сертификация и формальный accessibility-аудит не заявляются.
+## Checks
 
-Промежуточные неуспехи устранены: два прежних текстовых ожидания интерфейса;
-один недостоверный повтор из-за пересечения моих запусков на общей тестовой
-БД. Пересекающийся процесс остановлен, итоговые 322 теста выполнены отдельно.
-Никакие изменения backend для прохождения проверок не потребовались.
+- `docker compose ps`: MySQL/PHP healthy, Nginx running.
+- `docker compose exec -T php php artisan migrate --seed --no-interaction`: PASS,
+  применена только новая миграция, выполнен идемпотентный seed, без reset/fresh.
+- Первый завершённый focused `IntegrationIntakeTest`: 14 passed / 266 assertions;
+  затем добавлены проверки partial file write, replay после изменения состояния,
+  malformed inputs и реального QueryException с sensitive bindings.
+- MySQL concurrency: отдельные 4 PHP процесса; same-ID application → одна строка,
+  same-ID questionnaire → одна строка/исходный 201 у всех; разные IDs одного нового
+  email → один 201, остальные 200, без duplicate-key 500.
+- Production `route:list --json`: PASS, результаты указаны выше.
+- Larastan: PASS (No errors).
+- Pint: PASS, 133 files; дополнительный изменённый тест отдельно форматирован.
+- Composer platform requirements: PASS, PHP 8.2.32 и необходимые расширения.
+- `docker compose exec -T php php artisan test`: **342 passed / 4349 assertions**,
+  391.45 s; Stage 4–10, Stage 11, все 249 prototype variants и production isolation.
+- `docker compose exec -T php php artisan view:cache`: PASS.
+- `git diff --check`: PASS.
+- `docker compose exec -T php php artisan test --filter='Integration(Intake|Concurrency)Test'`:
+  **20 passed / 331 assertions**, 33.84 s, после последнего уточнения сохранения
+  admin-флага и проверки настоящего QueryException с SQL bindings.
+- Финальные Pint (133 files), Larastan и `git diff --check`: PASS.
+- Полный diff и staged inspection: PASS, ровно 23 файла задачи;
+  `git diff --cached --check`: PASS. Нет секретов, real PII, uploaded files,
+  логов, screenshots, runtime config cache или посторонних артефактов.
+
+Промежуточные исправленные неуспехи: limiter callback выбрасывает Laravel
+HttpResponseException, для него сохранён готовый JSON response; UI fixture требовал
+настройки placement lifecycle; сравнение raw Eloquent attributes до refresh
+различало bool/int. `pint --dirty` неприменим без Git внутри контейнера — использован
+явный список файлов. Одноразовый runtime-клиент исправлен для обхода системного HTTP
+proxy и корректного импорта urllib; production-код для этих клиентских ошибок не
+менялся. Все временные smoke-данные очищались в finally.
+
+## Runtime / manual signed evidence
+
+Одноразовый Python test-client из `/tmp` отправил реальные HTTP-запросы через
+локальный Nginx → PHP 8.2 FPM под `/cabinet`. Временный случайный секрет установлен
+через локальный config cache; первоначальная конфигурация восстановлена после
+проверки. Секрет не выводился и не коммитился.
+
+Проверено:
+
+- signed multipart → 201; новая boundary + тот же ID → идентичный ответ;
+- анкета присутствует в real admin pending list;
+- реальный защищённый admin document view возвращает исходный PDF и правильный MIME;
+- private exists/public missing, случайный путь и имя из signed descriptor;
+- pending/rejected repeats → 200; approved/disabled/deleted → 409;
+- completed replay после удаления анкеты возвращает исходный 201;
+- signed JSON active group → 201, повтор не создаёт дубль;
+- owner list/detail, admin list, group detail показывают новую заявку;
+- counters all/new/processed = 1/1/0; другой психолог получает 404;
+- unknown UUID 404, inactive/disabled 422, bad signature/stale 401,
+  missing ID 400, rate limit 429, всё в JSON;
+- 4 completed journal entries, 3 append-only private documents после повторов;
+- inspection новых логов и journal rows: нет synthetic email/имён/телефона,
+  document name, questionnaire body, секретов и подписей;
+- payment/history/job counts до и после intake совпадают;
+- удалены собственные smoke rows/documents/sessions/dictionary item/journal,
+  восстановлен исходный config cache, временный секрет удалён.
+
+Это HTTP-проверка реальных страниц и действий; визуальная переработка или новая
+браузерная responsive-сертификация не выполнялась, UI не менялся.
+
+## Facts
+
+Начальная рабочая директория чистая. HEAD `0a779ce` — актуальная planner-коррекция
+multipart; после implementation base `ccd546b` были только два planner-коммита,
+менявшие `.ai/task.md`. Задача ранее не реализована. Все данные проверок синтетические.
+Тесты используют MySQL `gruppa_cabinet_test`; runtime smoke — отдельные временные
+записи локальной development DB. Для Laravel routing/error hooks запрошен Context7,
+а доступность API сверена с установленными Laravel 12 исходниками.
+
+## Assumptions / Unknowns
+
+Продуктовые предположения не добавлены. UTC consent format и conservative rate
+limit выбраны в разрешённых задачей рамках и явно описаны в контракте.
+Production/staging секрет, source IPs, staging URL и реальные education codes
+неизвестны и не выдуманы. Деплой и интеграция внешнего публичного сайта не выполнялись.
+
+## Risks / Next Step
+
+Разработчику публичного сайта: реализовать server-side signing/retries и хранение
+request IDs, связать `cabinet_group_uuid`, согласовать dictionary codes, provision
+secret/HTTPS/proxy/allowlist и проверить staging по `docs/integration.md`.
+Stage 12 email/password setup и WEBPAY остаются отдельными этапами.

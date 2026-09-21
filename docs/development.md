@@ -320,8 +320,8 @@ tools; keep scripts/screenshots outside the repository.
 
 ## Stage 10 applications and retention
 
-Create only clearly synthetic fixtures locally; no participant creation endpoint
-exists. A local PHP script bootstrapped through the console kernel can use:
+Create only clearly synthetic fixtures locally. Stage 11 now provides signed
+participant intake (see below). A local PHP script bootstrapped through the console kernel can use:
 
 ```php
 $group = App\Models\Group::query()->where('owner_id', $syntheticOwner->id)->findOrFail($syntheticGroupId);
@@ -362,6 +362,47 @@ docker compose exec -T php php artisan schedule:list
 
 Cleanup is permanent and reports `Deleted applications: N` only. Its daily
 schedule has overlap protection; the existing every-minute group expiry schedule
-is unchanged. Stage 11 intake/integration remains pending. A global UI/UX audit
-is the recommended next separate product task before Stage 11 if requested by
-the product owner.
+is unchanged. Stage 11 intake is documented below.
+
+## Stage 11 signed intake
+
+The full public-site contract, signing helper and synthetic curl examples are in
+[the integration guide](integration.md). Local endpoints use
+`http://localhost:8080/cabinet/api/v1/{psychologists,group-applications}`.
+Use `php artisan migrate --seed` (non-destructive) for the request journal.
+
+Configure `INTEGRATION_SECRET` outside version control. For manual testing,
+choose a temporary synthetic value interactively in your local shell:
+
+```bash
+read -rsp 'Local synthetic integration secret: ' INTEGRATION_SECRET; echo
+export INTEGRATION_SECRET
+```
+
+Provision that same value through the receiving PHP/FPM environment or ignored
+local `.env`; an exported host variable alone does not change running FPM.
+Reload cached configuration as appropriate, and remove the temporary value after
+testing. Do not print it in command output, reports or logs. Defaults are
+`INTEGRATION_TIMESTAMP_TOLERANCE=300`, `INTEGRATION_RATE_PER_MINUTE=60`, and empty
+`INTEGRATION_ALLOWED_IPS` (comma-separated exact IPs when enabled). See the guide
+for trusted-proxy/shared-cache prerequisites and fail-closed behavior.
+
+Keep standard `enable_post_data_reading=1`. Existing PHP limits are 10 MiB/file
+and 12 MiB total POST; Nginx also limits total requests to 12 MiB. Multiple small
+files work; keep the entire multipart request below the total limit. Do not
+change global upload parsing or build a raw multipart parser. Sign the payload
+manifest and include actual byte size/SHA-256 for each file.
+
+```bash
+docker compose exec -T php php artisan test --filter=IntegrationIntakeTest
+docker compose exec -T php php artisan test --filter=IntegrationConcurrencyTest
+docker compose exec -T php php artisan route:list --path=api -vv
+```
+
+Concurrency tests use separate PHP processes and the dedicated MySQL testing DB;
+run database test suites sequentially. For runtime smoke checks, use disposable
+synthetic accounts/groups/documents, inspect actual owner/admin pages, replay
+IDs and compare journal/file counts. Inspect only newly produced log records for
+redaction. Clean only your smoke IDs/files and restore temporary configuration.
+No public-site repository changes, emails or payment operations are part of this
+verification.

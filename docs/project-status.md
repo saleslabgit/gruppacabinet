@@ -109,7 +109,7 @@ Stage 8 adds only an informational admin payment-list route.
 MySQL coverage includes both tariffs, history/atomicity, IDOR, immutability,
 validation/dictionaries/integer money, activation, deletion and query counts.
 Stage 8 adds dictionary/settings administration and an informational payment page.
-Stage 9 adds lifecycle automation/free extension. Stage 10 connects internal applications below; external integration, mail and
+Stage 9 adds lifecycle automation/free extension. Stage 10 connects internal applications below; Stage 11 adds incoming integration. Mail and
 payments remain pending.
 
 ## Stage 8 dictionaries, settings and payment information
@@ -154,15 +154,33 @@ Reusable phone normalization requires explicit international input and never
 invents a country code. Synthetic factories use reserved fictional phones.
 Daily overlap-protected applications:cleanup permanently removes only records
 strictly older than the current retention setting, including deleted parents;
-output is aggregate-only. There is no intake endpoint, email, payment or lifecycle
-side effect. Stage 11 incoming integration remains pending. The recommended next
-separate product task is a global UI/UX audit before Stage 11, if requested by the
-product owner. Verification evidence is in `.ai/report.md`.
+output is aggregate-only. Stage 11 adds signed intake below, with no email, payment or lifecycle
+side effect. Verification evidence is in `.ai/report.md`.
+
+## Stage 11 incoming integration
+
+Two stateless production API routes accept signed questionnaires and participant
+applications: `/api/v1/psychologists` (multipart manifest/files) and
+`/api/v1/group-applications` (JSON), under the `/cabinet` deployment prefix.
+Canonical HMAC binds endpoint, timestamp, request ID and payload digest; multipart
+file descriptors bind actual bytes. Configurable clock tolerance, per-IP/endpoint
+rate limiting, optional IP allowlist and safe JSON errors/logging protect intake.
+
+The MySQL request journal coordinates replay and business mutation in one
+transaction, including concurrent duplicates. Questionnaire repeats follow the
+pending/rejected/approved/disabled/deleted matrix; existing document policy and
+domain transitions are reused, with rollback cleanup for new files. Applications
+resolve immutable group UUIDs and derive ownership internally. Existing Stage 5
+and 10 pages/counters receive real incoming data without UI changes.
+
+The public-site contract is `docs/integration.md`. Stage 12 email/password setup
+and later payment stages remain pending. No SMTP, mail jobs, password tokens or
+WEBPAY behavior was added. Public-site implementation/deployment is external.
 
 ## Intentionally not implemented
 
 No psychologist profile editing or document mutations, payment CRUD,
-public API, mail/warning jobs, or WEBPAY
+mail/warning jobs, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 
 ## External prerequisites and unknowns

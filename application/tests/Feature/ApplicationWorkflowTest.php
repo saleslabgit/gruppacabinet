@@ -255,9 +255,9 @@ class ApplicationWorkflowTest extends TestCase
         }
     }
 
-    public function test_routes_have_no_application_intake_or_admin_mutations(): void
+    public function test_web_routes_have_no_application_intake_or_admin_mutations(): void
     {
-        $routes = collect(Route::getRoutes()->getRoutes())->filter(fn ($route) => str_contains($route->uri(), 'applications') && ! str_contains($route->uri(), '_prototype'));
+        $routes = collect(Route::getRoutes()->getRoutes())->filter(fn ($route) => str_contains($route->uri(), 'applications') && ! str_contains($route->uri(), '_prototype') && ! str_starts_with($route->uri(), 'api/'));
         $this->assertCount(6, $routes);
         foreach ($routes as $route) {
             $this->assertStringNotContainsString('api/', $route->uri());
