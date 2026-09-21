@@ -1,1276 +1,976 @@
-# Task: TASK-2026-09-21-09
+# Task: TASK-2026-09-21-10
 
 Status: planned
-Created from: e96ce0a8c41282827513f9b3fb6fea3f140dacce (main)
+Created from: ccd546b0a484e085345aa8ddd30bc00123d05288 (main)
 
 ## Title
 
-Global application design audit and full UI/UX refactor of every page
-
-## Executor
-
-Codex.
+Stage 11 — Implement signed incoming API integration for psychologist questionnaires and group applications
 
 ## Goal
 
-Perform a complete design audit of the entire cabinet and immediately fix every material UI/UX and visual-design problem found.
+Implement Stage 11 from SPEC.md: the cabinet becomes the secure server-to-server receiving side for the existing public site `https://gruppa.info/`.
 
-This is not an audit-only task and not a small cosmetic pass.
+Add two versioned incoming API flows:
 
-The current interface has accumulated systemic problems across navigation, wayfinding, spacing, hierarchy, components, forms, lists, states and responsive behavior. Treat this milestone as the point where the cabinet receives a coherent application-wide design system and every existing page is reviewed against the same standards.
+1. psychologist questionnaire submission;
+2. participant application submission for a published group.
 
-Audit and refactor:
+Both flows must use the same integration security boundary:
 
-- public/auth surfaces;
-- psychologist cabinet;
-- administrator cabinet;
-- all shared UI components;
-- every currently real page from Stages 4–10;
-- the existing prototype/future pages sufficiently to ensure the shared design system works when Stages 11–14 connect them;
-- desktop, tablet and mobile behavior.
+- HMAC-SHA256 over the exact HTTP request body;
+- `X-Timestamp` with a ±5 minute acceptance window;
+- constant-time signature comparison with `hash_equals`;
+- required `X-Request-Id`;
+- durable MySQL idempotency;
+- rate limiting;
+- unified JSON errors;
+- PII-safe technical logging;
+- no browser/session/CSRF authentication.
 
-The product owner explicitly authorizes substantial Blade/CSS restructuring where it improves usability, hierarchy, navigation, consistency or responsiveness.
+The API must integrate with already accepted Stages 5 and 10:
 
-The result must feel like one intentionally designed application, not a collection of prototype screens connected over time.
+- incoming psychologist questionnaires appear in the existing admin psychologist workflow;
+- incoming group applications appear immediately in the existing owner/admin Stage 10 application UI and counters.
 
-## Base / Accepted Product State
+Do not implement Stage 12 email/password onboarding or any WEBPAY behavior.
 
-Stages 1–10 business behavior is accepted through:
+## Current Base
 
-e96ce0a8c41282827513f9b3fb6fea3f140dacce
+Use the current main HEAD exactly:
 
-Do not change accepted business semantics.
+`ccd546b0a484e085345aa8ddd30bc00123d05288`
 
-This task explicitly supersedes the old Stage 3 visual baseline. The previous “do not redesign accepted views” rule does not apply here because this is the dedicated product-approved redesign milestone.
+This includes the accepted Stage 1–10 backend and the latest Stage 10 UI/design corrections.
 
-## Hard Boundary
+Do not revert or overwrite the current UI baseline.
 
-### Allowed
+## Facts
 
-You may change:
+- Laravel 12 / PHP 8.2+ / MySQL.
+- Application production base path is `/cabinet`.
+- API production base is `https://gruppa.info/cabinet/api/v1/...`.
+- Current bootstrap registers web + console routes only; no public API route file exists yet.
+- Current public/site integration endpoints do not exist.
+- `gp_users` already stores the full questionnaire, consent, lifecycle/access/tariff fields and soft delete.
+- Active email uniqueness is already enforced by generated `active_email`.
+- Existing repeat-email rules are defined in SPEC §5.
+- `gp_user_documents` and `PsychologistDocuments` already provide private storage, MIME validation conventions and safe filenames.
+- Document types are:
+  - diploma;
+  - certificate;
+  - license;
+  - registration.
+- Existing private file MIME allowlist is PDF/JPEG/PNG and max size comes from `config/psychologist_documents.php`.
+- `education_type` is an existing dictionary whose item codes are stable.
+- `gp_groups.public_uuid` is immutable and unique.
+- Stage 10 already implements real group applications, owner/admin access, counters, process/unprocess and phone normalization/search.
+- `PhoneNormalizer` already exists and must be reused for participant phone storage.
+- Group applications may only be accepted for `status=active` and `disabled=false`.
+- The public site must not submit `psychologist_id` or `owner_id` for a group application.
+- Stage 12 owns approval email/password setup; Stage 11 sends no email.
+- Current UI must remain the design baseline; this task is API/backend integration, not another UI redesign.
 
-- Blade layouts;
-- Blade page structure;
-- shared Blade partials;
-- Blade components;
-- navigation markup/presentation;
-- breadcrumbs;
-- page headers;
-- content hierarchy;
-- visual grouping;
-- forms/layout of existing fields;
-- lists/tables/cards;
-- status presentation;
-- alerts/notices;
-- empty/no-result/error states;
-- confirmation modals;
-- pagination presentation;
-- responsive behavior;
-- typography;
-- spacing system;
-- CSS design tokens;
-- restrained product colors;
-- borders/radii/shadows;
-- hover/focus/active/disabled states;
-- application/public/ui.css;
-- application/public/ui.js only when minimal UI behavior is necessary;
-- a local icon-library integration;
-- minor presenter/ViewModel changes only to expose already-existing data in a cleaner UI;
-- UI-focused tests or text expectations affected by justified design changes;
-- docs/ui-pages.md if materially outdated;
-- .ai/report.md.
+## Architecture Decisions
 
-### Forbidden
+### API endpoints
 
-Do NOT change:
+Use:
 
-- database schema or migrations;
-- business rules;
-- authentication/session behavior;
-- authorization semantics;
-- user/group/payment/application status semantics;
-- group status-transition rules;
-- group lifecycle behavior;
-- application processed/unprocessed semantics;
-- retention behavior;
-- document security/storage rules;
-- scheduler behavior;
-- payment behavior;
-- WEBPAY;
+- `POST /api/v1/psychologists`
+- `POST /api/v1/group-applications`
+
+Full production URLs:
+
+- `https://gruppa.info/cabinet/api/v1/psychologists`
+- `https://gruppa.info/cabinet/api/v1/group-applications`
+
+The psychologist route is the stable Stage 11 contract because SPEC requires a versioned psychologist endpoint but does not name the path.
+
+### Stateless route boundary
+
+Add a dedicated `routes/api.php` and register it through Laravel routing.
+
+Requirements:
+
+- stateless API middleware;
+- no session authentication;
+- no CSRF;
+- no web login redirect;
+- no HTML error responses;
+- no prototype/local behavior mixed into the API.
+
+Use the normal Laravel `api` prefix plus a route-level `v1` prefix so the application path resolves as `/cabinet/api/v1/...`.
+
+### Integration configuration
+
+Add `config/integration.php` with environment-backed values:
+
+- `INTEGRATION_SECRET`;
+- timestamp tolerance, default 300 seconds;
+- rate limit per minute, choose/document a conservative technical default (e.g. 60) and keep it configurable;
+- optional source IP allowlist.
+
+Add placeholders/defaults only to `.env.example`; never commit a real secret.
+
+The application must fail closed for signed integration routes when no secret is configured outside explicit testing overrides.
+
+### HMAC contract
+
+`X-Signature` is lowercase hex HMAC-SHA256:
+
+`hash_hmac('sha256', RAW_HTTP_BODY_BYTES, INTEGRATION_SECRET)`
+
+Rules:
+
+- sign the exact bytes sent on the wire;
+- do not parse/re-encode JSON before signature verification;
+- for multipart, verify the exact serialized multipart body including its boundary;
+- compare expected/provided values using `hash_equals`;
+- do not trim/normalize the body before verification;
+- malformed/missing signature is rejected;
+- do not log full signatures.
+
+`X-Timestamp`:
+
+- Unix epoch seconds;
+- required;
+- numeric integer;
+- reject when absolute clock difference is greater than 300 seconds by default;
+- exact ±300 second boundary is accepted;
+- future and past skew are treated symmetrically.
+
+### Required request ID
+
+`X-Request-Id`:
+
+- required;
+- opaque string;
+- max 128 chars;
+- allow a practical safe character set such as UUID/ULID/token characters;
+- never derive business meaning from it.
+
+Missing/invalid request id returns a unified protocol error.
+
+### Durable idempotency
+
+Use MySQL, not cache, for authoritative idempotency.
+
+Add a migration/model for an integration request journal, recommended table:
+
+`gp_integration_requests`
+
+Minimum fields:
+
+- id;
+- request_id — unique;
+- endpoint/action code;
+- request_fingerprint — SHA-256;
+- response_status;
+- response_body JSON/text suitable for exact replay;
+- completed_at;
+- timestamps.
+
+Do not store the request body, questionnaire fields, file contents, HMAC secret or signature.
+
+Behavior:
+
+1. Authentication/timestamp protocol validation happens before business execution.
+2. Build a semantic request fingerprint after parsing:
+   - endpoint code;
+   - normalized scalar request values;
+   - for every uploaded file: document type + SHA-256 file-content hash;
+   - no file bytes are persisted in the journal.
+3. First authenticated request claims/processes the request ID.
+4. Business mutation and final idempotency response must be coordinated transactionally.
+5. A later request with the same request ID + same endpoint + same semantic fingerprint returns the original HTTP status/body without executing business effects again.
+6. Same request ID with a different endpoint or fingerprint returns HTTP 409 `idempotency_conflict`.
+7. Concurrent duplicate requests must create exactly one business effect.
+8. A failed transaction must not permanently poison the request ID as completed.
+9. Do not use process-local locks as the authoritative guarantee.
+
+For multipart retries, semantic fingerprinting must not depend on the random MIME boundary; identical logical fields/files with a newly serialized boundary must still match.
+
+### Unified JSON response/error envelope
+
+Use JSON for all API responses.
+
+Success should use a stable shape, for example:
+
+`{"data": {...}, "request_id": "..."}`
+
+Errors:
+
+`{"code": "...", "message": "...", "errors": {...optional...}, "request_id": "...optional..."}`
+
+Do not expose stack traces, SQL, filesystem paths or internal exception messages.
+
+Stable error codes must exist for at least:
+
+- missing_request_id;
+- invalid_request_id;
+- missing_timestamp;
+- invalid_timestamp;
+- expired_timestamp;
+- missing_signature;
+- invalid_signature;
+- rate_limited;
+- validation_failed;
+- idempotency_conflict;
+- psychologist_conflict;
+- group_not_found;
+- group_not_accepting_applications;
+- internal_error.
+
+Use correct HTTP semantics:
+
+- 400 for malformed protocol headers/request ID;
+- 401 for invalid/missing/stale signed authentication;
+- 404 unknown group UUID;
+- 409 idempotency/business conflict;
+- 422 validated business/input rejection;
+- 429 rate limit;
+- 500 only for genuine unexpected failures.
+
+### Rate limiting
+
+Define a dedicated limiter for Stage 11 integration endpoints.
+
+Requirements:
+
+- configured limit;
+- keyed at minimum by source IP and endpoint;
+- response uses the same JSON error envelope;
+- log rejection using safe technical context only;
+- do not use request payload content as a rate-limit key.
+
+### Safe logging
+
+Follow SPEC §4.10.
+
+For rejected integration requests log only:
+
+- endpoint/action;
+- request ID if syntactically available;
+- reason/error code;
+- source IP;
+- timestamp/technical context needed for diagnosis.
+
+Never log:
+
+- full request body;
+- questionnaire values;
+- participant names/phone;
+- uploaded document metadata beyond non-PII technical count if necessary;
+- file content;
+- integration secret;
+- full signature;
+- password/reset tokens.
+
+Approved/disabled/deleted email conflicts may be logged with a safe internal user ID and technical code; do not log the email itself unless existing production logging policy explicitly requires it (default: do not).
+
+### Optional IP allowlist
+
+Support a configurable allowlist if `INTEGRATION_ALLOWED_IPS` is set.
+
+- empty config = do not enforce IP allowlist;
+- non-empty = reject outside addresses;
+- use trusted Laravel request IP handling;
+- document proxy/trusted-proxy prerequisite;
+- do not hardcode current public-site IPs.
+
+## Scope
+
+### 1. API routing and middleware
+
+Add:
+
+- `routes/api.php`;
+- API v1 route group;
+- dedicated integration HMAC/timestamp/request-id middleware or equivalent cohesive layer;
+- dedicated rate limiter;
+- optional IP allowlist middleware/check;
+- unified exception/error rendering for these API routes.
+
+Do not alter web auth behavior.
+
+### 2. Integration request journal migration/model
+
+Add the durable idempotency table/model described above.
+
+Indexes:
+
+- unique request_id;
+- endpoint/action if useful operationally;
+- created_at/completed_at as useful for maintenance.
+
+No PII payload column.
+
+A cleanup policy for this small journal is not required in Stage 11 unless trivially safe; document that retention can be added later. Do not silently delete active idempotency history on a short schedule.
+
+### 3. Psychologist questionnaire endpoint
+
+Implement:
+
+`POST /api/v1/psychologists`
+
+Content type:
+
+- `multipart/form-data`, because documents may be included.
+
+Accepted questionnaire fields:
+
+- last_name;
+- first_name;
+- middle_name;
+- phone;
 - email;
-- external/public API;
-- Stage 11+ functionality;
-- package/framework architecture;
-- route semantics unless a harmless presentation-only alias is absolutely unavoidable; default is no route changes;
-- SPEC.md;
-- WORKFLOW.md;
-- AGENTS.md;
-- .ai/task.md.
-
-Do not use this task for backend cleanup.
-
-If a backend/product problem is discovered but is not necessary to complete the UI refactor, record it in .ai/report.md and leave it unchanged.
-
-## Required Icon Library
-
-Integrate **Bootstrap Icons** as the single application icon library.
+- education_type_code;
+- other_education;
+- modality_program;
+- training_center;
+- graduation_year;
+- training_hours;
+- license_number;
+- license_expires_at;
+- group_leading_experience;
+- groups_conducted_count;
+- documents_confirmed;
+- education_confirmed;
+- live_session_ready;
+- personal_data_consent_at;
+- personal_data_consent_version;
+- documents.
 
-Reason: the project already uses Bootstrap 5 and does not use a frontend build tool.
-
-Requirements:
-
-- use the official Bootstrap Icons distribution;
-- vendor production assets locally under application/public/vendor or another clear local public path;
-- no CDN;
-- no runtime dependency on npm/Vite;
-- document the exact Bootstrap Icons version in .ai/report.md;
-- load icon CSS through a base-path-safe Laravel asset URL;
-- use one icon family only;
-- do not mix Bootstrap Icons with emoji, Font Awesome, inline random SVG sets or Unicode symbols for UI actions.
-
-Use icons purposefully for:
-
-- primary navigation;
-- breadcrumbs where useful;
-- back/parent navigation;
-- search/filter;
-- add/create;
-- edit;
-- view/open;
-- save;
-- submit/send;
-- approve;
-- revision;
-- reject;
-- activate/publish;
-- copy;
-- upload/download;
-- documents;
-- groups;
-- applications;
-- payments;
-- dictionaries;
-- settings;
-- profile/user;
-- logout;
-- delete/destructive actions;
-- pagination chevrons where appropriate;
-- success/warning/error/info states when useful.
-
-Accessibility rules:
-
-- icons do not replace required text where the action is not universally obvious;
-- decorative icons use aria-hidden="true";
-- icon-only controls require an accessible name via aria-label and should be reserved for compact, universally understood actions;
-- status meaning must never rely on icon alone;
-- icon color must not be the only carrier of meaning;
-- keep icon sizing/alignment consistent;
-- do not sprinkle icons into every label/heading just for decoration.
-
-Establish a small consistent icon mapping and reuse it.
-
-## Design Audit Scorecard
-
-Every page family must be evaluated against the dimensions below.
-
-Use a 0–3 score internally while auditing:
-
-- 0 = broken / missing / materially confusing;
-- 1 = weak / inconsistent / needs redesign;
-- 2 = acceptable production baseline;
-- 3 = strong, clear and consistent.
-
-By completion:
-
-- no reviewed dimension may remain at 0 or 1 on a real page;
-- no critical flow may have a navigation dead end;
-- shared-pattern problems must be fixed at component/system level, not patched page by page.
-
-Do not commit the full score spreadsheet unless useful; summarize systemic findings/fixes in .ai/report.md.
-
-### D1 — Information architecture
-
-Every page must answer quickly:
-
-- Where am I?
-- What object/workflow am I viewing?
-- What is its current state?
-- What requires my attention?
-- What is the primary next action?
-- How do I return to the parent context?
-
-Avoid:
+Do NOT accept writable internal fields:
 
-- repeated blocks explaining the same state;
-- sections with unclear purpose;
-- critical actions buried below low-priority information;
-- duplicate metadata.
+- id;
+- status;
+- accept;
+- disabled;
+- free;
+- admin;
+- password;
+- remember_token;
+- deleted_at;
+- education_type_id.
 
-### D2 — Navigation and wayfinding
+Unexpected protected/internal fields should be rejected, not silently applied.
 
-No dead-end pages.
+### 4. Questionnaire validation
 
-Add a reusable breadcrumb system.
+Do not invent stricter product requirements than SPEC.
 
-Expected hierarchy examples:
+Required for incoming public questionnaire:
 
-Psychologist:
-- Мои группы > Название группы
-- Мои группы > Название группы > Редактирование
-- Мои группы > Название группы > Продление
-- Мои группы > Название группы > Заявки
-- Мои группы > Название группы > Заявки > Имя участника
-- Мои данные
+- email;
+- personal_data_consent_at;
+- personal_data_consent_version.
 
-Admin:
-- Психологи > Имя психолога
-- Психологи > Имя психолога > Редактирование
-- Психологи > Имя психолога > Документы
-- Группы > Название группы
-- Группы > Название группы > Редактирование
-- Заявки > Имя участника
-- Справочники > Название справочника
-- Настройки
-- Платежи
+Other questionnaire fields remain nullable unless technical type/range validation applies.
 
-Rules:
+Normalize:
 
-- top-level section pages should not show redundant breadcrumbs;
-- nested/detail/edit pages should;
-- breadcrumb ancestors are real links;
-- current breadcrumb item is non-clickable;
-- do not use browser-history JavaScript as navigation;
-- users must not depend on the browser Back button;
-- forms and deep detail pages also need an obvious contextual Cancel/Back action where useful;
-- back/cancel destinations must be deterministic, not arbitrary referrer behavior.
+- email = lower-case + trim;
+- nullable text = trimmed;
+- integer/date/boolean fields through explicit validation;
+- consent timestamp interpreted according to the documented public contract and stored UTC.
 
-Create a reusable breadcrumb component rather than one-off markup.
+Use the same technical bounds as existing admin questionnaire validation.
 
-### D3 — Global shell and navigation
+#### Education type
 
-Audit:
+External contract uses `education_type_code`, not an internal DB ID.
 
-- product header/shell;
-- psychologist navigation;
-- admin navigation;
-- current state;
-- logo/product identity;
-- logout placement;
-- desktop/tablet/mobile behavior;
-- density.
+Resolve only against dictionary `education_type`.
 
-Admin has many sections; make it highly scannable without hiding important destinations.
+For a new user:
+- supplied code must be active.
 
-Psychologist navigation should remain lightweight.
+For repeat pending/rejected submission:
+- active codes accepted;
+- the currently selected inactive item may remain valid if the same code is re-submitted, matching existing cabinet behavior.
 
-Use icons consistently in navigation.
+Unknown/wrong-dictionary code -> 422.
 
-### D4 — Layout, grid and spacing
+Store the resolved internal `education_type_id`; never expose that requirement to the public site.
 
-Establish a coherent application layout system.
+### 5. Questionnaire full-submission semantics
 
-Audit:
+Treat the POST as one full questionnaire submission, not a PATCH.
 
-- page max width;
-- content widths;
-- form widths;
-- table/list widths;
-- gutters;
-- page padding;
-- section spacing;
-- internal component spacing;
-- alignment of left/right edges;
-- vertical rhythm.
+Build an explicit whitelist map of all questionnaire fields.
 
-Avoid arbitrary spacing values.
+- fields omitted from the nullable questionnaire contract may become null;
+- booleans use explicit validated values;
+- internal lifecycle/access/tariff fields are never copied from request input.
 
-Use a small spacing family, for example:
+Document these semantics so the public site sends the complete current questionnaire on retry/resubmission.
 
-4 / 8 / 12 / 16 / 24 / 32 / 48 px
+### 6. New psychologist behavior
 
-Exact tokens may differ, but they must form a system.
+If no active or soft-deleted conflict exists for email:
 
-Fix:
+create one `gp_users` row:
 
-- elements touching viewport edges;
-- giant gaps;
-- cramped controls;
-- inconsistent section spacing;
-- nested panel padding multiplication;
-- random margins added page-by-page.
+- status=pending;
+- admin=false;
+- disabled=false;
+- free=false (DB/business default; tariff remains an admin decision);
+- password=null;
+- questionnaire + consent from request.
 
-### D5 — Typography
+Return HTTP 201.
 
-Create a clear hierarchy for:
+No email is sent.
 
-- page title;
-- object title;
-- section title;
-- card/list title;
-- body;
-- form label;
-- metadata;
-- helper text;
-- status/eyebrow;
-- table headers.
+No password token is created.
 
-Rules:
+The user must immediately appear in the existing admin psychologist list/filter as pending.
 
-- page titles must not dominate the viewport;
-- body must be comfortable for Russian text;
-- line-height must be deliberate;
-- helper/meta text must remain readable;
-- heading levels must have visible distinction;
-- semantic h1/h2/h3 order must be sensible;
-- avoid “everything bold”;
-- avoid very small secondary text.
+### 7. Repeat email matrix
 
-Keep local Montserrat.
+Implement SPEC §5 exactly.
 
-### D6 — Color and contrast
+Resolve conflicts under transaction/row lock, including withTrashed lookup.
 
-Audit:
+#### Existing pending
 
-- text/background contrast;
-- muted text;
-- links;
-- borders;
-- active navigation;
-- statuses;
-- alerts;
-- disabled controls;
-- destructive actions.
+- update questionnaire fields;
+- keep status pending;
+- keep tariff/access/internal fields unchanged;
+- append newly uploaded documents;
+- HTTP 200.
 
-Use a restrained palette.
+#### Existing rejected
 
-Avoid:
+- update questionnaire;
+- transition rejected -> pending through `UserStatusTransitionService` or existing domain transition boundary;
+- keep tariff/access/internal fields unchanged;
+- append new documents;
+- HTTP 200.
 
-- too many unrelated accent colors;
-- low-contrast gray-on-gray text;
-- color as the only meaning;
-- heavy colored surfaces for low-priority information.
+#### Existing approved
 
-### D7 — Component correctness
+- no mutation;
+- no new documents;
+- HTTP 409 `psychologist_conflict`.
 
-Use the correct semantic/control pattern.
+#### Existing disabled=true
 
-Examples:
+- no mutation regardless of status;
+- HTTP 409.
 
-- navigation -> links;
-- mutations/submissions -> buttons/forms;
-- destructive action -> button + confirmation;
-- status -> status/badge;
-- tabular data -> table only when columns help comparison;
-- unrelated detail data -> definition/section layout, not fake table;
-- no clickable div/span;
-- do not make plain text look clickable;
-- do not use disabled buttons as the only explanation of unavailable functionality.
+#### Soft-deleted matching email
 
-Audit whether each current panel/card/table/button is actually the right component.
+- do not restore;
+- do not create a new row automatically;
+- no document mutation;
+- HTTP 409.
 
-### D8 — Action hierarchy
+Concurrent same-email submissions with different request IDs must still preserve the single-active-email invariant and return deterministic success/conflict rather than 500 duplicate-key leakage.
 
-Every page should have one clear primary action or intentionally none.
+Do not allow repeat questionnaire to change `free`, `disabled`, `admin`, password, or approved status.
 
-Define and consistently style:
+### 8. Multipart documents
 
-- primary;
-- secondary;
-- tertiary/text;
-- destructive.
+Contract:
 
-Audit:
+`documents[n][type]`
+`documents[n][file]`
 
-- button prominence;
-- action grouping;
-- action location;
-- duplicated actions;
-- mobile wrapping.
+Allowed type values are the existing stable config keys:
 
-Avoid:
+- diploma;
+- certificate;
+- license;
+- registration.
 
-- three equal primary buttons;
-- delete sitting beside save with equal prominence;
-- primary action hidden below unrelated content;
-- action clusters with no visual hierarchy.
+Validation must reuse the existing size/MIME policy:
 
-### D9 — Interaction states
+- PDF;
+- JPEG;
+- PNG;
+- max KB from config.
 
-Every interactive element must have intentional states:
+Security:
 
-- default;
-- hover;
-- focus-visible;
-- active/pressed;
-- current/selected;
-- disabled.
+- content MIME, not extension only;
+- private local storage only;
+- random path;
+- safe original filename;
+- never public URL;
+- no binary/file content in logs/idempotency journal.
 
-Apply to:
+Behavior:
 
-- global navigation;
-- breadcrumb links;
-- text links;
-- buttons;
-- ghost/text buttons;
-- table/list row actions;
-- pagination;
-- selects;
-- inputs;
-- checkboxes/radios;
-- modal controls;
-- copy control;
-- dropdowns.
+- zero documents is allowed unless SPEC/public form requires otherwise;
+- repeat pending/rejected submissions append new documents;
+- existing documents are never removed/replaced by this endpoint.
 
-Hover should communicate interactivity on pointer devices.
+Atomicity/file cleanup:
 
-Focus-visible must be clearly visible for keyboard users.
+- if any DB/business/idempotency operation fails, no orphan private file from that request may remain;
+- if storing one of multiple files fails, clean up all files created by the failed API request and roll back DB changes;
+- duplicate idempotent replay must not write the same document twice.
 
-Never remove focus outlines without an equal or better replacement.
+Reuse/extend `PsychologistDocuments` rather than creating a second incompatible storage policy.
 
-### D10 — Forms
+### 9. Participant application endpoint
 
-Audit every form for:
+Implement exactly:
 
-- field grouping;
-- field order;
-- label clarity;
-- required indication;
-- input width;
-- textarea size;
-- select choice presentation;
-- checkbox/radio semantics;
-- help-text usefulness;
-- error placement;
-- error summary;
-- old input after validation;
-- Save vs Submit distinction;
-- Cancel/back behavior;
-- destructive action separation;
-- mobile keyboard/inputmode where already appropriate.
+`POST /api/v1/group-applications`
 
-Rules:
+Prefer JSON request body for this endpoint.
 
-- help text only when useful;
-- do not repeat obvious instructions;
-- field errors belong near fields;
-- error summary should be useful, not noisy duplication;
-- long forms need clear sections;
-- Save / Submit / Send / Approve actions must be unambiguous.
+Accepted fields only:
 
-Do not change validation requirements.
+- group_uuid;
+- last_name;
+- first_name;
+- phone.
 
-### D11 — Lists, tables and cards
+Explicitly reject/ignore as validation error attempts to provide:
 
-Optimize for scanning.
+- psychologist_id;
+- owner_id;
+- group_id;
+- processed_at;
+- any internal application id/status field.
 
-For each list ask:
+### 10. Application validation / group lookup
 
-- What is the primary identifier?
-- Where is status?
-- Which metadata matters?
-- Which columns are essential?
-- Where are actions?
-- What can be removed from the row?
-- Does row hover help?
-- How do long values wrap?
-- How does the pattern transform on mobile?
+Validation:
 
-Admin lists may be denser than psychologist lists.
+- group_uuid required UUID;
+- last_name required string with reasonable existing DB max;
+- first_name required string;
+- phone required and accepted by existing `PhoneNormalizer`.
 
-Avoid giant card rows if a compact structured list/table is more effective.
+Lookup:
 
-### D12 — Detail pages
+- query by `gp_groups.public_uuid = group_uuid`;
+- do not query by internal group id;
+- soft-deleted group behaves as unknown -> 404;
+- unknown UUID -> 404 `group_not_found`;
+- found but status != active -> 422 `group_not_accepting_applications`;
+- found but disabled=true -> 422 same stable business code.
 
-Avoid a vertical stack of visually identical panels.
+Do not accept psychologist ID from the caller.
 
-A detail page should establish:
+The owner is always derived internally via `group.owner_id`.
 
-1. identity/title;
-2. status;
-3. primary action;
-4. critical warning;
-5. essential facts;
-6. related information;
-7. history/secondary data.
+### 11. Application creation
 
-Use stronger section hierarchy and less repeated chrome.
+On a valid active/enabled group:
 
-### D13 — Status and lifecycle communication
+- create `gp_group_applications.group_id` from the matched internal group;
+- store last_name/first_name;
+- store original display phone as appropriate;
+- store `phone_normalized` using existing `PhoneNormalizer`;
+- processed_at=null.
 
-Audit all status-heavy flows:
+Return HTTP 201.
 
-Users:
-- pending;
-- approved;
-- rejected;
-- disabled.
+No email/job/payment/group transition.
 
-Groups:
-- draft;
-- moderation;
-- revision;
-- rejected;
-- approved;
-- active;
-- warning;
-- expired;
-- outside extension window;
-- disabled.
+Immediately prove:
 
-Applications:
-- new;
-- processed.
+- psychologist owner sees the new application in Stage 10 list/detail;
+- owner group counters increase;
+- admin application list sees it;
+- a different psychologist cannot access it.
 
-Requirements:
+### 12. Idempotent application behavior
 
-- status must be easy to find;
-- label and color/icon mapping must be consistent;
-- current state should not be explained three times;
-- warning/action guidance appears only when actionable;
-- avoid conflating status with tariff/access/payment.
+Repeated same `X-Request-Id` + same semantic request returns the original 201 JSON and creates exactly one application.
 
-Do not change status semantics.
+Concurrent duplicates create exactly one application.
 
-### D14 — Alerts, notices and feedback
+Different `X-Request-Id` values are distinct submissions even if participant fields happen to match; Stage 11 does not invent participant de-duplication business rules beyond request idempotency.
 
-Audit:
+### 13. Unified API validation
 
-- success;
-- info;
-- warning;
-- danger;
-- validation;
-- empty;
-- no-results;
-- unavailable functionality.
+Use dedicated Form Requests / DTO-like normalized request classes.
 
-Alerts should be compact and proportional to importance.
+Do not reuse admin HTML FormRequest responses directly.
 
-Do not use full-card warning surfaces for minor notes.
+API validation must produce the unified JSON envelope and stable field errors.
 
-Success feedback should not dominate the next task.
+Do not expose internal dictionary IDs or database implementation in validation messages.
 
-### D15 — Empty and no-result states
+### 14. API exception safety
 
-Every empty state should explain:
+For `/api/v1/*`:
 
-- what is empty;
-- whether this is expected;
-- what the user can do next, if anything.
+- no HTML 404/419/500;
+- no login redirect;
+- unexpected exceptions -> safe JSON internal_error;
+- in testing/logs the actual exception remains diagnosable server-side without exposing it to caller.
 
-Differentiate:
+Web error handling must remain unchanged.
 
-- first-use empty;
-- filter/search no-results;
-- temporarily unavailable future feature.
+### 15. Security headers / transport assumptions
 
-Do not show a CTA when the user cannot actually perform it.
+Document:
 
-### D16 — Pagination and filters
+- production calls must use HTTPS;
+- secret is server-only;
+- never put secret/signature generation in browser JS;
+- same-host does not mean browser-to-cabinet API;
+- source is the backend of the public site.
 
-Audit:
+Do not attempt to implement TLS in Laravel.
 
-- active page;
-- previous/next affordance;
-- hover/focus;
-- query preservation;
-- mobile size;
-- filter grouping;
-- reset action;
-- applied filter visibility.
+### 16. Integration documentation
 
-Filters should not visually dominate the page.
+Create `docs/integration.md`.
 
-### D17 — Confirmation and destructive actions
-
-Audit every dangerous action.
-
-Requirements:
-
-- destructive actions are visually distinct but not constantly dominant;
-- confirmations clearly name the object/effect;
-- cancel is obvious;
-- modal fits 390px viewport;
-- keyboard/focus behavior remains usable;
-- no nested-form invalid markup;
-- copy/approve/reject/revision dialogs use consistent structure.
-
-### D18 — Breadcrumbs and contextual return
-
-This is a hard requirement due to current product issues.
-
-Every deep page must provide:
-
-- breadcrumbs;
-- a clear path to parent list/context;
-- a sensible Cancel/Back control when editing.
-
-Check every detail/edit/document/application/dictionary page for dead ends.
-
-### D19 — Responsive behavior
-
-Validate at minimum:
-
-- 1440px;
-- 1024px;
-- 390px.
-
-Do not merely stack the desktop UI.
-
-At 390px:
-
-- no page-level horizontal overflow;
-- navigation remains usable;
-- breadcrumbs wrap or collapse gracefully;
-- actions do not become tiny clusters;
-- tables become readable cards/structured blocks where appropriate;
-- forms use available width;
-- touch targets are sensible;
-- modal content fits viewport;
-- long values wrap;
-- primary action remains easy to find.
-
-### D20 — Accessibility baseline
-
-This is not a formal certification, but fix obvious issues:
-
-- semantic landmarks/headings;
-- labels associated with controls;
-- aria-current;
-- accessible names for icon-only buttons;
-- keyboard-visible focus;
-- disabled clarity;
-- color contrast;
-- modal controls;
-- text alternatives where needed.
-
-### D21 — Microcopy
-
-Audit wording for:
-
-- button labels;
-- statuses;
-- alerts;
-- empty states;
-- help text;
-- confirmation dialogs;
-- headings.
-
-Prefer concise action-oriented Russian.
-
-Avoid technical/internal language where user-facing wording exists.
-
-Do not alter business meaning.
-
-### D22 — Consistency
-
-The same concept must look and behave the same everywhere.
-
-Audit consistency for:
-
-- page header;
-- breadcrumbs;
-- section header;
-- buttons;
-- forms;
-- statuses;
-- alerts;
-- lists;
-- pagination;
-- filters;
-- dates;
-- money;
-- dangerous actions;
-- empty states.
-
-Prefer shared component changes over per-page overrides.
-
-### D23 — Visual polish
-
-Final pass for:
-
-- alignment;
-- hover quality;
-- icon baseline;
-- border consistency;
-- radius consistency;
-- line wrapping;
-- orphaned labels;
-- awkward whitespace;
-- jitter from inconsistent button heights;
-- table/card rhythm;
-- mobile edge cases.
-
-## Application-Wide Audit Coverage
-
-You must review every page group, not only the most important flows.
-
-There are 31 existing page groups / 249 prototype variants.
-
-Do NOT manually inspect all 249 variants.
-
-Instead:
-
-- inspect every distinct page group;
-- inspect all real routes;
-- inspect representative state variants for components/statuses;
-- use shared component fixes so the remaining variants inherit the improvements;
-- run the full prototype test suite at the end.
-
-## Token / Context Efficiency
-
-Do not read the whole repository.
-
-### Read first
-
-1. WORKFLOW.md
-   - only planner/executor/report/commit rules.
-
-2. this .ai/task.md.
-
-3. docs/project-status.md
-   - Stages 4–10 and intentionally-not-implemented.
-
-4. docs/ui-pages.md
-   - page groups and real wiring sections;
-   - do not read every prototype URL description unless needed.
-
-5. SPEC.md
-   Search/read only:
-   - UI/design section around 24;
-   - rule 24.5;
-   - #25 Responsive.
-   This task explicitly authorizes redesign.
-
-6. application/routes/web.php
-   - route map only.
-
-### UI foundation
-
-Read:
-
-- application/public/ui.css
-- application/public/ui.js
-- application/resources/views/layouts/app.blade.php
-- application/resources/views/layouts/surface.blade.php
-- application/resources/views/layouts/admin.blade.php
-- application/resources/views/layouts/psychologist.blade.php
-- application/resources/views/layouts/public.blade.php
-
-### Core components
-
-Prioritize:
-
-- components/navbar.blade.php
-- components/sidebar.blade.php
-- components/page-header.blade.php
-- components/panel.blade.php
-- components/button.blade.php
-- components/status.blade.php
-- components/alert.blade.php
-- components/empty.blade.php
-- components/table.blade.php
-- components/cell.blade.php
-- components/pagination.blade.php
-- components/input.blade.php
-- components/select.blade.php
-- components/textarea.blade.php
-- components/checkbox.blade.php
-- components/confirmation.blade.php
-- components/validation-summary.blade.php
-- date/money components if needed.
-
-Create a reusable breadcrumb component.
-
-### Shared product partials
-
-Review:
-
-- shared/group-form.blade.php
-- shared/group-data.blade.php
-- shared/group-summary.blade.php
-- shared/group-history.blade.php
-- shared/application-list.blade.php
-- shared/application-detail.blade.php
-- shared/application-counters.blade.php
-- shared/profile-data.blade.php
-- shared/documents.blade.php
-- shared/payment-data.blade.php if present.
-
-### Psychologist pages
-
-Review all:
-
-- psychologist/groups/index.blade.php
-- psychologist/groups/form.blade.php
-- psychologist/groups/show.blade.php
-- psychologist/groups/extension.blade.php
-- psychologist/applications/index.blade.php
-- psychologist/applications/show.blade.php
-- psychologist/profile/show.blade.php
-- psychologist/payments/placement.blade.php
-- psychologist/payments/return.blade.php
-
-### Admin pages
-
-Review all:
-
-- admin/home.blade.php
-- admin/users/index.blade.php
-- admin/users/show.blade.php
-- admin/users/form.blade.php
-- admin/users/documents.blade.php
-- admin/groups/index.blade.php
-- admin/groups/show.blade.php
-- admin/groups/form.blade.php
-- admin/applications/index.blade.php
-- admin/applications/show.blade.php
-- admin/payments/index.blade.php
-- admin/payments/show.blade.php
-- admin/dictionaries/index.blade.php
-- admin/dictionaries/items.blade.php
-- admin/settings/index.blade.php
-
-### Public/system pages
-
-Review:
-
-- auth/login.blade.php
-- auth/password.blade.php
-- errors/403.blade.php
-- errors/404.blade.php
-- errors/419.blade.php
-- errors/429.blade.php
-- errors/500.blade.php
-- shared/notices.blade.php
-- prototype/index.blade.php only enough to keep it usable.
-
-### Presenters only when needed
-
-Prefer not to inspect backend.
-
-Allowed focused support classes:
-
-- App\Support\GroupPages
-- App\Support\ApplicationPages
-- App\Support\PsychologistPages
-- App\Support\PsychologistCabinetPages
-- PrototypeFixtures only when a prototype cannot render after UI changes.
-
-Do not wander into domain services/controllers/tests unless a visible bug requires understanding existing data.
-
-## Local Browser Access
-
-Base URL:
-
-http://localhost:8080/cabinet
-
-Accounts:
-
-- admin@gruppa.test / password
-- psychologist@gruppa.test / password
-
-Use current local synthetic data.
-
-Do not mutate domain data just to manufacture every rare state.
-
-Use prototype pages for rare states.
-
-## Representative Browser Audit Routes
-
-### Public
-
-- /cabinet/login
-
-### Psychologist real
-
-- /cabinet/
-- /cabinet/profile
-- one real /cabinet/groups/{id}
-- one real /cabinet/groups/{id}/edit
-- one real /cabinet/groups/{id}/extension
-- one real /cabinet/groups/{id}/applications
-- one real application detail
-
-### Admin real
-
-- /cabinet/admin
-- /cabinet/admin/psychologists
-- one psychologist detail
-- one psychologist edit
-- documents
-- /cabinet/admin/groups
-- one group detail
-- one group edit
-- /cabinet/admin/applications
-- one application detail
-- /cabinet/admin/dictionaries
-- one dictionary items page
-- /cabinet/admin/settings
-- /cabinet/admin/payments
-
-## Prototype Coverage
-
-Inspect at least one representative state for every distinct prototype-only page group.
-
-Prioritize:
-
-- login validation/error;
-- password normal/validation/expired;
-- system errors;
-- notices/confirmation;
-- group revision/rejected/warning/expired/outside-window;
-- group form validation/long;
-- placement;
-- payment pending/success/result;
-- extension free/paid/outside-window;
-- application long/processed;
-- admin group moderation/validation/paid-rejected;
-- admin applications long;
-- admin payment detail/refund states;
-- dictionary used/deactivated;
-- settings validation.
-
-Do not inspect every permutation once shared components are stable.
-
-## Implementation Order
-
-### Pass 1 — establish design system
-
-Before page-by-page fixes:
-
-- spacing tokens;
-- typography tokens;
-- color tokens;
-- radii/borders/shadows;
-- link states;
-- button system;
-- icon system;
-- status system;
-- alert system;
-- focus system;
-- global content widths.
-
-### Pass 2 — application shell and wayfinding
-
-Implement/fix:
-
-- public shell;
-- psychologist shell;
-- admin shell;
-- responsive nav;
-- breadcrumb component;
-- page-header pattern;
-- back/context pattern.
-
-### Pass 3 — shared patterns
-
-Fix:
-
-- forms;
-- tables/lists/cards;
-- details;
-- filters;
-- pagination;
-- empty states;
-- confirmation modals;
-- timeline/history;
-- documents;
-- counters.
-
-### Pass 4 — psychologist pages
-
-Walk full flows and fix page-specific issues.
-
-### Pass 5 — admin pages
-
-Walk full flows and fix page-specific issues.
-
-### Pass 6 — prototype/future surfaces
-
-Apply the new system to not-yet-real payment/password/error states.
-
-### Pass 7 — responsive and interaction polish
-
-Validate all representative pages at:
-
-- 1440;
-- 1024;
-- 390.
-
-Check hover/focus/active states, wrapping and modal behavior.
-
-## Do Not Overdesign
-
-The application is a professional working cabinet.
-
-Avoid:
-
-- glassmorphism;
-- gradients everywhere;
-- huge decorative hero sections;
-- excessive animation;
-- excessive shadow;
-- excessive border-radius;
-- oversized icons;
-- playful consumer-app patterns;
-- icon-only interfaces that hurt clarity;
-- decorative dashboard charts without product value.
-
-Prefer calm, precise, work-oriented design.
-
-## UI JS Rules
-
-Use JavaScript only for interaction that cannot reasonably be done with HTML/Bootstrap:
-
-- existing copy feedback;
-- minimal progressive enhancement;
-- optional responsive navigation behavior if Bootstrap does not already solve it.
-
-No SPA behavior.
-No client-side business logic.
-No dependency.
-
-## Required Browser/Interaction Checks
-
-For each representative interactive component verify:
-
-- pointer hover;
-- keyboard focus;
-- active/current state;
-- disabled state if applicable;
-- click/tap target;
-- mobile wrapping.
-
-At minimum manually inspect:
-
-### 1440
-
-- psychologist groups;
-- group form;
-- profile;
-- admin psychologists;
-- admin group detail;
-- admin applications;
-- dictionaries;
-- settings.
-
-### 1024
-
-- psychologist group detail;
-- psychologist applications;
-- admin groups;
-- admin psychologist detail;
-- admin applications;
-- payments info.
-
-### 390
-
-- login;
-- psychologist groups;
-- group form;
-- group detail;
-- application list;
-- application detail;
-- profile/documents;
-- admin navigation;
-- admin psychologists;
-- admin group detail/moderation;
-- admin applications;
-- dictionary items;
-- settings;
-- one confirmation modal;
-- one validation-error form.
-
-## Tests / Verification Strategy
-
-Do not rerun the entire suite after every CSS change.
-
-During work:
-
-- use browser iteration;
-- run targeted prototype/UI tests after shared component changes;
-- run view:cache after larger Blade edits.
-
-Before commit run:
-
-1. docker compose exec -T php php artisan test
-2. docker compose exec -T php ./vendor/bin/pint --test
-3. docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
-4. docker compose exec -T php composer check-platform-reqs
-5. docker compose exec -T php php artisan view:cache
-
-Also verify:
-
-- all 31 / 249 prototype routes/tests remain green;
-- production still excludes prototype/foundation routes;
-- no real route/business semantics changed;
-- browser console has no new JS errors;
-- no page-level horizontal overflow at 390 on representative pages;
-- icon assets load under /cabinet base path;
-- no external CDN request is used for the icon library.
-
-## Required .ai/report.md
-
-Keep the report concise but complete.
+It must be usable by the developer of the existing public site without reading cabinet source code.
 
 Include:
 
-### Status
-done / partial / blocked / failed.
+- architecture/server-to-server flow;
+- production base URL;
+- local development base URL;
+- unknown staging URL marked configurable/not invented;
+- required headers;
+- timestamp window;
+- exact HMAC algorithm;
+- exact request-id behavior;
+- JSON error envelope;
+- endpoint 1 psychologist multipart contract;
+- questionnaire field names/types;
+- `education_type_code` mapping;
+- document multipart naming and allowed types/MIME/size;
+- repeat-email matrix;
+- endpoint 2 group application JSON contract;
+- group_uuid and public-site `cabinet_group_uuid` responsibility;
+- explicit statement: never send psychologist_id/owner_id;
+- response/status examples;
+- error code table;
+- idempotent retry instructions;
+- multipart signing instructions: serialize body once, HMAC those exact bytes, send the same bytes and Content-Type boundary;
+- example signing code/pseudocode;
+- curl/test examples that do not contain real secrets or personal data;
+- operational notes for rate limit/IP allowlist.
 
-### Design system
-Final:
-- spacing;
-- typography;
-- color;
-- surface;
-- radius;
-- action;
-- status;
-- icon;
-- responsive direction.
+### 17. Environment/development documentation
 
-### Navigation / wayfinding
-Describe:
-- new breadcrumb rules;
-- back/cancel conventions;
-- admin/psychologist nav changes;
-- dead-end pages fixed.
+Update `docs/development.md` and `.env.example` for integration config.
 
-### System-level fixes
-Summarize:
-- components;
-- forms;
-- lists/tables;
-- detail pages;
-- alerts;
-- states;
-- focus/hover;
-- mobile.
+Use placeholders only.
 
-### Page-family fixes
-Psychologist:
-- groups;
-- group form/detail/extension;
-- applications;
-- profile/documents;
-- future payment views.
+Document a local synthetic secret for manual testing as a user-supplied shell env example, not a committed credential.
 
-Admin:
-- home;
-- psychologists;
-- groups/moderation;
-- applications;
-- payments;
-- dictionaries;
-- settings.
+### 18. Project/UI documentation
 
-Public/system:
-- login/password;
-- errors;
-- notices.
+Update:
 
-### Icon library
-Exact Bootstrap Icons version and local asset paths.
+- `docs/project-status.md` — Stage 11 implemented, Stage 12+ pending;
+- `docs/ui-pages.md` only if needed to state that no new UI page was introduced and incoming data feeds existing Stage 5/10 screens;
+- `docs/architecture.md` — integration middleware/idempotency/service boundaries and safe logging.
 
-### Remaining issues
-Only unresolved UI issues.
+Preserve the current redesigned UI. Do not perform visual refactoring in this backend milestone.
 
-### Verification
-Exact automated checks and representative browser widths/routes.
+## Out Of Scope
 
-### Files changed
-Grouped by:
-- foundation/assets;
-- components/layouts;
-- psychologist;
-- admin;
-- public/prototypes;
-- support/tests/docs/report.
+Do NOT implement:
 
-Do not write a long chronological diary.
+- changes to the separate public-site repository/code;
+- browser-to-cabinet API calls;
+- CORS-based public browser integration;
+- password setup emails;
+- password reset/setup tokens;
+- admin resend setup email;
+- expiry warning email/jobs;
+- SMTP;
+- Stage 12;
+- WEBPAY;
+- placement payment;
+- paid extension;
+- refund behavior;
+- new application UI;
+- new psychologist UI;
+- UI redesign;
+- production deployment.
+
+Do not send an email when an admin later approves an API-created psychologist; Stage 12 owns that behavior.
+
+## Constraints
+
+- Follow WORKFLOW.md and AGENTS.md.
+- Work from current HEAD `ccd546b0a484e085345aa8ddd30bc00123d05288`.
+- Keep current Stage 10 design/UI baseline.
+- HMAC verification uses raw request bytes and `hash_equals`.
+- Timestamp tolerance defaults to 300 seconds.
+- Durable idempotency is MySQL-backed.
+- Do not store raw integration payloads in the idempotency journal.
+- Do not log PII/files/secrets/signatures.
+- Integration secret exists only in env/config.
+- Internal IDs are not part of the public group-application contract.
+- Public group association is only through immutable `public_uuid`.
+- Questionnaire education dictionary is addressed by stable code, not ID.
+- Files remain private.
+- Money/payment code is untouched.
+- Tests use MySQL only.
+- No npm/Vite/frontend framework.
+- No real participant/psychologist data or real secret in fixtures/docs.
+- Do not alter `.ai/task.md`.
+
+## Tests
+
+All integration tests run on the project MySQL testing database.
+
+Cover at minimum:
+
+### Protocol/authentication
+
+- valid signature accepted;
+- missing signature;
+- invalid signature;
+- correct signature for a different body rejected;
+- missing timestamp;
+- malformed timestamp;
+- timestamp exactly -300/+300 seconds accepted;
+- ±301 rejected;
+- missing request ID;
+- invalid/too-long request ID;
+- secret missing fails closed;
+- optional allowlist behavior;
+- rate limit returns unified 429;
+- all rejections JSON, not HTML/redirect;
+- safe log context and explicit absence of body/PII/secret/full signature.
+
+### Idempotency
+
+- first request stores completed response;
+- exact duplicate returns same status/body;
+- duplicate does not rerun business logic;
+- same ID different endpoint -> 409;
+- same ID different semantic body -> 409;
+- multipart duplicate with different boundary but identical fields/files replays successfully;
+- concurrent duplicate application creates one row;
+- concurrent duplicate psychologist creates/updates once;
+- failed business transaction does not leave a completed poisoned idempotency result;
+- journal contains no raw payload or file bytes.
+
+### Psychologist intake
+
+- valid new signed multipart -> 201 pending;
+- visible in admin pending list;
+- internal fields cannot be supplied;
+- email trim/lower normalization;
+- consent required;
+- education_type_code maps correct dictionary;
+- wrong/unknown/inactive code rejected;
+- same existing inactive education code accepted on repeat;
+- valid document types/MIME/size;
+- content MIME spoof rejected;
+- files private with random paths;
+- no public URL;
+- zero-doc request works;
+- multiple docs work;
+- failure cleans newly stored files.
+
+Repeat matrix:
+- pending -> update + append docs + 200;
+- rejected -> update + domain transition to pending + append docs + 200;
+- approved -> 409/no mutation;
+- disabled -> 409/no mutation;
+- soft-deleted -> 409/no restore/new row;
+- repeat never changes free/admin/disabled/password except rejected->pending status rule;
+- concurrent same-email submissions do not expose duplicate-key 500.
+
+### Group application intake
+
+- valid active/enabled public_uuid -> 201;
+- exact gp_group_applications.group_id is matched group internal id;
+- owner derives only from group relationship;
+- psychologist_id/owner_id/group_id input rejected;
+- phone normalized using existing service;
+- unknown UUID -> 404 JSON;
+- soft-deleted group -> 404;
+- draft/moderation/revision/rejected/approved/expired -> 422;
+- disabled active -> 422;
+- duplicate request ID creates one application;
+- different request IDs can create separate applications;
+- Stage 10 owner/admin UI and counters see the created application;
+- foreign owner still gets 404/denied through existing cabinet routes.
+
+### Side effects/regression
+
+- no email sent/queued;
+- no password tokens created;
+- no payment rows;
+- no group status transition;
+- Stage 4–10 full regression green;
+- scheduler definitions unchanged;
+- current UI/prototype suite remains green;
+- API routes exist in production;
+- prototype routes remain production-isolated.
+
+## Runtime / Manual Verification
+
+Using Docker and only synthetic data:
+
+1. Set a temporary local `INTEGRATION_SECRET` through runtime env/config; do not commit it.
+2. Create/ensure an active dictionary education_type item.
+3. Send a correctly signed multipart `POST /cabinet/api/v1/psychologists`.
+4. Verify pending psychologist appears in real admin UI and private documents open through existing protected admin route.
+5. Retry same logical multipart with the same request ID and confirm no duplicate user/document.
+6. Exercise pending/rejected repeat behavior.
+7. Verify approved/disabled/deleted conflict responses.
+8. Identify/create a synthetic active group and copy its real public_uuid.
+9. Send signed JSON group application using that UUID.
+10. Verify it appears in real owner group application list/counter and admin application list.
+11. Retry same request ID -> no duplicate.
+12. Send unknown/inactive/disabled group cases.
+13. Send bad signature/stale timestamp/missing request-id/rate-limit cases.
+14. Inspect application logs and journal rows for absence of PII/raw payload/secrets.
+15. Confirm no mail/jobs/payments/unrelated lifecycle effects.
+
+Do not modify the separate public site as part of this repository task.
+
+## Required Checks
+
+Run and report exact results:
+
+1. `docker compose ps`
+2. non-destructive migrate/seed
+3. focused Stage 11 integration tests
+4. concurrency/idempotency tests on MySQL
+5. route inspection for API/web/prototype boundaries
+6. manual signed test-client/curl flow
+7. storage/private document inspection
+8. log redaction inspection
+9. `docker compose exec -T php php artisan test`
+10. `docker compose exec -T php ./vendor/bin/pint --test`
+11. `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
+12. `docker compose exec -T php composer check-platform-reqs`
+13. `docker compose exec -T php php artisan view:cache`
+14. `git diff --check`
+15. inspect final diff/staged files
+16. confirm no real secret, PII, uploaded files, logs, screenshots or browser artifacts are staged
+
+## Required .ai/report.md
+
+Include:
+
+- Status;
+- exact API routes;
+- HMAC/timestamp contract;
+- limiter/IP allowlist behavior;
+- idempotency table/schema and replay/conflict behavior;
+- unified response/error format;
+- psychologist create/repeat matrix;
+- document storage/rollback behavior;
+- group application lookup/owner derivation;
+- safe logging evidence;
+- no-email/no-WEBPAY evidence;
+- migrations/config/docs added;
+- exact test/check results;
+- manual signed request evidence;
+- Facts / Assumptions / Unknowns;
+- remaining external work for the public-site developer.
+
+Do not include the integration secret or real payloads in the report.
 
 ## Acceptance Criteria
 
-1. All real application page families have been visually audited.
-2. All 31 distinct prototype page groups inherit the new design system and remain functional.
-3. Every nested/detail/edit page has appropriate breadcrumbs/contextual navigation.
-4. No user must rely on browser Back to leave a page.
-5. No material navigation dead end remains.
-6. Global admin navigation is clear, compact and responsive.
-7. Psychologist navigation is clear and lightweight.
-8. Bootstrap Icons is locally integrated with no CDN/npm runtime.
-9. Icon use is consistent and accessible.
-10. Spacing follows a coherent token system.
-11. Typography has a consistent semantic/visual hierarchy.
-12. Links/buttons have clear hover/focus/active states.
-13. Current navigation and pagination states are obvious.
-14. Primary/secondary/destructive action hierarchy is consistent.
-15. Forms have coherent grouping, labels, errors and save/submit hierarchy.
-16. Lists/tables are scan-friendly and use appropriate density.
-17. Detail pages are not repetitive stacks of identical panels.
-18. Status/lifecycle presentation is consistent and easy to understand.
-19. Alerts/notices are proportional to importance.
-20. Empty/no-result/unavailable states are clear and actionable only when appropriate.
-21. Confirmation/destructive flows are consistent and fit mobile.
-22. Breadcrumbs, navigation and actions use correct semantic HTML.
-23. Focus-visible states are usable with keyboard navigation.
-24. Long Russian text, email, UUID and phone values wrap safely.
-25. 390px representative pages have no page-level horizontal overflow.
-26. Mobile pages are intentionally composed, not merely stacked desktop UI.
-27. 1024px tablet layouts remain practical.
-28. 1440px layouts use space efficiently without over-wide text.
-29. Business form field names/values/CSRF/method spoofing remain correct.
-30. Accepted business/domain/auth/lifecycle/application behavior is unchanged.
-31. No Stage 11+ functionality is introduced.
-32. Prototype routes remain development/testing-only.
-33. Full MySQL test suite passes.
-34. Pint passes.
-35. Larastan passes.
-36. Composer platform check passes.
-37. Blade compilation passes.
-38. Browser console has no new errors.
-39. No external icon CDN/request is introduced.
-40. .ai/report.md documents the completed design audit/refactor and any remaining issues.
-41. Final diff contains only justified UI/design assets, minimal presenter/UI test/docs changes and report.
-42. No secrets, real personal data, browser artifacts or screenshots are committed.
+1. `POST /cabinet/api/v1/psychologists` exists in production.
+2. `POST /cabinet/api/v1/group-applications` exists in production.
+3. API routes are stateless and do not use web session/CSRF auth.
+4. Valid raw-body HMAC-SHA256 signature is required.
+5. Signature comparison uses `hash_equals`.
+6. Timestamp ±300s boundary behavior is correct.
+7. Required `X-Request-Id` is validated.
+8. Dedicated configurable rate limiter works.
+9. Optional configured IP allowlist works without hardcoded production IPs.
+10. All API failures use the unified JSON envelope.
+11. API unexpected exceptions never expose internals.
+12. Technical integration logs contain no questionnaire/application payload, PII, files, secrets or full signatures.
+13. Durable MySQL idempotency journal exists and stores no raw payload.
+14. Duplicate same request ID/request returns original response.
+15. Duplicate ID with different semantic request returns 409.
+16. Concurrent duplicate requests produce exactly one business effect.
+17. New questionnaire creates exactly one pending non-admin enabled paid-default user and sends no email.
+18. Public request cannot set lifecycle/access/tariff/password/internal fields.
+19. education_type is addressed by stable external code and correctly resolves internally.
+20. Valid multipart documents are stored privately using existing policy.
+21. Failed multipart transaction leaves no orphan newly uploaded files.
+22. Pending repeat updates questionnaire and appends documents.
+23. Rejected repeat returns user to pending through the domain transition boundary.
+24. Approved repeat is 409 without mutation.
+25. Disabled repeat is 409 without mutation.
+26. Soft-deleted email is 409 without restore/new user.
+27. Repeat submission never changes free/admin/access/password fields.
+28. Valid group application uses only group_uuid/public_uuid lookup.
+29. Caller cannot choose psychologist/owner/internal group id.
+30. Unknown or soft-deleted group UUID returns 404.
+31. Non-active or disabled group returns 422.
+32. Phone normalization reuses Stage 10 PhoneNormalizer.
+33. Valid application appears immediately in existing Stage 10 owner/admin UI and counters.
+34. Idempotent application replay creates no duplicate.
+35. No Stage 11 flow sends email/queues onboarding mail.
+36. No Stage 11 flow creates payment or changes group lifecycle.
+37. `docs/integration.md` is sufficient for the public-site developer and includes full production URLs, HMAC, multipart signing, request-id retry, `cabinet_group_uuid`, and no psychologist_id rule.
+38. Current redesigned Stage 10 UI is preserved.
+39. Stage 4–10 regression remains green.
+40. Full MySQL suite passes.
+41. Pint passes.
+42. Larastan passes.
+43. Composer platform check passes.
+44. Blade compilation passes.
+45. Prototype production isolation remains correct.
+46. Final diff is limited to Stage 11 API/security/idempotency/intake/storage/config/tests/docs/report.
+47. No secret, real PII or unrelated artifact is committed.
 
 ## Hard Workflow Gate
 
-Before editing:
+Before changing files:
 
-- confirm current base is e96ce0a8c41282827513f9b3fb6fea3f140dacce;
-- run git log --oneline -5;
-- run git status --short;
-- review unknown local changes before touching files;
-- read only the focused files listed above first.
+- read WORKFLOW.md;
+- read AGENTS.md;
+- read this `.ai/task.md`;
+- read SPEC only around §4.10, §5–6, §17–18 and Stage 11;
+- read current `docs/project-status.md`;
+- inspect current `bootstrap/app.php`, models, `PhoneNormalizer`, `PsychologistDocuments`, dictionary conventions and current Stage 10 application flow;
+- run `git log --oneline -5`;
+- run `git status --short`;
+- confirm base `ccd546b0a484e085345aa8ddd30bc00123d05288`;
+- do not overwrite unknown local changes.
 
-During work:
+During implementation:
 
-- audit and fix immediately;
-- fix shared systemic problems before page-specific patches;
-- use the scorecard consistently;
-- do not change backend/business behavior;
-- do not implement Stage 11;
-- do not edit .ai/task.md;
-- do not modify SPEC/WORKFLOW/AGENTS.
+- stay strictly in Stage 11;
+- do not implement Stage 12 email/password setup;
+- do not implement WEBPAY;
+- do not redesign UI;
+- keep incoming API stateless;
+- keep public contract independent from internal database IDs;
+- do not log sensitive request data;
+- do not edit `.ai/task.md`;
+- do not edit SPEC/WORKFLOW/AGENTS.
 
 Before commit:
 
-- inspect full diff;
-- remove temporary browser/debug artifacts;
-- update .ai/report.md;
-- run all required checks;
-- stage only justified task files.
+- run all required automated checks;
+- execute real signed synthetic requests;
+- inspect idempotency rows/logs/private storage;
+- inspect complete diff and staged files;
+- remove temporary secrets, uploaded smoke files and artifacts;
+- update `.ai/report.md`;
+- stage only Stage 11 files + report.
 
 Completion:
 
-- Status: done only if the full design audit/refactor and checks are complete;
+- use Status: done only if every acceptance criterion is satisfied;
 - otherwise partial / blocked / failed.
 
 If complete, commit with:
 
-codex: TASK-2026-09-21-09 audit and refactor application design
+`codex: TASK-2026-09-21-10 implement signed incoming integrations`
 
 Do not create an accept commit.
