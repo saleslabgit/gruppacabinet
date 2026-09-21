@@ -70,7 +70,7 @@ nested-owner view/download/delete endpoints. Uploads have a configurable
 10 MiB technical ceiling. No email or password invitation is sent.
 
 The same Blade files retain all 31 prototype groups / 249 variants. Real admin
-navigation offers Home, Psychologists, Groups and Logout. New MySQL tests cover CRUD,
+navigation now also exposes Payments, Dictionaries and Settings (Stage 8). New MySQL tests cover CRUD,
 protected fields, audit, session revocation, IDOR, file failures and constant
 list query counts. No migrations or dependencies were added.
 
@@ -103,16 +103,33 @@ copy/reminder is available before activation. Owner draft/rejected deletion and
 admin abandoned-draft deletion are soft deletes with historical payment safety.
 Lists use eager loading, filters/search, deterministic sorting and pagination;
 payment/application queries are excluded from normal listing. Applications are
-unavailable, and payments/extensions have no real routes or links.
+unavailable; payment operations and extensions have no real routes or links.
+Stage 8 adds only an informational admin payment-list route.
 
 MySQL coverage includes both tariffs, history/atomicity, IDOR, immutability,
 validation/dictionaries/integer money, activation, deletion and query counts.
-Stages 8+ (dictionary/settings administration, lifecycle automation,
-applications, external integration, mail and payments) remain pending.
+Stage 8 adds dictionary/settings administration and an informational payment page.
+Stages 9+ (lifecycle automation, applications, external integration, mail and
+payments) remain pending.
+
+## Stage 8 dictionaries, settings and payment information
+
+Real admin routes reuse the approved dictionary/item/settings/payment-list views.
+Containers and items have stable create-only codes, validated CRUD, pagination,
+scoped ownership and confirmed deletion/deactivation. Core containers and all
+historically used values are protected; soft-deleted references count. New and
+reactivated items appear immediately in existing Stage 5/7 forms, and inactive
+current selections remain visible.
+
+The seven typed settings now have a transactional write boundary with minimal
+actor/old/new audit and cache invalidation after commit. BYN prices use integer
+minor units; nullable values round-trip. Placement duration affects later
+activations only. The real Payments route is informational and performs no
+payment table query, provider call or mutation. All 249 prototype variants remain.
 
 ## Intentionally not implemented
 
-No psychologist profile editing or document mutations, payment/dictionary/settings CRUD,
+No psychologist profile editing or document mutations, payment CRUD,
 public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 
@@ -121,7 +138,7 @@ requests, signatures, credentials, callbacks, and payment effects are present.
 - Local execution requires a working Docker Engine and Compose plugin.
 - Placement and extension prices remain intentionally unconfigured until the
   product values are supplied.
-- Dictionary item display values remain empty until approved values are
-  supplied.
+- Seeds still contain no dictionary item display values. Administrators can add
+  local synthetic examples or approved values through the Stage 8 UI.
 - Production hosting, queue-worker operation, SMTP, public-site integration,
   and WEBPAY remain unverified and belong to later stages.

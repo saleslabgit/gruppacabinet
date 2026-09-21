@@ -256,3 +256,60 @@ Real Stage 7 views expose neither payment/extension actions nor application
 links/counters. Applications are explicitly unavailable. There are no payment
 writes or transitions to awaiting_payment. Prototype fixtures and their no-op
 variants remain available only in local/testing using the same Blade files.
+
+## Stage 8 dictionary administration and business settings
+
+`admin.dictionaries.*`, `admin.settings.*` and the GET-only `admin.payments.index`
+use the existing account/admin middleware. DictionaryPolicy and SettingPolicy
+require an approved, enabled, non-deleted administrator. Nested dictionary/item
+routes use scoped model bindings through `Dictionary::items`; a mismatched
+parent/item pair returns 404 before any mutation.
+
+Dictionary codes are create-only lowercase `[a-z0-9_]` identifiers (64 characters).
+Names remain editable. The core containers `education_type`, `group_format`,
+`gender` cannot be deleted; custom containers must be empty. Item codes are
+unique within their parent and immutable through update requests. Explicit
+field allowlists exclude IDs, timestamps and foreign parent reassignment.
+Lists paginate 20 rows, with code/ID or sort_order/ID ordering; counts and usage
+are selected with subqueries rather than queries from Blade.
+
+`DictionaryUsage` centralizes current schema references: education_type →
+users.education_type_id, group_format → groups.format_id, gender → groups.gender_id.
+Its queries deliberately include soft-deleted records. `DictionaryManagement`
+locks the parent/item and checks usage inside its transaction; existing RESTRICT
+foreign keys also prevent a concurrent reference from being silently removed.
+Used items can be deactivated, never physically deleted. Unused items and empty
+custom containers require explicit destructive confirmation. Activation is
+idempotent. Editing an active item to inactive also requires confirmation.
+Existing Stage 5/7 form queries immediately see additions/reactivation, hide
+inactive items for new records, and preserve current inactive selections.
+
+`SettingService::update(array $values, User $actor)` accepts exactly the seven
+known keys with normalized PHP integers (null only for the two prices). It locks
+existing rows in ID order, rejects missing rows/unknown keys/invalid types, and
+writes integer values and minimal `setting.updated` AuditService entries in one
+transaction. Metadata contains only key/old_value/new_value; unchanged values
+produce no audit. Cache invalidation is registered with DB::afterCommit, including
+when called inside an outer transaction. Reads within a transaction bypass the
+shared cache so uncommitted values cannot leak into it; normal committed reads
+retain the typed cached boundary. Tests of cache persistence and invalidation
+use real commits rather than RefreshDatabase's enclosing test transaction.
+
+Human BYN input is parsed by BynAmount using decimal strings, with comma or dot
+and at most two fraction digits; there is no float conversion. The maximum is
+PHP_INT_MAX minor units. sort_order is bounded by MySQL unsigned INT (4294967295).
+Duration/count inputs are positive PHP integers, warning days must be less than
+placement days. The placement duration has a technical maximum of whole days
+remaining until MySQL TIMESTAMP's 2038-01-19 03:14:07 UTC ceiling at save time.
+This is a storage/date boundary, not a product limit. Existing active group
+snapshots are never rewritten; later activation reads the saved duration.
+
+The shared confirmation accepts an optional existing form ID. Its submit button
+belongs to that form and sends `confirmed=1`, preserving CSRF, method override,
+all edited fields and browser validation without nested forms. Previous URL-based
+confirmations and prototype no-op behavior remain supported.
+
+The real Payments view is an informational pre-WEBPAY surface, with no filters,
+synthetic rows, detail/refund links or mutations. Rendering does not query payment
+or notification tables. Settings changes do not create or modify payments/groups,
+and the temporary Stage 7 no-payment path for both tariffs remains unchanged.

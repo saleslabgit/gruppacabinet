@@ -246,3 +246,29 @@ Also run the full test suite, Pint, Larastan, platform requirements and Blade
 compilation listed above. Browser checks cover both tariffs, rejection, IDOR,
 UUID copying, abandoned cutoff, and list/form/detail/moderation at 1440/1024/390.
 Use only synthetic verification data; keep screenshots/scripts outside Git.
+
+## Stage 8: manage local dictionaries and settings
+
+Log in as the seeded local administrator, then open **Справочники**. Open each
+of `education_type`, `group_format` and `gender` and add synthetic local values
+with stable lowercase codes (letters, digits, underscore). They immediately
+appear in psychologist/group creation forms; no seed rerun or source edit is
+needed. These local examples are not approved production dictionary content.
+
+Edit changes names/order/active state; codes cannot change. Deactivation requires
+confirmation and hides a value from new forms, while records already using it
+retain their selection. Reactivation restores it. Delete is offered only for
+unused values and empty custom containers; core containers remain protected.
+Soft-deleted users/groups still count as usage.
+
+Open **Настройки** to edit both prices in BYN (`50`, `50.0`, `50,00`) and all five
+integer timing settings. Blank price means unconfigured, not zero. Confirm the
+save in the modal. Validation retains entered values and shows field errors.
+Warning days must be smaller than placement days. Technical integer/date bounds
+are documented in architecture.md. Settings and their old/new audit values commit
+together; no payment is created. Changing placement duration affects later
+activations and leaves existing group dates intact.
+
+**Платежи** displays only “Платежи ещё не подключены”. There is no provider setup,
+payment detail, refund or payment mutation at this stage. Applications, lifecycle
+automation and WEBPAY remain later milestones.

@@ -1,11 +1,15 @@
 <?php
 
+use App\Http\Controllers\Admin\DictionaryController;
+use App\Http\Controllers\Admin\DictionaryItemController;
 use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
+use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Psychologist\GroupController;
 use App\Http\Controllers\Psychologist\ProfileController;
 use App\Http\Controllers\SessionController;
+use App\Support\PsychologistPages;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
@@ -64,6 +68,27 @@ Route::middleware(['account', 'role:admin'])->prefix('admin/groups')->name('admi
         Route::post('/{group}/'.$action, [$controller, 'action'])->name($action);
     }
     Route::delete('/{group}', [$controller, 'action'])->name('destroy');
+});
+
+Route::middleware(['account', 'role:admin'])->prefix('admin')->name('admin.')->scopeBindings()->group(function (): void {
+    $dictionaries = DictionaryController::class;
+    $items = DictionaryItemController::class;
+    Route::get('/dictionaries', [$dictionaries, 'index'])->name('dictionaries.index');
+    Route::post('/dictionaries', [$dictionaries, 'store'])->name('dictionaries.store');
+    Route::get('/dictionaries/{dictionary}/edit', [$dictionaries, 'index'])->name('dictionaries.edit');
+    Route::put('/dictionaries/{dictionary}', [$dictionaries, 'update'])->name('dictionaries.update');
+    Route::delete('/dictionaries/{dictionary}', [$dictionaries, 'destroy'])->name('dictionaries.destroy');
+    Route::get('/dictionaries/{dictionary}/items', [$items, 'index'])->name('dictionaries.items.index');
+    Route::post('/dictionaries/{dictionary}/items', [$items, 'store'])->name('dictionaries.items.store');
+    Route::get('/dictionaries/{dictionary}/items/{item}/edit', [$items, 'index'])->name('dictionaries.items.edit');
+    Route::put('/dictionaries/{dictionary}/items/{item}', [$items, 'update'])->name('dictionaries.items.update');
+    foreach (['activate', 'deactivate'] as $action) {
+        Route::post('/dictionaries/{dictionary}/items/{item}/'.$action, [$items, 'action'])->name('dictionaries.items.'.$action);
+    }
+    Route::delete('/dictionaries/{dictionary}/items/{item}', [$items, 'action'])->name('dictionaries.items.destroy');
+    Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
+    Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
+    Route::get('/payments', fn () => view('admin.payments.index', PsychologistPages::layout('Платежи') + ['realPayments' => true]))->name('payments.index');
 });
 
 if (app()->environment(['local', 'testing'])) {

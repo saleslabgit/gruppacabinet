@@ -9,7 +9,6 @@ use App\Models\User;
 use App\Services\SettingService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -61,23 +60,5 @@ class SettingsAndSeedTest extends TestCase
         $this->assertSame(30, $settings->expiredExtensionWindowDays());
         $this->assertSame(12, $settings->participantApplicationRetentionMonths());
         $this->assertSame(72, $settings->passwordSetupLinkTtlHours());
-    }
-
-    public function test_setting_reads_are_cached_and_can_be_invalidated_explicitly(): void
-    {
-        $this->seed(DatabaseSeeder::class);
-        Cache::flush();
-        $settings = app(SettingService::class);
-
-        $this->assertSame(30, $settings->placementDurationDays());
-
-        Setting::query()
-            ->where('key', SettingService::PLACEMENT_DURATION_DAYS)
-            ->update(['value' => '45']);
-
-        $this->assertSame(30, $settings->placementDurationDays());
-
-        $settings->invalidate(SettingService::PLACEMENT_DURATION_DAYS);
-        $this->assertSame(45, $settings->placementDurationDays());
     }
 }

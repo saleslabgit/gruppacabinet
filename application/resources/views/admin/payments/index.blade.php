@@ -1,5 +1,8 @@
 @extends('layouts.admin')
 @section('content')
+@if($realPayments ?? false)
+<x-empty title="Платежи ещё не подключены" text="После подключения WEBPAY здесь появятся платежи. Сейчас создание групп и изменение настроек не создают платежей." />
+@else
 <x-panel title="Поиск платежей" :compact="true" class="panel-compact">
 <form data-prototype-form>
 <x-input name="search" label="Номер заказа или транзакции" />
@@ -59,5 +62,6 @@
 </tr>
 </x-table>
 <x-pagination :pages="$pages" :current="$currentPage" />
+@endif
 @endif
 @endsection

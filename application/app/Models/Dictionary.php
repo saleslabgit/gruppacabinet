@@ -11,6 +11,7 @@ class Dictionary extends Model
 
     protected $guarded = ['id'];
 
+    /** @return HasMany<DictionaryItem, $this> */
     public function items(): HasMany
     {
         return $this->hasMany(DictionaryItem::class);

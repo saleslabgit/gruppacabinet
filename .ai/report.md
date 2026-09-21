@@ -1,180 +1,177 @@
-# Report: TASK-2026-09-21-05
+# Report: TASK-2026-09-21-06
 
 Status: done
 
 ## Summary
 
-Реализован Stage 7: реальные группы психолога и администратора, анкета,
-модерация, полная история, ручная активация и безопасное soft delete.
-Оба тарифа начинают с draft и проходят весь цикл без платежей.
-Утверждённые Blade-страницы подключены к данным; CSS и prototype-каталог не менялись.
+Реализован Stage 8: административное управление справочниками/элементами,
+семью бизнес-настройками и информационная страница платежей до WEBPAY.
+Использованы существующие утверждённые Blade views и CSS; параллельных страниц,
+миграций, зависимостей и frontend build tools не добавлено.
 
-База задачи подтверждена: `2b9ff579d91c69cc2d7a6ecae6438415f93f06e1`;
-исходный HEAD — `980a65e` (актуальный planner), рабочая директория была чистой.
-`.ai/task.md`, SPEC.md, WORKFLOW.md и AGENTS.md не изменены.
+- 15 реальных маршрутов под account + role:admin: контейнеры и вложенные items,
+  GET/PUT settings, только GET payments. Навигация содержит Главная, Психологи,
+  Группы, Платежи, Справочники, Настройки, Выход; заявок нет.
+- Стабильные коды create-only, Form Requests, явные allowlists полей, scoped
+  binding с 404 для несовпадающих dictionary/item. Страницы имеют 20 строк,
+  детерминированный порядок, aggregate counts/usage без N+1.
+- DictionaryManagement блокирует родитель/элемент в транзакции; DictionaryUsage
+  учитывает education_type/users и format/gender/groups, включая soft-deleted
+  записи. Системные контейнеры и используемые элементы нельзя удалить.
+  Удаление допустимых записей и деактивация подтверждаются; реактивация идемпотентна.
+- SettingService::update принимает ровно семь известных ключей и int/null,
+  блокирует существующие строки, сохраняет настройки и AuditService entries
+  одной транзакцией. Минимальный setting.updated содержит actor и key/old/new;
+  неизменённые значения не аудируются. DB::afterCommit сбрасывает кеш;
+  чтения внутри транзакций не используют/не заполняют общий кеш.
+- BynAmount переводит decimal string в minor units без float и отвергает overflow.
+  Nullable цены, положительные целые и warning < placement валидируются сервером.
+  Технические пределы: PHP_INT_MAX для целых/копеек, unsigned INT для sort_order,
+  placement days — число полных дней до предела MySQL TIMESTAMP в 2038 году.
+- Общий confirmation получил необязательный ID существующей формы: кнопка
+  отправляет её поля, CSRF, method override и confirmed=1. Прежние URL-based
+  confirmations и prototype no-op сохранены.
+- Платежи отображают только «Платежи ещё не подключены»: нет строк, фильтров,
+  detail/refund/mutation routes, запросов платёжных таблиц или provider actions.
 
 ## Changed Files
 
-- `application/routes/web.php`: корневая страница групп и реальные owner/admin маршруты.
-- `app/Http/Controllers/Psychologist/GroupController.php`,
-  `app/Http/Controllers/Admin/GroupController.php`: списки, карточки, формы и действия.
-  В HomeController удалена заменённая заглушка групп.
-- `app/Http/Requests/GroupRequest.php`, `GroupActionRequest.php`,
-  `GroupIndexRequest.php`: анкета/деньги/справочники, подтверждения/комментарии, фильтры.
-- `app/Policies/GroupPolicy.php`: owner/admin, состояния, удаление и исторический платёж.
-- `app/Services/GroupWorkflow.php`: атомарные операции с блокировкой строки,
-  создание начальной истории, композиция существующего transition service.
-- `app/Support/GroupPages.php`, PsychologistPages и PsychologistCabinetPages:
-  реальные данные и общая навигация. Group получает только аннотации типов связей.
-- `config/groups.php`: технический порог abandoned draft = 30 дней.
-- Существующие admin/groups, psychologist/groups и shared/group-* views:
-  реальные формы/CSRF/old input, отдельное сохранение/отправка, история,
-  подтверждения и доступные действия. `components/confirmation` получает ID формы
-  для связи textarea в модальном окне через стандартный HTML-атрибут `form`.
-- `tests/Feature/GroupWorkflowTest.php`: 36 сценариев с data providers.
-  AuthenticationTest и PsychologistProfileTest обновлены только для новой главной
-  с реальными группами/пагинацией; остальные проверки сохранены. В PrototypeTest
-  добавлена проверка единственного автоматически открытого validation-окна.
-- docs/architecture.md, development.md, project-status.md, ui-pages.md и этот отчёт.
+Production PHP:
 
-Пути app/resources/tests/config выше относятся к `application/`.
-Новых migrations, зависимостей, frontend build, env-переменных нет.
+- `application/routes/web.php` и `app/Support/PsychologistPages.php` — маршруты/навигация.
+- `app/Http/Controllers/Admin/{DictionaryController,DictionaryItemController,SettingController}.php`.
+- `app/Http/Requests/{DictionaryRequest,DictionaryItemRequest,DictionaryActionRequest,SettingRequest}.php`.
+- `app/Policies/{DictionaryPolicy,SettingPolicy}.php`.
+- `app/Services/{DictionaryManagement,DictionaryUsage,SettingService}.php`.
+- `app/Support/BynAmount.php`, `app/Models/Dictionary.php` (типизация отношения).
 
-## Routes and rules
+Все пути app/ выше относительно `application/`.
 
-- `GET /` — собственные группы, 20 на страницу, created_at/id DESC.
-- `POST /groups` — собственный draft → форма; owner/status/UUID из запроса игнорируются.
-- `GET /groups/{group}`, `GET /groups/{group}/edit`, `PUT /groups/{group}`,
-  `POST /groups/{group}/submit`, `DELETE /groups/{group}`.
-- `/admin/groups`: index/create/store/show/edit/update; отдельные POST
-  approve/revision/reject/activate и DELETE abandoned draft.
-- Все маршруты защищены account + соответствующей ролью; чужие owner IDs дают 404.
-- Редактирование психологом только draft/revision и enabled; rejected — просмотр/удаление.
-- Admin создаёт для approved/enabled/non-admin владельца и редактирует только анкету.
-- Начальная история null → draft записывается с текущим actor атомарно с созданием.
-  Остальные статусы меняет только GroupStatusTransitionService.
-- Revision/rejection требуют 10–16000 символов после trimming. История сохраняет
-  каждый комментарий независимо; актеры/справочники загружаются без N+1.
-- Activation: approved → active, текущая длительность SettingService, UTC now,
-  expires_at = published_at + duration, сброс expiry_warning_sent_at. Повтор запрещён.
-- UUID создаётся моделью один раз; edit/submit/moderation не меняют UUID, owner/free.
-  Copy control использует точный UUID. Внешних запросов при активации нет.
-- Money: до 16 цифр целой части, 0–2 дробных, точка/запятая; только integer/string
-  преобразование в копейки. Формат/пол — активные значения плюс текущий inactive item.
-- Admin search: ID/title/owner name/email; status/free, безопасный date sort,
-  approved/abandoned quick filters и сохранение query при пагинации.
-- Owner delete: enabled draft/rejected без succeeded/unrefunded payment.
-  Admin delete: draft с created_at <= now - 30 дней и та же платёжная защита.
-  Исторические soft-deleted payments тоже учитываются. Удаление только soft delete.
-- В обычных списках нет запросов payments/applications; payment query используется
-  только для авторизации удаления. Формы редактирования такую проверку не запрашивают.
-- Заявки явно недоступны; реальных payment/application/extension ссылок/маршрутов нет.
-  Payment rows не создаются/изменяются/удаляются, awaiting_payment недостижим.
+Blade:
+
+- `application/resources/views/admin/dictionaries/{index,items}.blade.php`.
+- `application/resources/views/admin/settings/index.blade.php`.
+- `application/resources/views/admin/payments/index.blade.php`.
+- `application/resources/views/components/confirmation.blade.php`.
+
+Tests/docs:
+
+- `application/tests/Feature/{DictionaryAdminTest,SettingsAdminTest}.php`.
+- `application/tests/Feature/Domain/SettingsAndSeedTest.php`: существующий тест
+  кеширования перенесён без потери проверок в SettingsAdminTest с настоящими
+  commit, поскольку RefreshDatabase оборачивает тест в незавершённую транзакцию.
+- `docs/{architecture,development,project-status,ui-pages}.md`, `.ai/report.md`.
+
+`.ai/task.md`, SPEC.md, WORKFLOW.md, AGENTS.md не изменены.
 
 ## Checks
 
-Фактически выполнено:
+### Автоматические проверки
 
-1. `docker compose ps`: mysql и php healthy, web Up, локальный HTTP :8080.
-2. `docker compose exec -T php php artisan migrate --seed --force`:
-   Nothing to migrate; idempotent seed выполнен, без destructive reset.
-3. `docker compose exec -T php php artisan test --filter=GroupWorkflowTest`:
-   начальный focused прогон — 29 passed, 403 assertions (32.05 s).
-   Затем добавлены ещё 7 сценариев отката, сортировки, исторического актора,
-   отзыва доступа и disabled/status deletion; они вошли в финальный полный прогон.
-4. `docker compose exec -T php php artisan test`:
-   финально **246 passed, 2455 assertions, 148.46 s**, MySQL test database.
-   Включены Stage 4–6, документы, domain foundation и все 31/249 prototype variants.
-   Первый полный прогон выявил старое ожидание одного aria-current на всей странице:
-   теперь атрибут есть и у пагинации. Проверка ограничена навигацией; финальный прогон зелёный.
-5. `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 90 files.
-   Форматирование запускалось только для файлов задачи. Попытка `pint --dirty`
-   не поддерживается контейнером без .git; использован явный список файлов.
-6. `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
-   [OK] No errors. Первые замечания к типам Eloquent-связей исправлены.
-7. `docker compose exec -T php composer check-platform-reqs`:
-   все требования success, PHP 8.2.32.
-8. `docker compose exec -T php php artisan view:cache`:
-   Blade templates cached successfully, включая финальные шаблоны.
-9. `docker compose exec -T php php artisan route:list --except-vendor --json`:
-   проверены реальные group routes, нет реальных payment/application/extension routes.
-10. `docker compose exec -T -e APP_ENV=production php php artisan route:list --except-vendor --json`:
-    42 маршрута; prototype, foundation и redirect-check отсутствуют.
-11. После финального diff-review исправлено автоматическое открытие rejection-modal
-    в prototype validation: оно включается только в real mode, чтобы сохранить
-    исходное единственное окно revision. Выполнен
-    `docker compose exec -T php php artisan test --filter=test_prototype_login_and_navigation_remain_no_op`:
-    **1 passed, 12 assertions, 7.10 s**. Также повторены Blade compilation (success)
-    и Pint для последних двух PHP-файлов (PASS).
-12. `git diff --check` и `git diff --cached --check`: успешно.
-    Просмотрены diff и staged-файлы; только Stage 7, тесты, документация и отчёт.
+- Исходное состояние чистое; HEAD `27b9878` — актуальный planner этой задачи.
+  Его родитель подтверждён: `1f5182039fadcfe53bb737c30748104c2535308c`.
+- `docker compose ps`: mysql/php healthy, web Up.
+- `docker compose exec -T php php artisan migrate --seed --force`: Nothing to
+  migrate; idempotent seed успешно. Локальная БД не сбрасывалась.
+- Точечные MySQL-проверки словарей прошли; повторный прогон
+  `php artisan test --filter='SettingsAdminTest|SettingsAndSeedTest'`:
+  19 passed, 158 assertions, 83.14 s.
+- Первый прогон обнаружил неправильное ожидание порядка JSON-ключей в тесте
+  и отсутствие bail перед проверкой суммы при array-вводе. Оба исправлены.
+- `docker compose exec -T php php artisan test`: **268 passed, 2811 assertions,
+  250.70 s**. Stage 4–7 regression и все 31 группы / 249 prototype variants прошли.
+- `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 104 files.
+  `pint --dirty` не поддерживается без .git внутри контейнера; форматирование
+  выполнялось явным списком только изменённых PHP-файлов.
+- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
+  [OK] No errors после уточнения типа Dictionary::items и PHPDoc.
+- `docker compose exec -T php composer check-platform-reqs`: все требования
+  success, PHP 8.2.32.
+- `docker compose exec -T php php artisan view:cache`: успешно.
+- `docker compose exec -T php php artisan route:list --json`: 92 routes,
+  из них 15 Stage 8. `docker compose exec -T -e APP_ENV=production -e APP_DEBUG=false
+  php php artisan route:list --json`: 58 routes, 0 prototype/foundation/redirect-check,
+  те же 15 Stage 8. У payments только GET|HEAD index.
 
-### Real Docker HTTP/browser
+- `git diff --check` и `git diff --cached --check`: успешно. Просмотрены diff и
+  staged-состав: 29 файлов только Stage 8, тесты, документация и отчёт. Секретов,
+  локальных конфигураций, реальных персональных/платёжных данных, screenshots,
+  логов и browser artifacts в индексе нет.
 
-`node /tmp/stage7-smoke.cjs` — PASS через локальный Chromium/Playwright и Nginx
-`http://localhost:8080/cabinet`. Скрипт и снимки находятся только в `/tmp`.
-MCP browser не запускался из-за отсутствующих путей исполняемых файлов;
-использована уже установленная Chromium 1243, без установки зависимостей проекта.
+### SQL и транзакционные проверки
 
-Проверены отдельными browser sessions для free=true и free=false:
+Реальный HTTP kernel с array-session, без изменения бизнес-данных:
 
-- login → POST создания → заполнение → сохранение draft → отправка;
-- запрет редактирования moderation;
-- реальный admin list/detail → revision с комментарием;
-- видимость комментария психологу → исправление → resubmit → approve;
-- точное совпадение clipboard с public_uuid → activate;
-- статус active, 30 дней из локальной настройки, разность expires/published ровно 30 дней;
-- история draft/moderation/revision/moderation/approved/active;
-- отдельное отклонение с причиной → owner soft delete;
-- чужой ID — 404;
-- abandoned filter/delete по разные стороны 30-дневного порога;
-- по каждой activated группе 0 payments; общий payment count не изменился;
-- нет активных payment/application/extension/prototype ссылок.
+- dictionaries: 3 SQL (account + count + list с counts);
+- dictionary items: 4 SQL (account + parent + count + list с usage subquery);
+- payments: 1 SQL (account), 0 запросов gp_payments/gp_payment_notifications.
 
-Для обеих активаций SQL-проверка gp_group_status_history подтвердила требуемую
-цепочку; корректные actor_id/actor_type отдельно проверены MySQL-тестами.
-SQL-проверки dates/UUID/payments выполнялись после реальных browser actions.
+MySQL-тест сравнивает query count при увеличении количества строк и проверяет
+пагинацию 20, порядок, scoped uniqueness, все item IDOR actions, core/non-empty
+protection, soft-deleted usage. Проверены реальные mutations → новые формы →
+неактивные текущие selections → сохранение существующих записей → reactivation.
 
-Геометрия списка психолога, admin list, формы, карточки и admin moderation
-проверена на **1440/1024/390**, горизонтального переполнения нет. Скриншоты
-репрезентативных desktop/tablet/mobile состояний просмотрены.
-`node /tmp/stage7-mobile.cjs` дополнительно подтвердил видимость/границы кнопок
-сохранения/отправки и работоспособность мобильного confirmation удаления.
+Настройки проверяются с реальными commit: nullable/decimal/максимальная сумма,
+отрицательные/экспонента/лишние знаки/массив/overflow, integer/cross-field validation,
+unknown keys/missing rows/types, unchanged audit, actor/minimal metadata,
+audit failure rollback, outer rollback, сброс кеша после commit, snapshot
+старой группы и новый duration следующей активации, отсутствие payment effects.
 
-Создавались только синтетические пользователи/значения справочников/группы.
-Продуктовые удаления проверены как soft delete с сохранением истории.
-После проверки удалены только созданные этими smoke-скриптами fixtures;
-существующие записи не изменялись. Скриншоты, временные скрипты и данные не включены в Git.
+### Реальный браузер через Docker/Nginx
+
+`node /tmp/stage8-smoke.cjs`: PASS через уже установленный Chromium 1243 и
+Playwright, URL `http://localhost:8080/cabinet`. MCP браузеры не запускались
+из-за отсутствующих настроенных executable paths; установки зависимостей
+проекта не потребовалось. Скрипты/логи/screenshots только в `/tmp`.
+
+Проверены вход администратора, создание/редактирование/подтверждённое удаление
+custom container, добавление значений в три core dictionaries, item edit/sort,
+удаление unused item, деактивация used item и реактивация. После каждого
+изменения проверены реальные psychologist/group формы, отсутствие значения
+в новых и сохранение текущего inactive option в существующих записях.
+
+Все семь настроек сохранены через реальную модальную форму. SQL подтвердил
+5000/2550 minor units и семь actor=admin setting.updated entries с минимальной
+metadata. В UI обратно показаны 50,00/25,50. Новая группа получила 41 день;
+прежняя сохранила 30 дней и исходные published_at/expires_at. До и после —
+0 платежей. После сценария исходные локальные настройки восстановлены через UI.
+Синтетические локальные элементы/психолог/группы оставлены для ручной проверки;
+это не утверждённое production-содержимое справочников.
+
+Для dictionaries/items/settings/payments выполнены геометрическая проверка и
+просмотр снимков 1440/1024/390: нет горизонтального выхода за viewport,
+сохранены таблицы/мобильные карточки, поля и действия. Психолог в отдельной
+browser session получает 403 на всех четырёх разделах.
+
+`node /tmp/stage8-extra.cjs`: PASS — серверная ошибка суммы с сохранением
+старого ввода, мобильное подтверждение, деактивация через checkbox в edit-форме
+и последующая реактивация. Проверены итоговый required sort_order и desktop
+Payments. Первое выполнение этого дополнительного скрипта остановилось на
+неверном ожидании строкового значения boolean HTML-атрибута required; исправлен
+только временный проверочный скрипт, product-код не менялся.
 
 ## Facts
 
-- Все 42 acceptance criteria реализованы/проверены в рамках Stage 7.
-- Существующий transition service и его принятые правила не менялись.
-- Production UI использует исходные Blade-страницы и существующие CSS tokens.
-- Повторная activation/moderation не меняет историю/даты; ошибка transition
-  откатывает сохраняемый контент, что проверено отдельным тестом.
-- Owner/admin list query counts постоянны при увеличении количества строк;
-  SQL не содержит payments/applications.
-- Полный MySQL suite и обязательные проверки проходят; внешние credentials не нужны.
+- Новые данные справочников доступны Stage 5/7 без изменения исходников или seed.
+- Существующие active placement snapshots не меняются от settings update.
+- Новых migrations, packages, CSS/JS, WEBPAY credentials/config/provider code нет.
+- Prototype catalogue и production isolation сохранены.
+- Все изменения относятся к Stage 8 и его проверкам/документации.
 
 ## Assumptions
 
-Использованы продуктовые решения самой задачи: draft для обоих тарифов,
-неизменяемый владелец, 10 символов комментария/причины, 30 дней abandoned cutoff.
-Технические пределы денег/текста/положительных integer описаны в документации.
+- Локальные marker-значения предназначены исключительно для проверки интерфейса.
+- Для custom dictionaries текущая схема не содержит application references;
+  при появлении новых связей DictionaryUsage потребуется расширить явно.
 
 ## Unknowns
 
-Утверждённые реальные display values справочников group_format/gender всё ещё
-не предоставлены. Они не выдуманы и не добавлены в seed; проверка выполнена на
-изолированных синтетических значениях. Без настроенных справочников создание
-пустого draft доступно, а заполнение/отправка требует реальных значений.
-Форма объясняет отсутствие вариантов. Dictionary CRUD относится к Stage 8.
+- Production dictionary content и реальные бизнес-цены не определялись задачей.
+- Production deployment, Stage 9+ и WEBPAY не выполнялись и не проверялись.
 
 ## Risks / Next Step
 
-Для ручной продуктовой работы требуется наполнить справочники утверждёнными
-значениями. Этапы 8+ остаются pending. WEBPAY, приложения участников, scheduler,
-продление, email и публичная интеграция сознательно не подключены.
-Ручная проверка: два входа психолог/admin → группы → draft/save/submit →
-revision/resubmit/approve → UUID copy → activation; подробности в docs/development.md.
+Все обязательные проверки пройдены. Результат готов к приёмке Stage 8.
+Следующий продуктовый этап — Stage 9; он в эту реализацию не входит.
+Локальные синтетические данные не являются production-справочниками; исходные
+локальные бизнес-настройки восстановлены после browser smoke.

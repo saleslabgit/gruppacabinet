@@ -1,4 +1,4 @@
-@props(['id', 'title', 'action' => 'Подтвердить', 'kind' => 'danger', 'open' => false, 'url' => null, 'method' => 'POST', 'fields' => []])
+@props(['id', 'title', 'action' => 'Подтвердить', 'kind' => 'danger', 'open' => false, 'url' => null, 'method' => 'POST', 'fields' => [], 'form' => null])
 <div class="modal fade" id="{{ $id }}" tabindex="-1" aria-labelledby="{{ $id }}-title" aria-hidden="true" @if($open) data-prototype-open @endif>
 <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
 <div class="modal-content">
@@ -10,7 +10,9 @@
 <div class="modal-body">{{ $slot }}</div>
 <div class="modal-footer">
 <x-button kind="secondary" data-bs-dismiss="modal">Отмена</x-button>
-@if($url)
+@if($form)
+<x-button type="submit" :form="$form" name="confirmed" value="1" :kind="$kind">{{ $action }}</x-button>
+@elseif($url)
 <form id="{{ $id }}-form" method="POST" action="{{ $url }}">
 @csrf
 @if($method !== 'POST') @method($method) @endif
