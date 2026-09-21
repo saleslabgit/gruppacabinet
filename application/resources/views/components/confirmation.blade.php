@@ -11,7 +11,7 @@
 <div class="modal-footer">
 <x-button kind="secondary" data-bs-dismiss="modal">Отмена</x-button>
 @if($url)
-<form method="POST" action="{{ $url }}">
+<form id="{{ $id }}-form" method="POST" action="{{ $url }}">
 @csrf
 @if($method !== 'POST') @method($method) @endif
 <input type="hidden" name="confirmed" value="1">

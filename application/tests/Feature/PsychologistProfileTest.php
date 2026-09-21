@@ -90,7 +90,7 @@ class PsychologistProfileTest extends TestCase
             ->assertSee('Документов пока нет')->assertDontSee('Просмотр')->assertDontSee('Скачать');
     }
 
-    public function test_navigation_logout_and_empty_root_never_query_existing_groups(): void
+    public function test_navigation_logout_and_profile_does_not_query_groups(): void
     {
         Group::query()->create(['owner_id' => $this->owner->id, 'title' => 'Hidden existing group']);
         $this->actingAs($this->owner);
@@ -100,23 +100,27 @@ class PsychologistProfileTest extends TestCase
             $response = $this->get($path)->assertOk()->assertSee('Мои группы')->assertSee('Мои данные')
                 ->assertSee(route('psychologist.home'), false)->assertSee(route('psychologist.profile'), false)
                 ->assertSee('action="'.route('logout').'"', false)->assertSee('method="POST"', false)
-                ->assertSee('name="_token"', false)->assertDontSee('Hidden existing group')->assertDontSee('_prototype');
+                ->assertSee('name="_token"', false)->assertDontSee('_prototype');
             $queries = DB::getQueryLog();
             DB::disableQueryLog();
-            foreach ($queries as $query) {
-                $this->assertStringNotContainsString('gp_groups', $query['query']);
+            if ($path === '/profile') {
+                $response->assertDontSee('Hidden existing group');
+                foreach ($queries as $query) {
+                    $this->assertStringNotContainsString('gp_groups', $query['query']);
+                }
             }
             $this->assertMatchesRegularExpression('/href="'.preg_quote(route($current), '/').'"\s+aria-current="page"/', $response->getContent());
-            $this->assertSame(1, substr_count($response->getContent(), 'aria-current="page"'));
+            preg_match('/<nav\b[^>]*>.*?<\/nav>/s', $response->getContent(), $navigation);
+            $this->assertSame(1, substr_count($navigation[0], 'aria-current="page"'));
             if ($path === '/') {
-                $response->assertViewIs('psychologist.groups.index')->assertViewHas('empty', true)
-                    ->assertViewHas('canCreateGroup', false)->assertSee('Создание и просмотр групп пока недоступны.');
+                $response->assertViewIs('psychologist.groups.index')->assertViewHas('empty', false)
+                    ->assertViewHas('canCreateGroup', true)->assertSee('Hidden existing group');
             }
         }
         $this->post('/logout')->assertRedirect(route('login'));
         $this->get('/profile')->assertRedirect(route('login'));
         foreach (Route::getRoutes() as $route) {
-            if (str_starts_with($route->getName() ?? '', 'psychologist.')) {
+            if (str_starts_with($route->getName() ?? '', 'psychologist.') && ! str_starts_with($route->getName(), 'psychologist.groups.')) {
                 $this->assertSame(['GET', 'HEAD'], $route->methods());
                 $this->assertContains($route->uri(), ['/', 'profile', 'profile/documents/{document}/view', 'profile/documents/{document}/download']);
             }

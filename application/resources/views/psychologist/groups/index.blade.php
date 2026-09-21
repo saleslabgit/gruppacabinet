@@ -1,11 +1,19 @@
 @extends('layouts.psychologist')
 @section('actions')
+@if($realGroups ?? false)
+<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button type="submit">Добавить группу</x-button></form>
+@else
 <x-button :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
+@endif
 @endsection
 @section('content')
 @if($empty)
-<x-empty title="Здесь будут ваши группы" :text="($canCreateGroup ?? true) ? 'Добавьте первую группу, чтобы отправить её на модерацию и получать заявки.' : 'Создание и просмотр групп пока недоступны.'">
+<x-empty title="Здесь будут ваши группы" :text="($realGroups ?? false) ? 'Добавьте первую группу, чтобы отправить её на модерацию.' : (($canCreateGroup ?? true) ? 'Добавьте первую группу, чтобы отправить её на модерацию и получать заявки.' : 'Создание и просмотр групп пока недоступны.')">
+@if($realGroups ?? false)
+<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button type="submit">Добавить группу</x-button></form>
+@else
 <x-button :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
+@endif
 </x-empty>
 @else
 <div class="group-list">
@@ -18,8 +26,12 @@
 </div>
 <div>
 <h3>Заявки участников</h3>
+@if($realGroups ?? false)
+<p class="meta">Заявки пока недоступны.</p>
+@else
 @include('shared.application-counters')
 <a href="{{ $links['applications'] }}">Открыть заявки</a>
+@endif
 </div>
 <div class="wide">
 @include('psychologist.groups._actions')

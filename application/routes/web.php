@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Psychologist\GroupController;
 use App\Http\Controllers\Psychologist\ProfileController;
 use App\Http\Controllers\SessionController;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,7 @@ Route::post('/login', [SessionController::class, 'store'])->name('login.store');
 Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
 
 Route::middleware('account')->group(function (): void {
-    Route::get('/', [HomeController::class, 'psychologist'])->middleware('role:psychologist')->name('psychologist.home');
+    Route::get('/', [GroupController::class, 'index'])->middleware('role:psychologist')->name('psychologist.home');
     Route::get('/admin', [HomeController::class, 'admin'])->middleware('role:admin')->name('admin.home');
 });
 
@@ -39,6 +40,30 @@ Route::middleware(['account', 'role:admin'])->prefix('admin/psychologists')->nam
     Route::get('/{psychologist}/documents/{document}/view', [PsychologistDocumentController::class, 'view'])->name('documents.view');
     Route::get('/{psychologist}/documents/{document}/download', [PsychologistDocumentController::class, 'download'])->name('documents.download');
     Route::delete('/{psychologist}/documents/{document}', [PsychologistDocumentController::class, 'destroy'])->name('documents.destroy');
+});
+
+Route::middleware(['account', 'role:psychologist'])->prefix('groups')->name('psychologist.groups.')->group(function (): void {
+    $controller = GroupController::class;
+    Route::post('/', [$controller, 'store'])->name('store');
+    Route::get('/{group}', [$controller, 'show'])->name('show');
+    Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
+    Route::put('/{group}', [$controller, 'update'])->name('update');
+    Route::post('/{group}/submit', [$controller, 'update'])->name('submit');
+    Route::delete('/{group}', [$controller, 'destroy'])->name('destroy');
+});
+
+Route::middleware(['account', 'role:admin'])->prefix('admin/groups')->name('admin.groups.')->group(function (): void {
+    $controller = App\Http\Controllers\Admin\GroupController::class;
+    Route::get('/', [$controller, 'index'])->name('index');
+    Route::get('/create', [$controller, 'create'])->name('create');
+    Route::post('/', [$controller, 'store'])->name('store');
+    Route::get('/{group}', [$controller, 'show'])->name('show');
+    Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
+    Route::put('/{group}', [$controller, 'update'])->name('update');
+    foreach (['approve', 'revision', 'reject', 'activate'] as $action) {
+        Route::post('/{group}/'.$action, [$controller, 'action'])->name($action);
+    }
+    Route::delete('/{group}', [$controller, 'action'])->name('destroy');
 });
 
 if (app()->environment(['local', 'testing'])) {

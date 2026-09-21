@@ -110,8 +110,8 @@ and redirects to login with a safe access-revoked message.
 `role:psychologist` requires `admin=false`; `role:admin` requires `admin=true`.
 Cross-role requests return 403. Guests redirect to the named login route.
 
-`GET /` (`psychologist.home`) reuses the groups view in empty mode with creation
-unavailable, without querying groups. `GET /admin` (`admin.home`) reuses the
+`GET /` (`psychologist.home`) renders the current owner’s real paginated groups
+and a CSRF-protected draft creation action (Stage 7). `GET /admin` (`admin.home`) reuses the
 admin home with its work queue unavailable. Both use real navigation URLs and
 POST logout forms. There are no links to prototypes or future CRUD actions.
 `POST /logout` uses normal web CSRF middleware, logs out, invalidates the session
@@ -174,7 +174,7 @@ retry. Restoring deleted documents is not part of this stage.
 
 Production and prototype modes share the original views/components. Confirmed
 real actions have CSRF-protected forms; prototype forms and buttons remain
-no-op. There are no real Stage 7+ links or resend-invitation action.
+no-op. Group navigation is connected in Stage 7; there is no resend-invitation action.
 
 ## Stage 6 psychologist profile and owner documents
 
@@ -185,7 +185,7 @@ table. `PsychologistPages::profile()` supplies the same explicit questionnaire
 mapping used by administrators; credentials and internal columns are excluded.
 Dates retain the existing shared display conventions. PsychologistCabinetPages
 supplies Home/Profile navigation and POST logout for both real cabinet pages.
-The root remains empty and never queries groups, even when group records exist.
+The root renders real owned groups through Stage 7; the profile still does not query groups.
 
 `GET /profile/documents/{document}/view` and `/download` use `account` and
 `role:psychologist`. The controller looks up the document through the current
@@ -202,3 +202,57 @@ The shared table receives explicit per-document view/download URLs and an
 optional delete URL. Only admin management supplies delete; owner pages expose
 no upload, delete or profile editing controls or mutation routes. Prototype
 fixtures and no-op actions remain separate and unchanged.
+
+## Stage 7 group workflow
+
+Owner routes use `account` + `role:psychologist`; numeric group IDs are looked
+up with `owner_id = authenticated user` before policy checks, including form
+validation. Foreign and deleted IDs return 404. Admin routes use normal model
+binding, `role:admin` and `GroupPolicy`. Policies recheck current lifecycle and
+ownership inside each workflow transaction after locking the group row.
+
+`GroupWorkflow` atomically creates draft + initial history, saves questionnaire
+fields, submits, moderates, activates and soft-deletes. All later status writes
+use the existing `GroupStatusTransitionService` and its history transaction on
+the same connection/row. There is no duplicated transition matrix or generic
+workflow framework. Invalid/repeated actions fail without partial content,
+comments, dates or history. Revision/rejection comments require 10–16000 trimmed
+characters and persist independently in history; current fields show the latest
+message. History and actors (including soft-deleted actors) are eager loaded in
+chronological timestamp/ID order.
+
+Owner edits/submission require enabled draft/revision groups. Admin edits are
+allowed in every lifecycle state. `GroupRequest` explicitly allows only the
+questionnaire fields; owner, UUID, tariff snapshot, lifecycle fields and current
+moderation messages cannot be edited. Creation uses the existing model UUID and
+owner tariff snapshot invariants. Both free and paid owners start in draft.
+Dictionary options use active `group_format`/`gender` items plus the current
+inactive reference. Money validation accepts up to 16 whole decimal digits and
+at most two fractional digits, dot or comma, then converts with integer/string
+operations. Text limits are 16000 characters, within MySQL TEXT byte capacity.
+
+Activation requires confirmed manual publication and reads the current
+`SettingService::placementDurationDays()`. It snapshots duration and UTC now,
+sets expiry to now plus duration, clears the warning marker, then transitions
+approved → active with admin history. The integration UUID/copy/reminder block
+uses the accepted template; no external request or second public-site ID exists.
+
+Lists paginate 20 rows, eagerly load dictionaries/owners and never query
+payments or applications. Admin search supports ID/title/owner name/email,
+status/tariff filters, allowlisted descending date sorting with ID tie-break,
+and approved/abandoned quick filters. `GroupIndexRequest` validates filters.
+Deletion alone checks historical succeeded, unrefunded payments, including
+soft-deleted payment records. Owner deletion requires enabled draft/rejected;
+admin deletion requires draft created at or before the configured abandoned
+cutoff. Both are soft deletes preserving all related records.
+
+The technical cleanup threshold is `config/groups.php: abandoned_draft_days`
+(default 30), separate from placement business settings. All destructive and
+admin lifecycle actions require `confirmed` via `GroupActionRequest`. Modal
+comment controls are associated with CSRF-protected confirmation forms through
+the standard HTML `form` attribute.
+
+Real Stage 7 views expose neither payment/extension actions nor application
+links/counters. Applications are explicitly unavailable. There are no payment
+writes or transitions to awaiting_payment. Prototype fixtures and their no-op
+variants remain available only in local/testing using the same Blade files.

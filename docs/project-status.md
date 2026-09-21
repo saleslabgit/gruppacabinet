@@ -46,8 +46,7 @@ request and enforce opposite role boundaries. Disabled, non-approved and
 soft-deleted accounts lose access; SessionInvalidator supports later bulk
 session revocation and rotates remember tokens.
 
-The psychologist home renders the existing empty groups view with creation
-unavailable. The admin home renders an unavailable-work-queue state without
+The psychologist home now renders real owned groups and creation (Stage 7). The admin home renders an unavailable-work-queue state without
 fixture counts. Real navigation has CSRF-protected POST logout. The 31 groups /
 249 prototype variants remain local/testing only. The old DB diagnostic moved
 to local/testing-only `/_foundation`.
@@ -71,7 +70,7 @@ nested-owner view/download/delete endpoints. Uploads have a configurable
 10 MiB technical ceiling. No email or password invitation is sent.
 
 The same Blade files retain all 31 prototype groups / 249 variants. Real admin
-navigation offers Home, Psychologists and Logout. New MySQL tests cover CRUD,
+navigation offers Home, Psychologists, Groups and Logout. New MySQL tests cover CRUD,
 protected fields, audit, session revocation, IDOR, file failures and constant
 list query counts. No migrations or dependencies were added.
 
@@ -87,12 +86,33 @@ private view/download endpoints. Cross-owner document IDs return 404; admin
 accounts cannot use owner routes. Both controller paths use the same secure
 private streaming service. MySQL tests cover real and nullable questionnaire
 data, IDOR, MIME/security headers, missing files, navigation, role boundaries
-and session revocation. Stage 7 group integration remains pending: the root
-stays empty without group queries or creation links.
+and session revocation. Stage 7 connects the root to owned groups and draft creation.
+
+## Stage 7 groups, moderation and activation
+
+Owner and admin group CRUD now use the accepted Blade list/form/detail pages.
+Both tariffs create draft groups without payments, with immutable UUID, owner
+and tariff snapshot plus initial actor history. Owner-scoped lookups and policy
+checks protect all routes. Owners save/submit draft or revision only; admins
+edit content at any status and moderate with confirmed actions and required
+revision/rejection comments. History retains every comment and actor.
+
+Manual activation snapshots current configured duration, calculates UTC dates
+from activation, resets the warning marker and records admin history. UUID
+copy/reminder is available before activation. Owner draft/rejected deletion and
+admin abandoned-draft deletion are soft deletes with historical payment safety.
+Lists use eager loading, filters/search, deterministic sorting and pagination;
+payment/application queries are excluded from normal listing. Applications are
+unavailable, and payments/extensions have no real routes or links.
+
+MySQL coverage includes both tariffs, history/atomicity, IDOR, immutability,
+validation/dictionaries/integer money, activation, deletion and query counts.
+Stages 8+ (dictionary/settings administration, lifecycle automation,
+applications, external integration, mail and payments) remain pending.
 
 ## Intentionally not implemented
 
-No psychologist profile editing or document mutations, group/payment/dictionary/settings CRUD,
+No psychologist profile editing or document mutations, payment/dictionary/settings CRUD,
 public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 

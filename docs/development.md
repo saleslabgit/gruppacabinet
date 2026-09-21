@@ -119,8 +119,8 @@ Open `http://localhost:8080/cabinet/login`. Use `psychologist@gruppa.test` /
 `password` to open `/cabinet/` (Мои группы), or `admin@gruppa.test` / `password`
 to open `/cabinet/admin`. The opposite role's home returns 403. Click «Выход»
 to submit the real CSRF-protected POST logout form and return to login.
-Group creation in the psychologist cabinet remains disabled. Administrators
-can now open «Психологи»; other work-queue sections remain unavailable.
+Group creation and management are available in Stage 7. Administrators can open
+«Психологи» and «Группы»; the home work queue remains unavailable.
 
 Five failed login attempts per normalized email and client IP are allowed
 within 60 seconds. After that, wait 60 seconds from the first failed attempt.
@@ -173,8 +173,7 @@ uploads/browser artifacts must not be committed.
 ## Stage 6 real psychologist profile
 
 Log in at `http://localhost:8080/cabinet/login` with the local seeded
-`psychologist@gruppa.test` / `password` account. The root still shows empty
-groups with creation unavailable. Open «Мои данные» to visit
+`psychologist@gruppa.test` / `password` account. The root shows the owner’s real groups and draft creation action. Open «Мои данные» to visit
 `http://localhost:8080/cabinet/profile`: only the current questionnaire and
 documents are shown, with no edit/upload/delete controls. Missing questionnaire
 values and an empty document list use the approved empty states.
@@ -198,3 +197,52 @@ Focused MySQL regression:
 ```bash
 docker compose exec -T php php artisan test tests/Feature/PsychologistProfileTest.php
 ```
+
+## Stage 7 real groups
+
+Use two separate browser sessions for the seeded psychologist and administrator.
+All URLs below are relative to `http://localhost:8080/cabinet`.
+
+1. Psychologist: open `/`, click «Добавить группу» (POST `/groups`). A draft is
+   created and redirects to `/groups/{id}/edit`.
+2. Fill the questionnaire, then «Сохранить изменения» to keep the draft, or
+   «Отправить на модерацию» to save and submit. These are separate requests.
+3. Administrator: open «Группы» (`/admin/groups`), find the moderation group,
+   open it, choose «На доработку» and enter a comment of at least 10 characters.
+4. Psychologist: read the comment/history, edit and resubmit. Administrator:
+   confirm approval, copy «ID группы для gruppa.info», and manually publish the
+   catalogue entry with that ID. Confirm «Отметить активной» in the cabinet.
+   Dates start at activation and display in Europe/Minsk.
+5. Verify the rejected path on a separate group, including required reason and
+   owner soft deletion. Rejected groups cannot be edited or resubmitted.
+6. Repeat with `free=false`: the historical tariff label differs, but no payment
+   screen, row or payment prerequisite exists in Stage 7.
+
+Group dictionaries are not seeded with invented product values. Before filling
+forms, approved active items must exist in `group_format` and `gender`.
+Empty dictionaries display an explanatory warning. Automated and browser
+verification use isolated synthetic items; these are not product seed values.
+Dictionary administration is Stage 8, so real values remain a prerequisite.
+
+Admin creation selects an enabled approved psychologist. Existing ownership,
+UUID, tariff and lifecycle dates are not editable. The published-content warning
+reminds the admin to synchronize changes manually with the public catalogue.
+List search/filter/sort preserve query parameters across 20-row pages.
+
+`config/groups.php` sets `abandoned_draft_days = 30`; this is an administrative
+cleanup threshold, not placement duration and not a `gp_settings` value.
+The abandoned filter and admin delete use the same inclusive cutoff. Drafts on
+the newer side of the cutoff cannot be deleted by admin. Historical succeeded
+unrefunded payments block deletion, even when a payment was soft-deleted.
+No automatic cleanup is scheduled. Confirmed deletion retains group history.
+
+Focused MySQL checks:
+
+```bash
+docker compose exec -T php php artisan test --filter=GroupWorkflowTest
+```
+
+Also run the full test suite, Pint, Larastan, platform requirements and Blade
+compilation listed above. Browser checks cover both tariffs, rejection, IDOR,
+UUID copying, abandoned cutoff, and list/form/detail/moderation at 1440/1024/390.
+Use only synthetic verification data; keep screenshots/scripts outside Git.

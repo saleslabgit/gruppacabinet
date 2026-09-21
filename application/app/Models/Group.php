@@ -59,16 +59,19 @@ class Group extends Model
         ];
     }
 
+    /** @return BelongsTo<User, $this> */
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_id');
     }
 
+    /** @return BelongsTo<DictionaryItem, $this> */
     public function format(): BelongsTo
     {
         return $this->belongsTo(DictionaryItem::class, 'format_id');
     }
 
+    /** @return BelongsTo<DictionaryItem, $this> */
     public function gender(): BelongsTo
     {
         return $this->belongsTo(DictionaryItem::class, 'gender_id');
@@ -79,11 +82,13 @@ class Group extends Model
         return $this->hasMany(GroupApplication::class);
     }
 
+    /** @return HasMany<Payment, $this> */
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
     }
 
+    /** @return HasMany<GroupStatusHistory, $this> */
     public function statusHistory(): HasMany
     {
         return $this->hasMany(GroupStatusHistory::class);

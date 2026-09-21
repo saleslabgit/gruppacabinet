@@ -1,136 +1,180 @@
-# Report: TASK-2026-09-21-04
+# Report: TASK-2026-09-21-05
 
 Status: done
 
 ## Summary
 
-Implemented Stage 6 read-only psychologist profile and owner-only private
-document viewing/downloading using the accepted Blade pages. Both real
-cabinet pages share Groups/Profile navigation, active state and POST logout.
-The root remains empty without querying groups, including existing records.
+Реализован Stage 7: реальные группы психолога и администратора, анкета,
+модерация, полная история, ручная активация и безопасное soft delete.
+Оба тарифа начинают с draft и проходят весь цикл без платежей.
+Утверждённые Blade-страницы подключены к данным; CSS и prototype-каталог не менялись.
 
-Confirmed planner `cebcdbb` and parent/base
-`2f82b0e525f5c8633d79c2a69d7dab1922314ab0`; initial worktree was clean.
-Task, specification and governance files are unchanged. No migrations,
-dependencies, CSS/JS changes or alternate page markup were introduced.
+База задачи подтверждена: `2b9ff579d91c69cc2d7a6ecae6438415f93f06e1`;
+исходный HEAD — `980a65e` (актуальный planner), рабочая директория была чистой.
+`.ai/task.md`, SPEC.md, WORKFLOW.md и AGENTS.md не изменены.
 
 ## Changed Files
 
-- `application/app/Http/Controllers/Psychologist/ProfileController.php`:
-  authenticated profile and owner-scoped document endpoints.
-- `application/app/Support/PsychologistCabinetPages.php` and existing
-  `HomeController.php`: shared real psychologist navigation.
-- `application/routes/web.php`: three GET/HEAD profile/document routes.
-- `application/app/Policies/UserDocumentPolicy.php`: explicit owner-read policy.
-- `application/app/Services/PsychologistDocuments.php` and admin
-  `PsychologistDocumentController.php`: shared secure file response and explicit
-  document URLs; existing admin authorization/management remains unchanged.
-- `application/resources/views/shared/documents.blade.php`: explicit URLs with
-  optional delete capability; fixture mode unchanged.
-- `application/tests/Feature/PsychologistProfileTest.php`: 20 MySQL cases.
-- `docs/architecture.md`, `development.md`, `project-status.md`, `ui-pages.md`,
-  and this report.
+- `application/routes/web.php`: корневая страница групп и реальные owner/admin маршруты.
+- `app/Http/Controllers/Psychologist/GroupController.php`,
+  `app/Http/Controllers/Admin/GroupController.php`: списки, карточки, формы и действия.
+  В HomeController удалена заменённая заглушка групп.
+- `app/Http/Requests/GroupRequest.php`, `GroupActionRequest.php`,
+  `GroupIndexRequest.php`: анкета/деньги/справочники, подтверждения/комментарии, фильтры.
+- `app/Policies/GroupPolicy.php`: owner/admin, состояния, удаление и исторический платёж.
+- `app/Services/GroupWorkflow.php`: атомарные операции с блокировкой строки,
+  создание начальной истории, композиция существующего transition service.
+- `app/Support/GroupPages.php`, PsychologistPages и PsychologistCabinetPages:
+  реальные данные и общая навигация. Group получает только аннотации типов связей.
+- `config/groups.php`: технический порог abandoned draft = 30 дней.
+- Существующие admin/groups, psychologist/groups и shared/group-* views:
+  реальные формы/CSRF/old input, отдельное сохранение/отправка, история,
+  подтверждения и доступные действия. `components/confirmation` получает ID формы
+  для связи textarea в модальном окне через стандартный HTML-атрибут `form`.
+- `tests/Feature/GroupWorkflowTest.php`: 36 сценариев с data providers.
+  AuthenticationTest и PsychologistProfileTest обновлены только для новой главной
+  с реальными группами/пагинацией; остальные проверки сохранены. В PrototypeTest
+  добавлена проверка единственного автоматически открытого validation-окна.
+- docs/architecture.md, development.md, project-status.md, ui-pages.md и этот отчёт.
+
+Пути app/resources/tests/config выше относятся к `application/`.
+Новых migrations, зависимостей, frontend build, env-переменных нет.
+
+## Routes and rules
+
+- `GET /` — собственные группы, 20 на страницу, created_at/id DESC.
+- `POST /groups` — собственный draft → форма; owner/status/UUID из запроса игнорируются.
+- `GET /groups/{group}`, `GET /groups/{group}/edit`, `PUT /groups/{group}`,
+  `POST /groups/{group}/submit`, `DELETE /groups/{group}`.
+- `/admin/groups`: index/create/store/show/edit/update; отдельные POST
+  approve/revision/reject/activate и DELETE abandoned draft.
+- Все маршруты защищены account + соответствующей ролью; чужие owner IDs дают 404.
+- Редактирование психологом только draft/revision и enabled; rejected — просмотр/удаление.
+- Admin создаёт для approved/enabled/non-admin владельца и редактирует только анкету.
+- Начальная история null → draft записывается с текущим actor атомарно с созданием.
+  Остальные статусы меняет только GroupStatusTransitionService.
+- Revision/rejection требуют 10–16000 символов после trimming. История сохраняет
+  каждый комментарий независимо; актеры/справочники загружаются без N+1.
+- Activation: approved → active, текущая длительность SettingService, UTC now,
+  expires_at = published_at + duration, сброс expiry_warning_sent_at. Повтор запрещён.
+- UUID создаётся моделью один раз; edit/submit/moderation не меняют UUID, owner/free.
+  Copy control использует точный UUID. Внешних запросов при активации нет.
+- Money: до 16 цифр целой части, 0–2 дробных, точка/запятая; только integer/string
+  преобразование в копейки. Формат/пол — активные значения плюс текущий inactive item.
+- Admin search: ID/title/owner name/email; status/free, безопасный date sort,
+  approved/abandoned quick filters и сохранение query при пагинации.
+- Owner delete: enabled draft/rejected без succeeded/unrefunded payment.
+  Admin delete: draft с created_at <= now - 30 дней и та же платёжная защита.
+  Исторические soft-deleted payments тоже учитываются. Удаление только soft delete.
+- В обычных списках нет запросов payments/applications; payment query используется
+  только для авторизации удаления. Формы редактирования такую проверку не запрашивают.
+- Заявки явно недоступны; реальных payment/application/extension ссылок/маршрутов нет.
+  Payment rows не создаются/изменяются/удаляются, awaiting_payment недостижим.
 
 ## Checks
 
-- `docker compose ps`: PHP/MySQL healthy, web running on port 8080.
-- `docker compose exec -T php php artisan test tests/Feature/PsychologistProfileTest.php`:
-  PASS, 20 tests / 305 assertions.
-- `docker compose exec -T php php artisan test`: PASS, 210 tests / 1960
-  assertions, 150.64 seconds. Includes Stage 4/5 regression and all 31 prototype
-  groups / 249 variants, no-database rendering and production route isolation.
-- `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 80 files.
-- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
-  PASS, no errors.
-- `docker compose exec -T php composer check-platform-reqs`: PASS, all
-  requirements satisfied, PHP 8.2.32.
-- `docker compose exec -T php php artisan view:cache`: PASS.
-- `docker compose exec -T php php artisan route:list --except-vendor`:
-  59 application routes; three new read-only routes.
-- `docker compose exec -T -e APP_ENV=production php php artisan route:list --except-vendor`:
-  25 application routes; no prototype/foundation/redirect-check routes.
-- `git diff --check`: PASS. Implementation/tests/docs diffs reviewed.
-  No task/governance/spec changes or runtime artifacts are included.
+Фактически выполнено:
 
-### Real HTTP/browser verification
+1. `docker compose ps`: mysql и php healthy, web Up, локальный HTTP :8080.
+2. `docker compose exec -T php php artisan migrate --seed --force`:
+   Nothing to migrate; idempotent seed выполнен, без destructive reset.
+3. `docker compose exec -T php php artisan test --filter=GroupWorkflowTest`:
+   начальный focused прогон — 29 passed, 403 assertions (32.05 s).
+   Затем добавлены ещё 7 сценариев отката, сортировки, исторического актора,
+   отзыва доступа и disabled/status deletion; они вошли в финальный полный прогон.
+4. `docker compose exec -T php php artisan test`:
+   финально **246 passed, 2455 assertions, 148.46 s**, MySQL test database.
+   Включены Stage 4–6, документы, domain foundation и все 31/249 prototype variants.
+   Первый полный прогон выявил старое ожидание одного aria-current на всей странице:
+   теперь атрибут есть и у пагинации. Проверка ограничена навигацией; финальный прогон зелёный.
+5. `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 90 files.
+   Форматирование запускалось только для файлов задачи. Попытка `pint --dirty`
+   не поддерживается контейнером без .git; использован явный список файлов.
+6. `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
+   [OK] No errors. Первые замечания к типам Eloquent-связей исправлены.
+7. `docker compose exec -T php composer check-platform-reqs`:
+   все требования success, PHP 8.2.32.
+8. `docker compose exec -T php php artisan view:cache`:
+   Blade templates cached successfully, включая финальные шаблоны.
+9. `docker compose exec -T php php artisan route:list --except-vendor --json`:
+   проверены реальные group routes, нет реальных payment/application/extension routes.
+10. `docker compose exec -T -e APP_ENV=production php php artisan route:list --except-vendor --json`:
+    42 маршрута; prototype, foundation и redirect-check отсутствуют.
+11. После финального diff-review исправлено автоматическое открытие rejection-modal
+    в prototype validation: оно включается только в real mode, чтобы сохранить
+    исходное единственное окно revision. Выполнен
+    `docker compose exec -T php php artisan test --filter=test_prototype_login_and_navigation_remain_no_op`:
+    **1 passed, 12 assertions, 7.10 s**. Также повторены Blade compilation (success)
+    и Pint для последних двух PHP-файлов (PASS).
+12. `git diff --check` и `git diff --cached --check`: успешно.
+    Просмотрены diff и staged-файлы; только Stage 7, тесты, документация и отчёт.
 
-Executed `node /tmp/stage6-smoke.cjs` with external Playwright and an installed
-Chromium against `http://localhost:8080/cabinet`. Configured MCP browser
-executables were missing, so the available browser was used directly without
-adding an application dependency.
+### Real Docker HTTP/browser
 
-Passed seeded psychologist login, empty root, active navigation, own profile,
-admin upload of synthetic PDF, owner inline/download requests and actual
-download-button click with original filename. Checked file bytes, MIME,
-disposition, nosniff, private/no-store and absence of private paths in HTML/
-headers. A second synthetic approved psychologist and its document verified
-IDOR denial in both directions: 404 with no filename disclosure. Admin requests
-to profile and both owner endpoints returned 403; psychologist admin access
-returned 403. POST logout returned to login and revoked subsequent profile
-access. Admin modal deletion worked; the profile showed the empty state after
-document removal.
+`node /tmp/stage7-smoke.cjs` — PASS через локальный Chromium/Playwright и Nginx
+`http://localhost:8080/cabinet`. Скрипт и снимки находятся только в `/tmp`.
+MCP browser не запускался из-за отсутствующих путей исполняемых файлов;
+использована уже установленная Chromium 1243, без установки зависимостей проекта.
 
-Verified screenshots and geometry at 1440/1024/390 for normal and long-content
-profiles (long document name and long email). Scroll width matched each
-viewport, detail grids collapsed to one mobile column, table cells became
-mobile cards, and all navigation/file actions fit with 44 px control height.
-No browser JavaScript errors occurred. Prototype profile normal/long/
-no-documents/permission also passed; document actions remain no-op.
+Проверены отдельными browser sessions для free=true и free=false:
 
-Cleanup verified zero Stage 6 smoke users, zero Stage 6 smoke document rows
-and no remaining private files under psychologists/. Only this run's synthetic
-records/uploads were removed. Scripts/screenshots remain outside Git in /tmp.
+- login → POST создания → заполнение → сохранение draft → отправка;
+- запрет редактирования moderation;
+- реальный admin list/detail → revision с комментарием;
+- видимость комментария психологу → исправление → resubmit → approve;
+- точное совпадение clipboard с public_uuid → activate;
+- статус active, 30 дней из локальной настройки, разность expires/published ровно 30 дней;
+- история draft/moderation/revision/moderation/approved/active;
+- отдельное отклонение с причиной → owner soft delete;
+- чужой ID — 404;
+- abandoned filter/delete по разные стороны 30-дневного порога;
+- по каждой activated группе 0 payments; общий payment count не изменился;
+- нет активных payment/application/extension/prototype ссылок.
 
-### Intermediate verification issue
+Для обеих активаций SQL-проверка gp_group_status_history подтвердила требуемую
+цепочку; корректные actor_id/actor_type отдельно проверены MySQL-тестами.
+SQL-проверки dates/UUID/payments выполнялись после реальных browser actions.
 
-The first focused run forced a /cabinet root while using relative test request
-paths, causing 404 results. Corrected the test root to the existing admin-test
-convention; focused rerun and full suite passed. Real /cabinet URLs were
-verified independently in the browser. No application routing workaround.
+Геометрия списка психолога, admin list, формы, карточки и admin moderation
+проверена на **1440/1024/390**, горизонтального переполнения нет. Скриншоты
+репрезентативных desktop/tablet/mobile состояний просмотрены.
+`node /tmp/stage7-mobile.cjs` дополнительно подтвердил видимость/границы кнопок
+сохранения/отправки и работоспособность мобильного confirmation удаления.
+
+Создавались только синтетические пользователи/значения справочников/группы.
+Продуктовые удаления проверены как soft delete с сохранением истории.
+После проверки удалены только созданные этими smoke-скриптами fixtures;
+существующие записи не изменялись. Скриншоты, временные скрипты и данные не включены в Git.
 
 ## Facts
 
-New routes: `psychologist.profile` at GET /profile,
-`psychologist.documents.view` at GET /profile/documents/{document}/view, and
-`psychologist.documents.download` at GET /profile/documents/{document}/download.
-All use existing account and role:psychologist middleware. Profile ownership
-comes from the authenticated request, never caller-supplied IDs; only
-educationType and documents are loaded. Existing PsychologistPages::profile()
-is reused for explicit questionnaire mapping, nulls and date conventions.
-Credentials/internal columns are not passed as profile display data.
-
-Owner document lookup uses the authenticated user's documents relation and
-whereKey(...)->firstOrFail() before policy authorization and storage access.
-The policy also requires an approved, enabled, non-deleted, non-admin owner.
-Middleware revokes disabled/pending/rejected/deleted sessions before each
-profile/view/download endpoint; all endpoint/state combinations are tested.
-
-Both authorized controller paths use PsychologistDocuments::response() for
-file existence, MIME allowlist, sanitized filename, inline/attachment,
-nosniff, private/no-store and sandbox headers. Owner tests cover all three
-allowed stored MIME types; Stage 5 regression covers actual PDF/JPEG/PNG
-uploads. Missing files/disallowed stored MIME return 404. No public or
-temporary storage URL is generated.
-
-Shared document markup receives explicit view/download URLs and optional
-delete URLs. Only admin management supplies delete; owner pages have no
-edit/upload/delete controls or mutation endpoints. Prototype fixtures,
-navigation and no-op behavior remain unchanged. Root/profile tests reject
-any group query and ensure no future group routes are introduced.
+- Все 42 acceptance criteria реализованы/проверены в рамках Stage 7.
+- Существующий transition service и его принятые правила не менялись.
+- Production UI использует исходные Blade-страницы и существующие CSS tokens.
+- Повторная activation/moderation не меняет историю/даты; ошибка transition
+  откатывает сохраняемый контент, что проверено отдельным тестом.
+- Owner/admin list query counts постоянны при увеличении количества строк;
+  SQL не содержит payments/applications.
+- Полный MySQL suite и обязательные проверки проходят; внешние credentials не нужны.
 
 ## Assumptions
 
-Existing private-disk configuration, account middleware and questionnaire
-display conventions remain project contracts. No new product assumptions.
+Использованы продуктовые решения самой задачи: draft для обоих тарифов,
+неизменяемый владелец, 10 символов комментария/причины, 30 дней abandoned cutoff.
+Технические пределы денег/текста/положительных integer описаны в документации.
 
 ## Unknowns
 
-No unresolved Stage 6 blockers. Production hosting was not exercised and
-remains outside scope, as do dictionary values, email and later stages.
+Утверждённые реальные display values справочников group_format/gender всё ещё
+не предоставлены. Они не выдуманы и не добавлены в seed; проверка выполнена на
+изолированных синтетических значениях. Без настроенных справочников создание
+пустого draft доступно, а заполнение/отправка требует реальных значений.
+Форма объясняет отсутствие вариантов. Dictionary CRUD относится к Stage 8.
 
 ## Risks / Next Step
 
-Stage 6 implementation and required verification are complete. Stage 7 will
-connect real groups. Manual acceptance is available at
-http://localhost:8080/cabinet/profile after seeded psychologist login.
-The prescribed codex commit records this iteration; no accept commit.
+Для ручной продуктовой работы требуется наполнить справочники утверждёнными
+значениями. Этапы 8+ остаются pending. WEBPAY, приложения участников, scheduler,
+продление, email и публичная интеграция сознательно не подключены.
+Ручная проверка: два входа психолог/admin → группы → draft/save/submit →
+revision/resubmit/approve → UUID copy → activation; подробности в docs/development.md.

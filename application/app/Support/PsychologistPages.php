@@ -13,6 +13,7 @@ class PsychologistPages
             'navigation' => [
                 ['label' => 'Главная', 'url' => route('admin.home'), 'current' => request()->routeIs('admin.home')],
                 ['label' => 'Психологи', 'url' => route('admin.psychologists.index'), 'current' => request()->routeIs('admin.psychologists.*')],
+                ['label' => 'Группы', 'url' => route('admin.groups.index'), 'current' => request()->routeIs('admin.groups.*')],
             ],
             'logoutUrl' => route('logout'), 'homeUrl' => route('admin.home'),
             'links' => ['admin-users' => route('admin.psychologists.index'), 'admin-user-form' => route('admin.psychologists.create')],

@@ -4,30 +4,40 @@
 @endsection
 @section('content')
 <x-panel title="Поиск и фильтры" :compact="true" class="panel-compact">
-<form data-prototype-form>
-<x-input name="search" label="ID, название или психолог" :value="$variant === 'no-results' ? 'Нет совпадений' : ''" />
+<form @if($realGroups ?? false) method="GET" action="{{ route('admin.groups.index') }}" @else data-prototype-form @endif>
+<x-input name="search" label="ID, название или психолог" :value="$filters['search'] ?? ($variant === 'no-results' ? 'Нет совпадений' : '')" />
 <div class="row">
 <div class="col-md-4">
-<x-select name="status" label="Статус" :options="[''=>'Все','awaiting_payment'=>'Ожидает оплаты','draft'=>'Черновик','moderation'=>'На модерации','revision'=>'На доработке','rejected'=>'Отклонена','approved'=>'Ожидает публикации','active'=>'Активная','expired'=>'Закончена']" :value="in_array($variant,['normal','empty','long','pagination']) ? '' : $group['status']" />
+<x-select name="status" label="Статус" :options="[''=>'Все','awaiting_payment'=>'Ожидает оплаты','draft'=>'Черновик','moderation'=>'На модерации','revision'=>'На доработке','rejected'=>'Отклонена','approved'=>'Ожидает публикации','active'=>'Активная','expired'=>'Закончена']" :value="$filters['status'] ?? (in_array($variant,['normal','empty','long','pagination']) ? '' : $group['status'])" />
 </div>
 <div class="col-md-4">
-<x-select name="free" label="Тариф группы" :options="[''=>'Все','free'=>'Бесплатная','paid'=>'Платная']" :value="$variant" />
+<x-select name="free" label="Тариф группы" :options="[''=>'Все','free'=>'Бесплатная','paid'=>'Платная']" :value="$filters['free'] ?? $variant" />
 </div>
+@unless($realGroups ?? false)
 <div class="col-md-4">
 <x-select name="successful_payment" label="Успешный платёж" :options="[''=>'Все','yes'=>'Есть','no'=>'Нет']" :value="$variant === 'successful-payment' ? 'yes' : ''" />
 </div>
+@endunless
 <div class="col-md-4">
-<x-select name="sort" label="Сортировка" :options="['created_at'=>'Дата создания','published_at'=>'Дата публикации','expires_at'=>'Дата окончания']" />
+<x-select name="sort" label="Сортировка" :value="$filters['sort'] ?? 'created_at'" :options="['created_at'=>'Дата создания','published_at'=>'Дата публикации','expires_at'=>'Дата окончания']" />
 </div>
+@unless($realGroups ?? false)
 <div class="col-md-4">
 <x-input name="created_before" label="Созданы до, Минск" type="date" :value="$variant === 'abandoned' ? '2026-08-20' : ''" />
 </div>
+@endunless
 </div>
+@if($realGroups ?? false)
+@if(!empty($filters['quick']))<input type="hidden" name="quick" value="{{ $filters['quick'] }}">@endif
+<x-button kind="secondary" type="submit">Применить</x-button>
+<a href="{{ route('admin.groups.index') }}">Сбросить</a>
+@else
 <x-button kind="secondary" data-noop>Применить</x-button>
+@endif
 </form>
 <div class="actions small mt-3">
-@foreach(['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные черновики'] as $state=>$label)
-<a href="{{ route('prototype.admin-groups',['variant'=>$state]) }}">{{ $label }}</a>
+@foreach((($realGroups ?? false) ? ['approved'=>'Ожидают публикации','abandoned'=>'Брошенные черновики'] : ['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные черновики']) as $state=>$label)
+<a href="{{ ($realGroups ?? false) ? route('admin.groups.index',['quick'=>$state]) : route('prototype.admin-groups',['variant'=>$state]) }}">{{ $label }}</a>
 @endforeach
 </div>
 </x-panel>
@@ -41,12 +51,12 @@
 <p class="eyebrow">Внутренний ID {{ $group['id'] }}</p>
 <h2>{{ $group['title'] }}</h2>
 <p>
-<a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a>
+<a href="{{ ($realGroups ?? false) ? route('admin.psychologists.show', $group['owner_id']) : $links['admin-user'] }}">{{ ($realGroups ?? false) ? $group['owner']['name'] : $user['name'] }}</a>
 </p>
 @include('shared.group-summary')
 </div>
 <div class="actions" aria-label="Действия с группой">
-<x-button :href="route('prototype.admin-group',['variant'=>$group['status']])">Открыть группу</x-button>
+<x-button :href="($realGroups ?? false) ? route('admin.groups.show', $group['id']) : route('prototype.admin-group',['variant'=>$group['status']])">Открыть группу</x-button>
 </div>
 </article>
 @endforeach

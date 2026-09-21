@@ -61,8 +61,8 @@ class AuthenticationTest extends TestCase
         if ($admin) {
             $response->assertViewIs('admin.home')->assertDontSee('Требуют внимания')->assertSee('пока недоступны');
         } else {
-            $response->assertViewIs('psychologist.groups.index')->assertSee('disabled', false)
-                ->assertSee('Создание и просмотр групп пока недоступны.');
+            $response->assertViewIs('psychologist.groups.index')->assertViewHas('canCreateGroup', true)
+                ->assertSee(route('psychologist.groups.store'), false);
         }
         $this->get('http://localhost'.$denied)->assertForbidden();
     }

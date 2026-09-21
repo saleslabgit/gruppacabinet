@@ -42,6 +42,9 @@ class PrototypeTest extends TestCase
 
     public function test_prototype_login_and_navigation_remain_no_op(): void
     {
+        $moderation = $this->get('http://localhost/_prototype/admin-group/validation')->assertOk();
+        $this->assertSame(1, substr_count($moderation->getContent(), 'data-prototype-open'));
+
         $this->get('http://localhost/_prototype/login/normal')->assertOk()
             ->assertSee('data-prototype-form')->assertDontSee('name="_token"', false)
             ->assertDontSee('type="submit"', false);

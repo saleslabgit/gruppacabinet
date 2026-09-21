@@ -6,40 +6,57 @@
 @if($admin)
 <x-alert tone="warning">Администратор может редактировать группу независимо от статуса. Изменения опубликованной группы необходимо вручную перенести в каталог.</x-alert>
 @endif
-<form data-prototype-form>
-<x-validation-summary :errors="array_intersect_key($errors, array_flip(['title','description','schedule','format_id','meeting_duration_minutes','participant_capacity','gender_id','meeting_price']))" />
+<form @if($realGroups ?? false) method="POST" action="{{ $formAction }}" @else data-prototype-form @endif>
+@if($realGroups ?? false)
+@csrf
+@endif
+<x-validation-summary :errors="array_intersect_key($errors, array_flip(['owner_id','title','description','schedule','format_id','meeting_duration_minutes','participant_capacity','gender_id','meeting_price']))" />
 <x-panel title="Основная информация">
 @if($admin)
-<x-select name="owner_id" label="Психолог" :options="['demo' => $user['name']]" :required="true" />
+@if(($realGroups ?? false) && ! $creating)
+<p>Психолог: {{ $user['name'] }}</p>
+@else
+<x-select name="owner_id" label="Психолог" :options="($realGroups ?? false) ? ['' => 'Выберите психолога'] + $ownerOptions : ['demo' => $user['name']]" :value="old('owner_id')" :required="true" :error="$errors['owner_id'] ?? null" />
 @endif
-<x-input name="title" label="Название группы" :value="$variant === 'create' ? '' : $group['title']" :required="true" help="Короткое название, которое увидят участники." :error="$errors['title'] ?? null" />
-<x-textarea name="description" label="Описание" :value="$variant === 'create' ? '' : $group['description']" :required="true" help="Для кого группа и с какими темами вы работаете." :error="$errors['description'] ?? null" />
-<x-textarea name="schedule" label="Расписание" :value="$group['schedule']" :required="true" help="Дни недели и время встреч по Минску." :error="$errors['schedule'] ?? null" />
+@endif
+<x-input name="title" label="Название группы" :value="($realGroups ?? false) ? old('title', $group['title']) : ($variant === 'create' ? '' : $group['title'])" :required="true" help="Короткое название, которое увидят участники." :error="$errors['title'] ?? null" />
+<x-textarea name="description" label="Описание" :value="($realGroups ?? false) ? old('description', $group['description']) : ($variant === 'create' ? '' : $group['description'])" :required="true" help="Для кого группа и с какими темами вы работаете." :error="$errors['description'] ?? null" />
+<x-textarea name="schedule" label="Расписание" :value="($realGroups ?? false) ? old('schedule', $group['schedule']) : $group['schedule']" :required="true" help="Дни недели и время встреч по Минску." :error="$errors['schedule'] ?? null" />
 </x-panel>
 <x-panel title="Условия участия">
+@if(($realGroups ?? false) && (count($formatOptions) === 1 || count($genderOptions) === 1))
+<x-alert tone="warning">Для заполнения группы нужны доступные значения формата и пола участников. Обратитесь к администратору для настройки справочников.</x-alert>
+@endif
 <div class="row">
 <div class="col-md-6">
-<x-select name="format_id" label="Формат" :options="['' => 'Выберите формат', 'demo' => $group['format']]" :value="$group['format_id']" :required="true" :error="$errors['format_id'] ?? null" />
+<x-select name="format_id" label="Формат" :options="$formatOptions ?? ['' => 'Выберите формат', 'demo' => $group['format']]" :value="($realGroups ?? false) ? old('format_id', $group['format_id']) : $group['format_id']" :required="true" :error="$errors['format_id'] ?? null" />
 </div>
 <div class="col-md-6">
-<x-select name="gender_id" label="Пол участников" :options="['' => 'Выберите значение', 'demo' => $group['gender']]" :value="$group['gender_id']" :required="true" :error="$errors['gender_id'] ?? null" />
+<x-select name="gender_id" label="Пол участников" :options="$genderOptions ?? ['' => 'Выберите значение', 'demo' => $group['gender']]" :value="($realGroups ?? false) ? old('gender_id', $group['gender_id']) : $group['gender_id']" :required="true" :error="$errors['gender_id'] ?? null" />
 </div>
 <div class="col-md-6">
-<x-input name="meeting_duration_minutes" label="Длительность встречи, минут" type="number" min="1" step="1" :value="$group['meeting_duration_minutes']" :required="true" :error="$errors['meeting_duration_minutes'] ?? null" />
+<x-input name="meeting_duration_minutes" label="Длительность встречи, минут" type="number" min="1" step="1" :value="($realGroups ?? false) ? old('meeting_duration_minutes', $group['meeting_duration_minutes']) : $group['meeting_duration_minutes']" :required="true" :error="$errors['meeting_duration_minutes'] ?? null" />
 </div>
 <div class="col-md-6">
-<x-input name="participant_capacity" label="Количество участников" type="number" min="1" step="1" :value="$group['participant_capacity']" :required="true" :error="$errors['participant_capacity'] ?? null" />
+<x-input name="participant_capacity" label="Количество участников" type="number" min="1" step="1" :value="($realGroups ?? false) ? old('participant_capacity', $group['participant_capacity']) : $group['participant_capacity']" :required="true" :error="$errors['participant_capacity'] ?? null" />
 </div>
 <div class="col-md-6">
-<x-input name="meeting_price" label="Стоимость встречи, BYN" inputmode="decimal" value="35,00" :required="true" help="Цена одной встречи для участника. Демонстрационная сумма." :error="$errors['meeting_price'] ?? null" />
+<x-input name="meeting_price" label="Стоимость встречи, BYN" inputmode="decimal" :value="($realGroups ?? false) ? old('meeting_price', $priceInput) : '35,00'" :required="true" :help="($realGroups ?? false) ? 'Цена одной встречи для участника.' : 'Цена одной встречи для участника. Демонстрационная сумма.'" :error="$errors['meeting_price'] ?? null" />
 </div>
 </div>
 </x-panel>
 <div class="actions">
+@if($realGroups ?? false)
+@unless($admin)
+<x-button type="submit" :formaction="route('psychologist.groups.submit', $group['id'])">Отправить на модерацию</x-button>
+@endunless
+<x-button type="submit" :kind="$admin ? 'primary' : 'secondary'" :name="$creating ? null : '_method'" :value="$creating ? null : 'PUT'">{{ $admin ? 'Сохранить' : 'Сохранить изменения' }}</x-button>
+@else
 <x-button data-noop :disabled="$variant === 'disabled'">{{ $admin ? 'Сохранить' : 'Отправить на модерацию' }}</x-button>
 @unless($admin)
 <x-button kind="secondary" data-noop :disabled="$variant === 'disabled'">Сохранить черновик</x-button>
 @endunless
+@endif
 <x-button kind="ghost" :href="$links[$admin ? 'admin-groups' : 'groups']">Отмена</x-button>
 </div>
 </form>

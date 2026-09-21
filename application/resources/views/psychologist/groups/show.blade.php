@@ -14,12 +14,16 @@
 @include('psychologist.groups._actions')
 </div>
 <x-panel title="Заявки участников">
+@if($realGroups ?? false)
+<p>Заявки пока недоступны.</p>
+@else
 @include('shared.application-counters')@if($group['all_count'])
 <p>{{ $application['name'] }} · {{ $application['phone'] }}</p>
 @else
 <p>Заявок пока нет.</p>
 @endif
 <a href="{{ $links['applications'] }}">Все заявки группы</a>
+@endif
 </x-panel>
 @include('shared.group-history')@include('shared.group-delete')
 @endsection

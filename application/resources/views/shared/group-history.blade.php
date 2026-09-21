@@ -1,5 +1,14 @@
 <x-panel title="История статусов и замечаний">
 <ol class="timeline">
+@if($realGroups ?? false)
+@foreach($history as $entry)
+<li>
+<strong>@if($entry->from_status)<x-status :value="$entry->from_status->value" /> → @endif<x-status :value="$entry->to_status->value" /></strong>
+@if($entry->comment)<p>{{ $entry->comment }}</p>@endif
+<p class="meta"><x-date :value="$entry->created_at" /> · {{ $entry->actor ? \App\Support\PsychologistPages::profile($entry->actor)['name'] : ($entry->actor_type === 'system' ? 'Система' : 'Пользователь') }}</p>
+</li>
+@endforeach
+@else
 <li>
 <strong>Черновик создан</strong>
 <p class="meta">
@@ -53,6 +62,7 @@
 <p class="meta">Система · <x-date :value="$group['expires_at']" />
 </p>
 </li>
+@endif
 @endif
 </ol>
 </x-panel>
