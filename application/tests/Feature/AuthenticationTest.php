@@ -59,7 +59,8 @@ class AuthenticationTest extends TestCase
         $response = $this->get('http://localhost'.$home)->assertOk()->assertSee('method="POST"', false)
             ->assertSee(route('logout'), false)->assertDontSee('_prototype');
         if ($admin) {
-            $response->assertViewIs('admin.home')->assertDontSee('Требуют внимания')->assertSee('пока недоступны');
+            $response->assertViewIs('admin.home')->assertDontSee('Требуют внимания')->assertSee(route('admin.groups.index'), false)
+                ->assertSee('Управляйте анкетами, группами и заявками участников.');
         } else {
             $response->assertViewIs('psychologist.groups.index')->assertViewHas('canCreateGroup', true)
                 ->assertSee(route('psychologist.groups.store'), false);

@@ -1,9 +1,9 @@
 @extends('layouts.admin')
 @section('actions')
-<x-button :href="$links['admin-user-form']">Создать психолога</x-button>
+<x-button icon="person-plus" :href="$links['admin-user-form']">Создать психолога</x-button>
 @endsection
 @section('content')
-<x-panel title="Поиск психологов" :compact="true" class="panel-compact">
+<x-panel title="Поиск психологов" :compact="true" class="panel-compact filter-panel">
 <form @if($prototype) data-prototype-form @else method="GET" action="{{ route('admin.psychologists.index') }}" @endif>
 <div class="row">
 <div class="col-lg-6">
@@ -16,7 +16,8 @@
 <x-select name="free" label="Тариф" :options="[''=>'Все','free'=>'Бесплатный','paid'=>'Платный']" :value="$prototype ? (in_array($variant,['free','paid']) ? $variant : '') : ($filters['free'] ?? '')" />
 </div>
 </div>
-<x-button kind="secondary" :type="$prototype ? 'button' : 'submit'" :data-noop="$prototype">Применить</x-button>
+<x-button icon="search" kind="secondary" :type="$prototype ? 'button' : 'submit'" :data-noop="$prototype">Применить</x-button>
+<x-button icon="arrow-counterclockwise" kind="ghost" :href="$links['admin-users']">Сбросить</x-button>
 </form>
 </x-panel>
 @if($empty)

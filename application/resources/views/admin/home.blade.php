@@ -12,6 +12,19 @@
 @endforeach
 </div>
 @else
-<x-empty title="Добро пожаловать" text="Управление психологами доступно в меню. Разделы групп и платежей пока недоступны." />
+<p class="page-description">Управляйте анкетами, группами и заявками участников.</p>
+<div class="catalog-grid work-queue">
+@foreach([
+['Психологи', 'Анкеты, доступ и документы.', 'admin.psychologists.index', 'people'],
+['Группы', 'Модерация и ручная публикация.', 'admin.groups.index', 'collection'],
+['Заявки', 'Контакты участников и состояние обработки.', 'admin.applications.index', 'inbox'],
+['Настройки', 'Стоимость операций и сроки.', 'admin.settings.index', 'gear']
+] as [$label, $description, $route, $icon])
+<x-panel :title="$label" :compact="true">
+<p>{{ $description }}</p>
+<a class="section-link" href="{{ route($route) }}"><x-icon :name="$icon" /> Открыть раздел</a>
+</x-panel>
+@endforeach
+</div>
 @endif
 @endsection

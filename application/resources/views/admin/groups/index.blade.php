@@ -1,9 +1,9 @@
 @extends('layouts.admin')
 @section('actions')
-<x-button :href="$links['admin-group-form']">Создать группу</x-button>
+<x-button icon="plus-lg" :href="$links['admin-group-form']">Создать группу</x-button>
 @endsection
 @section('content')
-<x-panel title="Поиск и фильтры" :compact="true" class="panel-compact">
+<x-panel title="Поиск и фильтры" :compact="true" class="panel-compact filter-panel">
 <form @if($realGroups ?? false) method="GET" action="{{ route('admin.groups.index') }}" @else data-prototype-form @endif>
 <x-input name="search" label="ID, название или психолог" :value="$filters['search'] ?? ($variant === 'no-results' ? 'Нет совпадений' : '')" />
 <div class="row">
@@ -29,10 +29,10 @@
 </div>
 @if($realGroups ?? false)
 @if(!empty($filters['quick']))<input type="hidden" name="quick" value="{{ $filters['quick'] }}">@endif
-<x-button kind="secondary" type="submit">Применить</x-button>
+<x-button icon="search" kind="secondary" type="submit">Применить</x-button>
 <a href="{{ route('admin.groups.index') }}">Сбросить</a>
 @else
-<x-button kind="secondary" data-noop>Применить</x-button>
+<x-button icon="search" kind="secondary" data-noop>Применить</x-button>
 @endif
 </form>
 <div class="actions small mt-3">
@@ -56,7 +56,7 @@
 @include('shared.group-summary')
 </div>
 <div class="actions" aria-label="Действия с группой">
-<x-button :href="($realGroups ?? false) ? route('admin.groups.show', $group['id']) : route('prototype.admin-group',['variant'=>$group['status']])">Открыть группу</x-button>
+<x-button icon="arrow-up-right" kind="secondary" :href="($realGroups ?? false) ? route('admin.groups.show', $group['id']) : route('prototype.admin-group',['variant'=>$group['status']])">Открыть группу</x-button>
 </div>
 </article>
 @endforeach

@@ -2,7 +2,7 @@
 @include('shared.group-summary')
 <hr class="my-4">
 <h3>О группе</h3>
-<p class="mb-4">{{ $group['description'] }}</p>
+<p class="mb-4 readable-text">{{ $group['description'] }}</p>
 <dl class="detail-grid">
 <div>
 <dt>Расписание</dt>

@@ -93,7 +93,7 @@ class ApplicationWorkflowTest extends TestCase
         Mail::fake();
         Queue::fake();
         $this->actingAs($this->owner)->get('/')->assertOk()->assertViewHas('groups', fn ($groups) => $groups->first()['all_count'] === 0);
-        $this->get($this->path())->assertOk()->assertSee('Заявок не найдено');
+        $this->get($this->path())->assertOk()->assertSee('Заявок пока нет');
         $record = GroupApplication::factory()->for($this->group)->create();
         $before = $this->group->fresh()->getAttributes();
         $this->get('/')->assertOk()->assertSee($this->path())->assertViewHas('groups', fn ($groups) => $groups->first()['new_count'] === 1);
@@ -175,7 +175,7 @@ class ApplicationWorkflowTest extends TestCase
             $this->get('/admin/applications?search='.urlencode($search))->assertOk()
                 ->assertViewHas('applications', fn ($rows) => $rows->pluck('id')->all() === [$record->id]);
         }
-        $this->get('/admin/applications?search=Ничего')->assertOk()->assertSee('Заявок не найдено');
+        $this->get('/admin/applications?search=Ничего')->assertOk()->assertSee('Заявки не найдены');
         $this->get('/admin/applications?processed=new')->assertViewHas('applications', fn ($rows) => $rows->pluck('id')->all() === [$record->id]);
         $this->get('/admin/applications?processed=processed')->assertViewHas('applications', fn ($rows) => $rows->pluck('id')->all() === [$foreign->id]);
         $this->get('/admin/applications/'.$record->id)->assertOk()->assertSee('/admin/groups/'.$this->group->id)

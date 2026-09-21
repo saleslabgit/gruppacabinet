@@ -88,7 +88,7 @@ class PrototypeTest extends TestCase
         $response->assertSee('Интеграция с gruppa.info')->assertSee('ID группы для gruppa.info')
             ->assertSee('data-copy="public_uuid"', false)
             ->assertSee('11111111-2222-4333-8444-555555555555');
-        foreach (['vendor/bootstrap/5.3.8/css/bootstrap.min.css', 'ui.css', 'ui.js'] as $asset) {
+        foreach (['vendor/bootstrap/5.3.8/css/bootstrap.min.css', 'vendor/bootstrap-icons/1.13.1/bootstrap-icons.css', 'ui.css', 'ui.js'] as $asset) {
             $response->assertSee('http://localhost:8080/cabinet/'.$asset, false);
         }
         foreach (['fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net', '@vite'] as $external) {
@@ -114,10 +114,10 @@ class PrototypeTest extends TestCase
         $this->assertLessThanOrEqual(10, (int) $radius[1]);
         $this->assertMatchesRegularExpression('/\.form-control,\.form-select\s*\{[^}]*border-radius:var\(--control-radius\)/s', $css);
         $this->assertDoesNotMatchRegularExpression('/(?:form-control|form-select)[^{]*\{[^}]*border-radius:var\(--pill\)/s', $css);
-        foreach (['title' => 38, 'section' => 24, 'subsection' => 18] as $token => $size) {
+        foreach (['title' => 30, 'section' => 21, 'subsection' => 18] as $token => $size) {
             $this->assertStringContainsString('--'.$token.':'.$size.'px', $css);
         }
-        $this->assertStringContainsString('--title:30px', $css);
+        $this->assertStringContainsString('--title:25px', $css);
         $this->assertDoesNotMatchRegularExpression('/(?:https?:)?\/\//', $css);
 
         $form = $this->get('http://localhost/_prototype/group-form/validation')->assertOk();
@@ -136,7 +136,35 @@ class PrototypeTest extends TestCase
         $data['group']['free'] = true;
         $data['group']['has_unrefunded_payment'] = true;
         $html = view('psychologist.groups._actions', $data)->render();
-        $this->assertMatchesRegularExpression('/<button[^>]*disabled[^>]*>Удалить<\/button>/', $html);
+        $this->assertMatchesRegularExpression('/<button[^>]*disabled[^>]*>(?:<i[^>]*><\/i>\s*)?Удалить<\/button>/', $html);
+    }
+
+    public function test_nested_pages_have_contextual_navigation(): void
+    {
+        foreach ([
+            'group/draft' => 'groups',
+            'group-form/draft' => 'group',
+            'extension/free-active' => 'group',
+            'applications/normal' => 'group',
+            'application/new' => 'applications',
+            'placement/normal' => 'groups',
+            'payment-pending/pending' => 'groups',
+            'admin-user/pending' => 'admin-users',
+            'admin-user-form/edit' => 'admin-user',
+            'admin-documents/normal' => 'admin-user',
+            'admin-group/draft' => 'admin-groups',
+            'admin-group-form/edit' => 'admin-group',
+            'admin-application/new' => 'admin-applications',
+            'admin-payment/succeeded' => 'admin-payments',
+            'admin-dictionary/normal' => 'admin-dictionaries',
+        ] as $page => $parent) {
+            $this->get('http://localhost/_prototype/'.$page)->assertOk()
+                ->assertSee('aria-label="Хлебные крошки"', false)
+                ->assertSee('href="'.route('prototype.'.$parent).'"', false)
+                ->assertSee('aria-current="page"', false);
+        }
+        $this->get('http://localhost/_prototype/group/draft')->assertDontSee('Подробнее');
+        $this->get('http://localhost/_prototype/groups-empty/empty')->assertSee('Добавить группу');
     }
 
     public function test_error_views_can_render_without_prototype_data(): void

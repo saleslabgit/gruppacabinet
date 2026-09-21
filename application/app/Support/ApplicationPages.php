@@ -14,6 +14,7 @@ class ApplicationPages
             'admin' => $admin, 'realApplications' => true,
             'links' => [
                 'admin-applications' => route('admin.applications.index'),
+                'group' => $group ? route('psychologist.groups.show', $group) : null,
                 'applications' => $group ? route('psychologist.groups.applications.index', $group) : null,
             ],
             'group' => $group ? ['title' => $group->title ?: 'Новая группа', 'new_count' => $group->new_count,

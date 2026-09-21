@@ -3,7 +3,7 @@
 @if($realPayments ?? false)
 <x-empty title="Платежи ещё не подключены" text="После подключения WEBPAY здесь появятся платежи. Сейчас создание групп и изменение настроек не создают платежей." />
 @else
-<x-panel title="Поиск платежей" :compact="true" class="panel-compact">
+<x-panel title="Поиск платежей" :compact="true" class="panel-compact filter-panel">
 <form data-prototype-form>
 <x-input name="search" label="Номер заказа или транзакции" />
 <div class="row">
@@ -23,7 +23,7 @@
 <x-input name="to" label="Период до, Минск" type="date" />
 </div>
 </div>
-<x-button kind="secondary" data-noop>Применить</x-button>
+<x-button icon="search" kind="secondary" data-noop>Применить</x-button>
 </form>
 </x-panel>
 @if($variant === 'pre-webpay')

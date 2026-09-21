@@ -9,7 +9,7 @@
 </div>
 <div class="modal-body">{{ $slot }}</div>
 <div class="modal-footer">
-<x-button kind="secondary" data-bs-dismiss="modal">Отмена</x-button>
+<x-button icon="arrow-left" kind="secondary" data-bs-dismiss="modal">Отмена</x-button>
 @if($form)
 <x-button type="submit" :form="$form" name="confirmed" value="1" :kind="$kind">{{ $action }}</x-button>
 @elseif($url)

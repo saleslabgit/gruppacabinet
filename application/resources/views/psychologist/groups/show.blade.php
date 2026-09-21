@@ -1,18 +1,21 @@
 @extends('layouts.psychologist')
+@section('breadcrumbs')
+<x-breadcrumbs :items="[['label' => 'Мои группы' , 'url' => $links['groups']],['label' => $group['title']]]" />
+@endsection
+@section('group-actions')
+<div class="detail-actions">
+@include('psychologist.groups._actions', ['detail' => true])
+</div>
+@endsection
 @section('content')
 @if($group['disabled'])
 <x-alert tone="warning">Группа отключена администратором. Действия временно недоступны.</x-alert>
 @endif
-@if(in_array($group['status'], ['moderation','approved']))
-<x-alert>{{ $group['status'] === 'moderation' ? 'Анкета проверяется администратором. Редактирование недоступно.' : 'Группа одобрена и ожидает ручной публикации. Срок размещения начнётся после публикации.' }}</x-alert>
-@endif
 @if($variant === 'paid-delete-blocked')
 <x-alert tone="warning">Удаление недоступно: есть успешный платёж без отметки возврата. Обратитесь к администратору.</x-alert>
 @endif
+
 @include('shared.group-data')
-<div class="mb-4">
-@include('psychologist.groups._actions')
-</div>
 <x-panel title="Заявки участников">
 @if($realGroups ?? false)
 @include('shared.application-counters')

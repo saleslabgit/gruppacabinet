@@ -30,7 +30,7 @@
 <x-validation-summary :errors="array_intersect_key($fieldErrors, array_flip(['email','password']))" />
 <x-input name="email" label="Email" type="email" autocomplete="username" :value="$prototype ? '' : old('email', '')" :required="true" :error="$fieldErrors['email'] ?? null" />
 <x-input name="password" label="Пароль" type="password" autocomplete="current-password" :required="true" :error="$fieldErrors['password'] ?? null" />
-<x-button class="w-100" :data-noop="$prototype" :type="$prototype ? 'button' : 'submit'" :disabled="$variant === 'disabled'">Войти</x-button>
+<x-button icon="box-arrow-in-right" class="w-100" :data-noop="$prototype" :type="$prototype ? 'button' : 'submit'" :disabled="$variant === 'disabled'">Войти</x-button>
 </form>
 </x-panel>
 </div>

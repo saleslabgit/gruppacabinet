@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>@yield('title', $title ?? 'Кабинет психолога') · gruppa</title>
     <link rel="stylesheet" href="{{ asset('vendor/bootstrap/5.3.8/css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('vendor/bootstrap-icons/1.13.1/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ asset('ui.css') }}">
 </head>
-<body>
+<body class="surface-{{ $surface }}">
 <a href="#main" class="skip-link">К содержимому</a>
 <x-navbar :home-url="$homeUrl ?? null" :logout-url="($prototype ?? false) ? null : ($logoutUrl ?? null)" :navigation="$surface === 'psychologist' ? ($navigation ?? []) : []" />
 @if($prototype ?? false)
@@ -15,7 +16,8 @@
 @endif
 <div class="container app-shell {{ $surface !== 'admin' ? 'no-sidebar' : '' }}">
     @if($surface === 'admin') <x-sidebar :logout-url="($prototype ?? false) ? null : ($logoutUrl ?? null)" :navigation="$navigation ?? []" /> @endif
-    <main id="main">
+    <main id="main" tabindex="-1">
+        @yield('breadcrumbs')
         @if($surface !== 'public')
             <x-page-header :title="$title ?? ''" :eyebrow="$surface === 'admin' ? 'Администрирование' : 'Личный кабинет'">@yield('actions')</x-page-header>
         @endif

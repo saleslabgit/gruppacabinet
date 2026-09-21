@@ -16,16 +16,16 @@
 <x-cell label="Действия">
 <div class="actions">
 @if($prototype ?? true)
-<x-button kind="ghost" data-noop>Просмотр</x-button>
-<x-button kind="ghost" data-noop>Скачать</x-button>
+<x-button icon="eye" kind="ghost" data-noop>Просмотр</x-button>
+<x-button icon="download" kind="ghost" data-noop>Скачать</x-button>
 @if($admin)
-<x-button kind="danger" data-bs-toggle="modal" data-bs-target="#delete-document">Удалить</x-button>
+<x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-document">Удалить</x-button>
 @endif
 @else
-<x-button kind="ghost" :href="$documentActions[$document->id]['view']">Просмотр</x-button>
-<x-button kind="ghost" :href="$documentActions[$document->id]['download']">Скачать</x-button>
+<x-button icon="eye" kind="ghost" :href="$documentActions[$document->id]['view']">Просмотр</x-button>
+<x-button icon="download" kind="ghost" :href="$documentActions[$document->id]['download']">Скачать</x-button>
 @if(isset($documentActions[$document->id]['delete']))
-<x-button kind="danger" data-bs-toggle="modal" :data-bs-target="'#delete-document-'.$document->id">Удалить</x-button>
+<x-button icon="trash" kind="danger" data-bs-toggle="modal" :data-bs-target="'#delete-document-'.$document->id">Удалить</x-button>
 @endif
 @endif
 </div>

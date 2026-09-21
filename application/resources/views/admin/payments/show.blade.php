@@ -1,4 +1,10 @@
 @extends('layouts.admin')
+@section('breadcrumbs')
+<x-breadcrumbs :items="[['label' => 'Платежи' , 'url' => $links['admin-payments']],['label' => $payment['order_number']]]" />
+@endsection
+@section('actions')
+<x-button icon="arrow-left" kind="ghost" :href="$links['admin-payments']">К платежам</x-button>
+@endsection
 @section('content')
 @if($payment['manual_review'])
 <x-alert tone="warning">Требуется ручная проверка. Автоматические попытки завершены, результат остаётся неизвестным.</x-alert>

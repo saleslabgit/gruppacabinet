@@ -1,4 +1,7 @@
 @extends('layouts.admin')
+@section('breadcrumbs')
+<x-breadcrumbs :items="[['label' => 'Справочники' , 'url' => ($realDictionaries ?? false) ? route('admin.dictionaries.index') : $links['admin-dictionaries']],['label' => ($realDictionaries ?? false) ? $dictionary->name : 'Формат группы', 'url' => ($realDictionaries ?? false) ? route('admin.dictionaries.items.index', $dictionary) : $links['admin-dictionary']], ...((isset($editing) || $variant === 'edit') ? [['label' => 'Редактирование']] : [])]" />
+@endsection
 @section('content')
 @php
 $real = $realDictionaries ?? false;
@@ -8,6 +11,7 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 <p class="mb-4">{{ $real ? $dictionary->name.' · '.$dictionary->code : 'Формат группы · group_format' }}</p>
 @if(!$real)<x-alert>Значения ниже — вымышленные примеры для вёрстки, не утверждённый справочник.</x-alert>@endif
 @if($real)<x-validation-summary :errors="$errors" />@endif
+@unless($editing)
 @if(count($rows) === 0)
 <x-empty title="Элементов пока нет" text="Добавьте первое значение ниже." />
 @else
@@ -28,7 +32,7 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 @else
 <x-button kind="danger" data-bs-toggle="modal" data-bs-target="#{{ $real ? 'deactivate-'.$row->id : 'deactivate' }}">Деактивировать</x-button>
 @endif
-@if($real && !$row->usage_count)<x-button kind="danger" data-bs-toggle="modal" data-bs-target="#delete-item-{{ $row->id }}">Удалить</x-button>@endif
+@if($real && !$row->usage_count)<x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-item-{{ $row->id }}">Удалить</x-button>@endif
 </div></x-cell>
 </tr>
 @endforeach
@@ -45,6 +49,7 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 @endif
 @endforeach
 @endif
+@endunless
 <x-panel :title="$editing ? 'Редактировать элемент' : 'Добавить элемент'">
 <form id="item-form" @if($real) method="POST" action="{{ $editing ? route('admin.dictionaries.items.update', [$dictionary, $editing]) : route('admin.dictionaries.items.store', $dictionary) }}" @else data-prototype-form @endif>
 @if($real) @csrf @if($editing) @method('PUT') @endif @endif
@@ -59,11 +64,11 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 <x-checkbox name="active" label="Активен" :checked="$real ? (bool) old('active', $editing->active ?? true) : $variant !== 'deactivated'" :error="$errors['active'] ?? null" />
 <div class="actions mt-3">
 @if($real && $editing)
-<x-button data-bs-toggle="modal" data-bs-target="#item-save-confirm">Сохранить</x-button>
-@elseif($real)<x-button type="submit">Сохранить</x-button>
-@else<x-button data-noop>Сохранить</x-button>@endif
-<x-button kind="ghost" :href="$real ? route('admin.dictionaries.index') : $links['admin-dictionaries']">К справочникам</x-button>
-@if($real && $editing)<x-button kind="ghost" :href="route('admin.dictionaries.items.index', $dictionary)">Отмена</x-button>@endif
+<x-button icon="check-lg" data-bs-toggle="modal" data-bs-target="#item-save-confirm">Сохранить</x-button>
+@elseif($real)<x-button icon="check-lg" type="submit">Сохранить</x-button>
+@else<x-button icon="check-lg" data-noop>Сохранить</x-button>@endif
+<x-button icon="arrow-left" kind="ghost" :href="$real ? route('admin.dictionaries.index') : $links['admin-dictionaries']">К справочникам</x-button>
+@if($real && $editing)<x-button icon="arrow-left" kind="ghost" :href="route('admin.dictionaries.items.index', $dictionary)">Отмена</x-button>@endif
 </div>
 </form>
 </x-panel>

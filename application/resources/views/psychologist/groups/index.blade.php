@@ -1,18 +1,20 @@
 @extends('layouts.psychologist')
 @section('actions')
+@unless($empty)
 @if($realGroups ?? false)
-<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button type="submit">Добавить группу</x-button></form>
+<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button icon="plus-lg" type="submit">Добавить группу</x-button></form>
 @else
-<x-button :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
+<x-button icon="plus-lg" :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
 @endif
+@endunless
 @endsection
 @section('content')
 @if($empty)
 <x-empty title="Здесь будут ваши группы" :text="($realGroups ?? false) ? 'Добавьте первую группу, чтобы отправить её на модерацию.' : (($canCreateGroup ?? true) ? 'Добавьте первую группу, чтобы отправить её на модерацию и получать заявки.' : 'Создание и просмотр групп пока недоступны.')">
 @if($realGroups ?? false)
-<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button type="submit">Добавить группу</x-button></form>
+<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button icon="plus-lg" type="submit">Добавить группу</x-button></form>
 @else
-<x-button :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
+<x-button icon="plus-lg" :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
 @endif
 </x-empty>
 @else

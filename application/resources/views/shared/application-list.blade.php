@@ -3,7 +3,7 @@
 @include('shared.application-counters')
 </x-panel>
 @endunless
-<x-panel title="Поиск и фильтры" :compact="true" class="panel-compact">
+<x-panel title="Поиск и фильтры" :compact="true" class="panel-compact filter-panel">
 <form @if($realApplications ?? false) method="GET" action="{{ $links[$admin ? 'admin-applications' : 'applications'] }}" @else data-prototype-form @endif>
 <div class="row">
 @if($admin)
@@ -17,16 +17,16 @@
 </div>
 <div class="actions">
 @if($realApplications ?? false)
-<x-button kind="secondary" type="submit">Применить</x-button>
+<x-button icon="search" kind="secondary" type="submit">Применить</x-button>
 @else
-<x-button kind="secondary" data-noop>Применить</x-button>
+<x-button icon="search" kind="secondary" data-noop>Применить</x-button>
 @endif
-<x-button kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Сбросить</x-button>
+<x-button icon="arrow-counterclockwise" kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Сбросить</x-button>
 </div>
 </form>
 </x-panel>
 @if($empty)
-<x-empty title="Заявок не найдено" text="Когда участники запишутся в группу, здесь появятся их контакты." />
+<x-empty :title="(!empty($filters['search']) || !in_array($filters['processed'] ?? 'all', ['', 'all']) || $variant === 'no-results') ? 'Заявки не найдены' : 'Заявок пока нет'" :text="(!empty($filters['search']) || !in_array($filters['processed'] ?? 'all', ['', 'all']) || $variant === 'no-results') ? 'Измените условия поиска или сбросьте фильтры.' : 'Здесь появятся контакты участников, когда поступят заявки.'" />
 @else
 <x-table :headers="$admin ? ['Участник','Группа и психолог','Дата и состояние','Действия'] : ['Участник','Дата','Состояние','Действия']">
 @foreach(($realApplications ?? false) ? $applications : [$application] as $item)
@@ -55,14 +55,14 @@
 </x-cell>
 <x-cell label="Действия">
 <div class="actions">
-<x-button kind="ghost" :href="$item['show_url'] ?? route('prototype.'.($admin ? 'admin-application' : 'application'), ['variant' => $variant === 'processed' ? 'processed' : 'new'])">Открыть</x-button>
+<x-button icon="arrow-up-right" kind="ghost" :href="$item['show_url'] ?? route('prototype.'.($admin ? 'admin-application' : 'application'), ['variant' => $variant === 'processed' ? 'processed' : 'new'])">Открыть</x-button>
 @unless($admin)
 @if($item['action_url'] ?? null)
 <form method="POST" action="{{ $item['action_url'] }}">@csrf
-<x-button kind="secondary" type="submit">{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+<x-button icon="check-lg" kind="secondary" type="submit">{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
 </form>
 @else
-<x-button kind="secondary" data-noop>{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+<x-button icon="check-lg" kind="secondary" data-noop>{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
 @endif
 @endunless
 </div>

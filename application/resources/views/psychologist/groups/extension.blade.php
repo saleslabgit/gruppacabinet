@@ -1,4 +1,7 @@
 @extends('layouts.psychologist')
+@section('breadcrumbs')
+<x-breadcrumbs :items="[['label' => 'Мои группы' , 'url' => $links['groups']],['label' => $group['title'] ?: 'Новая группа' , 'url' => ($realGroups ?? false) ? route('psychologist.groups.show', $group['id']) : $links['group']],['label' => 'Продление']]" />
+@endsection
 @section('content')
 <x-panel title="Продлить размещение">
 <h3>{{ $group['title'] }}</h3>
@@ -9,7 +12,7 @@
 <p>Текущая дата окончания: <x-date :value="$group['expires_at']" /></p>
 @if($group['outside_window'])
 <x-alert tone="warning">Срок продления закончился. Создайте новую группу.</x-alert>
-<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button type="submit">Создать группу</x-button></form>
+<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button icon="plus-lg" type="submit">Создать группу</x-button></form>
 @elseif(!$group['current_owner_free'])
 <x-alert>Платное продление станет доступно после подключения оплаты.</x-alert>
 @elseif($group['expiry_due'])
@@ -23,7 +26,7 @@
 @else
 <x-alert>К текущей дате окончания добавится {{ $group['placement_days'] }} дн. Группа останется активной; действия администратора не требуются.</x-alert>
 @endif
-<x-button data-bs-toggle="modal" data-bs-target="#extend-group">Продлить бесплатно</x-button>
+<x-button icon="calendar-plus" data-bs-toggle="modal" data-bs-target="#extend-group">Продлить бесплатно</x-button>
 <x-confirmation id="extend-group" title="Продлить размещение?" action="Продлить бесплатно" kind="primary" :url="route('psychologist.groups.extend', $group['id'])">
 <p>{{ $group['status'] === 'expired' ? 'Группа будет ожидать ручной повторной публикации администратором.' : 'К текущей дате окончания добавится '.$group['placement_days'].' дн.' }}</p>
 </x-confirmation>
@@ -31,7 +34,7 @@
 @else
 @if($variant === 'outside-window')
 <x-alert tone="warning">Срок продления закончился. Создайте новую группу.</x-alert>
-<x-button :href="$links['group-form']">Создать группу</x-button>
+<x-button icon="plus-lg" :href="$links['group-form']">Создать группу</x-button>
 @elseif($variant === 'pending')
 <x-alert tone="warning">Оплата подтверждается WEBPAY. Даты размещения пока не изменены.</x-alert>
 <x-button :href="$links['payment-pending']">Посмотреть состояние</x-button>

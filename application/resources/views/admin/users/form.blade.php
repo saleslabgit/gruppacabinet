@@ -1,11 +1,14 @@
 @extends('layouts.admin')
+@section('breadcrumbs')
+<x-breadcrumbs :items="array_merge([['label' => 'Психологи' , 'url' => $links['admin-users']]], (($creating ?? false) || $variant === 'create') ? [] : [['label' => $user['name'] , 'url' => $prototype ? $links['admin-user'] : route('admin.psychologists.show', $user['id'])]], [['label' => (($creating ?? false) || $variant === 'create') ? 'Создание' : 'Редактирование']])" />
+@endsection
 @section('content')
-<form @if($prototype) data-prototype-form @else method="POST" action="{{ $formAction }}" @endif>
+<form class="editor-form" @if($prototype) data-prototype-form @else method="POST" action="{{ $formAction }}" @endif>
 @if(!$prototype)
 @csrf
 @if(!$creating) @method('PUT') @endif
 @endif
-<x-validation-summary :errors="$errors" />
+<x-validation-summary :errors="$prototype ? array_intersect_key($errors, array_flip(['last_name', 'first_name', 'middle_name', 'phone', 'email', 'education_type_id', 'other_education', 'modality_program', 'training_center', 'graduation_year', 'training_hours', 'license_number', 'license_expires_at', 'group_leading_experience', 'groups_conducted_count', 'personal_data_consent_version', 'personal_data_consent_at', 'documents_confirmed', 'education_confirmed', 'live_session_ready', 'disabled'])) : $errors" />
 <x-panel title="Анкета">
 <p class="meta mb-4">Email обязателен. Остальные поля могут быть не заполнены.</p>
 <h3>Контактные данные</h3>
@@ -92,8 +95,8 @@
 @endif
 </x-panel>
 <div class="actions">
-<x-button :type="$prototype ? 'button' : 'submit'" :data-noop="$prototype" :disabled="$variant === 'disabled'">Сохранить</x-button>
-<x-button kind="ghost" :href="$links['admin-users']">Отмена</x-button>
+<x-button icon="check-lg" :type="$prototype ? 'button' : 'submit'" :data-noop="$prototype" :disabled="$variant === 'disabled'">Сохранить</x-button>
+<x-button icon="arrow-left" kind="ghost" :href="(($creating ?? false) || $variant === 'create') ? $links['admin-users'] : ($prototype ? $links['admin-user'] : route('admin.psychologists.show', $user['id']))">Отмена</x-button>
 </div>
 </form>
 @endsection

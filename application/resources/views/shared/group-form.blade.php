@@ -6,7 +6,7 @@
 @if($admin)
 <x-alert tone="warning">Администратор может редактировать группу независимо от статуса. Изменения опубликованной группы необходимо вручную перенести в каталог.</x-alert>
 @endif
-<form @if($realGroups ?? false) method="POST" action="{{ $formAction }}" @else data-prototype-form @endif>
+<form class="editor-form" @if($realGroups ?? false) method="POST" action="{{ $formAction }}" @else data-prototype-form @endif>
 @if($realGroups ?? false)
 @csrf
 @endif
@@ -48,15 +48,15 @@
 <div class="actions">
 @if($realGroups ?? false)
 @unless($admin)
-<x-button type="submit" :formaction="route('psychologist.groups.submit', $group['id'])">Отправить на модерацию</x-button>
+<x-button icon="send" type="submit" :formaction="route('psychologist.groups.submit', $group['id'])">Отправить на модерацию</x-button>
 @endunless
-<x-button type="submit" :kind="$admin ? 'primary' : 'secondary'" :name="$creating ? null : '_method'" :value="$creating ? null : 'PUT'">{{ $admin ? 'Сохранить' : 'Сохранить изменения' }}</x-button>
+<x-button icon="check-lg" type="submit" :kind="$admin ? 'primary' : 'secondary'" :name="$creating ? null : '_method'" :value="$creating ? null : 'PUT'">{{ $admin ? 'Сохранить' : 'Сохранить изменения' }}</x-button>
 @else
-<x-button data-noop :disabled="$variant === 'disabled'">{{ $admin ? 'Сохранить' : 'Отправить на модерацию' }}</x-button>
+<x-button :icon="$admin ? 'check-lg' : 'send'" data-noop :disabled="$variant === 'disabled'">{{ $admin ? 'Сохранить' : 'Отправить на модерацию' }}</x-button>
 @unless($admin)
-<x-button kind="secondary" data-noop :disabled="$variant === 'disabled'">Сохранить черновик</x-button>
+<x-button icon="check-lg" kind="secondary" data-noop :disabled="$variant === 'disabled'">Сохранить черновик</x-button>
 @endunless
 @endif
-<x-button kind="ghost" :href="$links[$admin ? 'admin-groups' : 'groups']">Отмена</x-button>
+<x-button icon="arrow-left" kind="ghost" :href="(($creating ?? false) || $variant === 'create') ? $links[$admin ? 'admin-groups' : 'groups'] : (($realGroups ?? false) ? route($admin ? 'admin.groups.show' : 'psychologist.groups.show', $group['id']) : $links[$admin ? 'admin-group' : 'group'])">Отмена</x-button>
 </div>
 </form>

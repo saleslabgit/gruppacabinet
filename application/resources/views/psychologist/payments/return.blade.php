@@ -1,4 +1,7 @@
 @extends('layouts.psychologist')
+@section('breadcrumbs')
+<x-breadcrumbs :items="[['label' => 'Мои группы' , 'url' => $links['groups']],['label' => $group['title'] , 'url' => $links['group']],['label' => $title]]" />
+@endsection
 @section('content')
 <x-panel>
 @if($payment['status'] === 'pending')
@@ -34,7 +37,7 @@
 @else
 <x-button :href="route('prototype.placement', ['variant' => 'retry'])">Повторить оплату</x-button>
 @endif
-<x-button kind="ghost" :href="$links['groups']">К моим группам</x-button>
+<x-button icon="arrow-left" kind="ghost" :href="$links['groups']">К моим группам</x-button>
 </div>
 </x-panel>
 @endsection

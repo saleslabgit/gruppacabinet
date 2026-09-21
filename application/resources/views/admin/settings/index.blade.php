@@ -1,7 +1,7 @@
 @extends('layouts.admin')
 @section('content')
 @php $real = $realSettings ?? false; @endphp
-<form id="settings-form" @if($real) method="POST" action="{{ route('admin.settings.update') }}" @else data-prototype-form @endif>
+<form class="editor-form" id="settings-form" @if($real) method="POST" action="{{ route('admin.settings.update') }}" @else data-prototype-form @endif>
 @if($real) @csrf @method('PUT') @endif
 <x-validation-summary :errors="$real ? $errors : array_intersect_key($errors, array_flip(['placement_price','warning_days']))" />
 <x-panel title="Стоимость операций">
@@ -31,7 +31,7 @@
 @endforeach
 </div>
 </x-panel>
-<x-button data-bs-toggle="modal" data-bs-target="#settings-confirm">Сохранить настройки</x-button>
+<x-button icon="check-lg" data-bs-toggle="modal" data-bs-target="#settings-confirm">Сохранить настройки</x-button>
 </form>
 <x-confirmation id="settings-confirm" title="Изменить цены и сроки?" action="Сохранить настройки" kind="primary" :form="$real ? 'settings-form' : null" :open="$variant === 'confirmation'">
 <p>Новые значения применяются к новым операциям. Уже зафиксированные сроки размещения не изменяются.</p>

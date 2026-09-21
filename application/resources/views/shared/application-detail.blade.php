@@ -44,12 +44,12 @@
 @unless($admin)
 @if($application['action_url'] ?? null)
 <form method="POST" action="{{ $application['action_url'] }}">@csrf
-<x-button type="submit">{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+<x-button icon="check-lg" type="submit">{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
 </form>
 @else
-<x-button data-noop>{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+<x-button icon="check-lg" data-noop>{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
 @endif
 @endunless
-<x-button kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Назад к заявкам</x-button>
+<x-button icon="arrow-left" kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Назад к заявкам</x-button>
 </div>
 </x-panel>

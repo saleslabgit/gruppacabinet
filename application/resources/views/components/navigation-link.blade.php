@@ -1,0 +1,2 @@
+@props(['item'])
+<a href="{{ $item['url'] }}" @if($item['current']) aria-current="page" @endif><x-icon :name="['Главная' => 'grid', 'Рабочая сводка' => 'grid', 'Психологи' => 'people', 'Группы' => 'collection', 'Мои группы' => 'collection', 'Заявки' => 'inbox', 'Платежи' => 'credit-card', 'Справочники' => 'journal-text', 'Настройки' => 'gear', 'Мои данные' => 'person'][$item['label']] ?? 'circle'" /><span>{{ $item['label'] }}</span></a>

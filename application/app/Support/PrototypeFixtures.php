@@ -117,8 +117,17 @@ final class PrototypeFixtures
         $payment = ['id' => $variant === 'pagination' ? 502 : 501, 'order_number' => ($variant === 'pagination' ? 'DEMO-ORDER-20260920-0002' : 'DEMO-ORDER-20260920-0001').($long ? str_repeat('-DEMO', 10) : ''), 'transaction_id' => in_array($paymentStatus, ['created', 'pending'], true) ? null : 'DEMO-TRANSACTION-0001', 'amount' => 5000, 'currency' => 'BYN', 'type' => str_starts_with($variant, 'extension') ? 'extension' : 'placement', 'status' => $paymentStatus, 'created_at' => $date->subHour(), 'paid_at' => in_array($paymentStatus, ['succeeded', 'refunded'], true) ? $date : null, 'refunded_at' => $paymentStatus === 'refunded' ? $date->addHour() : null, 'last_status_check_at' => $paymentStatus === 'created' ? null : $date, 'status_check_attempts' => $variant === 'manual-review' ? 3 : 1, 'refund_comment' => 'Демонстрационная отметка ручного возврата.', 'manual_review' => $variant === 'manual-review'];
         $navigation = [];
         $nav = $admin ? ['admin-home' => 'Рабочая сводка', 'admin-users' => 'Психологи', 'admin-groups' => 'Группы', 'admin-applications' => 'Заявки', 'admin-payments' => 'Платежи', 'admin-dictionaries' => 'Справочники', 'admin-settings' => 'Настройки'] : ['groups' => 'Мои группы', 'profile' => 'Мои данные'];
+        $section = match ($slug) {
+            'groups-empty', 'group', 'group-form', 'extension', 'placement', 'payment-pending', 'payment-success', 'payment-result', 'applications', 'application' => 'groups',
+            'admin-user', 'admin-user-form', 'admin-documents' => 'admin-users',
+            'admin-group', 'admin-group-form' => 'admin-groups',
+            'admin-application' => 'admin-applications',
+            'admin-payment' => 'admin-payments',
+            'admin-dictionary' => 'admin-dictionaries',
+            default => $slug,
+        };
         foreach ($nav as $key => $label) {
-            $navigation[] = ['label' => $label, 'url' => $links[$key], 'current' => $slug === $key];
+            $navigation[] = ['label' => $label, 'url' => $links[$key], 'current' => $section === $key];
         }
         $errors = $variant === 'validation' ? ['title' => 'Укажите название группы.', 'description' => 'Добавьте описание.', 'schedule' => 'Укажите расписание.', 'format_id' => 'Выберите формат.', 'meeting_duration_minutes' => 'Введите положительное целое число минут.', 'participant_capacity' => 'Введите положительное целое число участников.', 'gender_id' => 'Выберите значение.', 'meeting_price' => 'Укажите неотрицательную стоимость.', 'email' => 'Укажите корректный email.', 'password' => 'Пароли должны совпадать и соответствовать требованиям.', 'password_confirmation' => 'Подтверждение не совпадает.', 'file' => 'Выберите PDF, JPEG или PNG допустимого размера.', 'moderator_comment' => 'Комментарий обязателен.', 'rejection_reason' => 'Причина обязательна.', 'refund_comment' => 'Добавьте комментарий к возврату.', 'code' => 'Укажите уникальный код.', 'name' => 'Укажите название.', 'sort_order' => 'Введите целое неотрицательное число.', 'graduation_year' => 'Укажите корректный год окончания.', 'training_hours' => 'Введите целое неотрицательное число часов.', 'license_expires_at' => 'Укажите корректную дату.', 'education_type_id' => 'Выберите тип образования.', 'documents_confirmed' => 'Проверьте подтверждение достоверности документов.', 'placement_price' => 'Введите неотрицательную сумму.', 'warning_days' => 'Срок предупреждения должен быть меньше срока размещения.'] : [];
         if ($variant === 'validation' && $slug === 'login') {

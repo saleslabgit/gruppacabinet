@@ -1,4 +1,4 @@
-<x-panel title="История статусов и замечаний">
+<x-panel class="panel-secondary" title="История статусов и замечаний">
 <ol class="timeline">
 @if($realGroups ?? false)
 @foreach($history as $entry)
