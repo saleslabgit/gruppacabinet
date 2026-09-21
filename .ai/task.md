@@ -1,596 +1,616 @@
-# Task: TASK-2026-09-21-07
+# Task: TASK-2026-09-21-08
 
 Status: planned
-Created from: 28aabaab3bcc84622959f9e81088d0844c90fc5f (main)
+Created from: 96b64c9323ba78ff434e35f2bdeadf15c623e344 (main)
 
 ## Title
 
-Stage 9 — Implement placement lifecycle expiration, remaining-time UI, expired admin filter, and free extensions without email or WEBPAY
+Stage 10 — Implement internal participant application lists, ownership/IDOR, counters, processing state, phone search, and retention cleanup
 
 ## Goal
 
-Implement Stage 9 from SPEC.md on top of the accepted Stage 7 group workflow and Stage 8 typed settings.
+Implement Stage 10 from SPEC.md using the accepted Stage 3 psychologist/admin application Blade views.
 
-This milestone completes the time-based lifecycle of an already activated group without email and without WEBPAY:
+This milestone makes participant applications fully usable **inside the cabinet** using synthetic/factory data, while deliberately not implementing the external public-site API yet.
 
-- active groups automatically become expired when expires_at is reached;
-- psychologist/admin pages show truthful remaining/expiry state;
-- administrator has a real expired quick filter for manual unpublication on gruppa.info;
-- a psychologist whose **current** gp_users.free=true can extend active or expired owned groups without payment;
-- active free extension shifts expires_at by the group’s snapshotted placement_days and resets the warning marker;
-- expired free extension transitions expired -> approved without moderation and waits for manual re-publication;
-- manual activation after expired extension recalculates a fresh placement period using the **current** placement_duration_days setting;
-- extension-window rules use the typed expired_extension_window_days setting;
-- paid owners (current gp_users.free=false) receive no payment flow yet and cannot bypass it with direct POST.
+After this task:
 
-Do not implement email warning jobs, SMTP, WEBPAY, payment creation, public API, or participant applications.
+- a psychologist sees applications only for groups they own;
+- a psychologist can open an application of their own group;
+- a psychologist can mark it processed and return it to unprocessed;
+- group list/detail counters show real new/processed/all counts;
+- an administrator can see/search/filter all applications across all groups/psychologists;
+- an administrator can open any application read-only;
+- application lists are paginated and no-N+1;
+- phone search uses normalized phone data;
+- a scheduled cleanup command permanently deletes applications strictly older than the configured retention period;
+- all real application UI uses approved Stage 3 views.
+
+External /api/v1 intake, HMAC, request idempotency and public-site integration remain Stage 11.
 
 ## Facts
 
-- Stages 1–8 are accepted through commit 28aabaab3bcc84622959f9e81088d0844c90fc5f.
-- Stage 7 already implements:
-  - draft/moderation/revision/rejected/approved/active workflow;
-  - manual approved -> active activation;
-  - published_at set at activation;
-  - placement_days snapshotted from SettingService::placementDurationDays();
-  - expires_at = published_at + placement_days;
-  - expiry_warning_sent_at reset to null on activation;
-  - real owner/admin group list/detail views and history.
-- GroupStatus enum already permits:
-  - active -> expired;
-  - expired -> approved.
-- GroupStatusTransitionService already performs lockForUpdate, transition validation and status-history persistence.
-- SettingService already exposes:
-  - placementDurationDays();
-  - expiryWarningDays();
-  - expiredExtensionWindowDays().
-- Stage 8 lets admin change these settings through typed/audited UI.
-- gp_groups has indexed status/expires_at and composite (status, expires_at) for scheduler work.
-- placement_days is the historical duration snapshot of the current placement period.
-- gp_groups.free is only the creation-time tariff snapshot and MUST NOT decide extension tariff.
-- Extension tariff source of truth is current gp_users.free at the moment the extension attempt is processed.
-- No Stage 1–8 real flow creates payment records.
-- Existing Stage 3 views already include active/warning/expired/outside-window and free/paid extension prototype variants.
+- Stages 1–9 are accepted through commit 96b64c9323ba78ff434e35f2bdeadf15c623e344.
+- gp_group_applications already exists with:
+  - id;
+  - group_id;
+  - last_name;
+  - first_name;
+  - phone;
+  - phone_normalized;
+  - processed_at;
+  - timestamps.
+- Indexes already exist on:
+  - group_id;
+  - processed_at;
+  - (group_id, processed_at);
+  - created_at.
+- GroupApplication model already belongsTo Group.
+- Group belongsTo owner User.
+- SettingService already exposes participantApplicationRetentionMonths().
+- Default retention setting is 12 months.
+- Stage 7/9 psychologist group list/detail currently use placeholder zero/unavailable application data.
+- Stage 3 approved views already exist:
+  - psychologist/applications/index.blade.php;
+  - psychologist/applications/show.blade.php;
+  - admin/applications/index.blade.php;
+  - admin/applications/show.blade.php;
+  - shared/application-list.blade.php;
+  - shared/application-detail.blade.php;
+  - shared/application-counters.blade.php.
+- Prototype catalogue includes real-looking application states but they remain synthetic/no-op.
+- Stage 11 will later create applications from the public site by group public_uuid.
+- Stage 10 must not expose a cabinet form/action that creates participant applications.
 
 ## Product / Architecture Decisions
 
-### Active free extension duration
+### No real application creation route in Stage 10
 
-For an active group, free extension uses the group’s existing placement_days snapshot:
+Stage 10 is internal read/update UI only.
 
-expires_at = expires_at + placement_days
+Do not add POST /applications create behavior.
+Do not add public API routes.
+Do not add a psychologist/admin “create application” action.
 
-It does NOT re-read the current placement_duration_days setting for that active period.
+Tests use model factories.
+Manual/local verification may create synthetic fixture records directly/factory/script, but no production UI endpoint is introduced.
 
-Changing placement_duration_days therefore:
-- does not alter an already active period;
-- does not alter the duration added by extending that active period;
-- DOES apply when an approved group is manually activated/re-published into a new placement period.
+### Processing state
 
-### Expired free extension
+processed_at is the only source of truth:
 
-For an expired group inside the extension window:
+- processed_at = null -> new/unprocessed;
+- processed_at != null -> processed.
 
-- transition expired -> approved;
-- do not run moderation;
-- do not create payment;
-- do not create new published_at/expires_at at extension time;
-- retain the old dates as the previous placement period until admin re-activates;
-- admin manually republishes on gruppa.info and uses the existing approved -> active action;
-- that activation overwrites published_at/expires_at and snapshots the then-current placement_duration_days setting.
+Mark processed:
+- set processed_at to current UTC time.
 
-### Current tariff
+Return to unprocessed:
+- set processed_at = null.
 
-Every extension attempt must read current owner gp_users.free from the database.
+Repeated action should be safe/idempotent:
+- marking an already processed application does not keep changing its timestamp;
+- returning an already unprocessed application remains null.
 
-- current free=true -> free Stage 9 extension logic;
-- current free=false -> no extension is applied in Stage 9;
-- historical gp_groups.free is ignored for this decision.
+No separate status column.
 
-### Extension window boundary
+### Phone normalization boundary
 
-Expired extension is allowed while:
+Stage 10 needs reusable normalization for storage/search, but must not invent a default country for ambiguous local numbers.
 
-now <= expires_at + expired_extension_window_days
+Add a small reusable PhoneNormalizer suitable for Stage 11:
 
-It is rejected after that exact boundary.
+- trim whitespace;
+- remove formatting separators such as spaces, parentheses, hyphens and dots;
+- accept an international + followed by digits;
+- convert 00-prefixed international notation to +;
+- a bare number already beginning with country digits may be canonicalized to +digits only when it is unambiguous under the implemented rule;
+- do not silently assume a country for arbitrary local numbers;
+- normalized storage value should be canonical +digits where an international number is available;
+- search normalization should compare digits independent of display punctuation.
 
-### Warning state
+Synthetic Stage 10 fixtures should use explicit international phone numbers.
 
-Stage 9 warning is presentation/lifecycle state only.
+If the existing SPEC does not define enough information to convert an ambiguous local number to international form, do not guess. Stage 11 API validation may tighten accepted input when integration requirements are known.
 
-- For active group with a future expires_at, use current SettingService::expiryWarningDays().
-- warning=true when remaining time is within the configured threshold.
-- Do NOT queue email.
-- Do NOT set expiry_warning_sent_at merely because the warning is displayed.
-- Stage 12 owns warning email jobs and successful-send marker behavior.
+### Retention cutoff
 
-### Scheduler frequency
+Use current SettingService::participantApplicationRetentionMonths() at command run time.
 
-Add an explicit Artisan command for expiration and schedule it every minute through Laravel Scheduler.
+Delete applications where:
 
-The command must be safe to run repeatedly and concurrently:
-- indexed candidate query;
-- bounded/chunked processing;
-- row lock + re-check before each transition;
-- active -> expired only once;
-- no duplicate history;
-- command-level withoutOverlapping is useful but row-level correctness must not depend on it.
+created_at < current UTC time minus configured retention months
 
-Production cron configuration itself remains deployment work; document the standard schedule:run requirement.
+Exact cutoff equality is retained; only strictly older rows are removed.
+
+Deletion is physical/permanent, because gp_group_applications currently has no soft-delete column and SPEC explicitly requires permanent retention cleanup.
+
+Applications belonging to soft-deleted groups are still subject to retention cleanup.
 
 ## Scope
 
-### 1. Lifecycle service
+### 1. Model / factory foundation
 
-Add a small explicit service, for example GroupLifecycleService, responsible for:
+Improve GroupApplication model typing/relationships as needed.
 
-- expireDueGroups();
-- expireOne()/equivalent locked expiration;
-- extension availability calculations;
-- free extension application;
-- remaining/warning presentation data where appropriate.
+Add GroupApplicationFactory for tests and local synthetic setup.
 
-Do not create a generic workflow engine.
+Factory should:
+- require/associate a Group;
+- create clearly synthetic names/phones;
+- populate phone and phone_normalized consistently through the reusable normalizer or a centralized creation invariant;
+- support processed/unprocessed states.
 
-Reuse GroupStatusTransitionService for every status transition:
-- active -> expired with actor_type=system, actor=null;
-- expired -> approved with actor_type=system, actor=null.
+Do not seed fake production applications in production.
 
-Do not assign status directly.
+Do not commit real personal data.
 
-### 2. Expiration command
+### 2. Reusable phone normalizer
+
+Add a small support/service class, not controller-specific parsing.
+
+It should provide at least:
+- normalizeForStorage(string): canonical normalized value or explicit validation/error for unsupported ambiguous input;
+- digitsForSearch(string): digits-only comparable search key.
+
+Tests must cover:
+- +375 (29) 123-45-67;
+- 00375 29 123 45 67;
+- already normalized international input;
+- punctuation/whitespace;
+- malformed non-phone text;
+- ambiguous local numbers are not silently assigned a country.
+
+Do not add a third-party phone package in this stage.
+
+Stage 11 must be able to reuse the same normalization service.
+
+### 3. Psychologist group counters
+
+Replace Stage 7 placeholder counters with real counts on psychologist group list/detail.
+
+For every listed group expose:
+- new_count = applications where processed_at is null;
+- processed_count = applications where processed_at is not null;
+- all_count = total applications.
+
+Use Eloquent withCount/subqueries in the main group query.
+No per-group application query.
+
+Group list:
+- display real shared.application-counters;
+- active link “Открыть заявки” to that group’s real application list.
+
+Group detail:
+- display real counters;
+- show truthful empty/latest snippet as appropriate without a per-group N+1;
+- active link “Все заявки группы”.
+
+Do not restrict viewing existing applications based on current group lifecycle status; owners may still need historical applications after expiry. Ownership is the access boundary.
+
+### 4. Owner application routes
+
+Under account + role:psychologist add nested owner routes, recommended:
+
+GET /groups/{group}/applications
+GET /groups/{group}/applications/{application}
+POST /groups/{group}/applications/{application}/processed
+POST /groups/{group}/applications/{application}/unprocessed
+
+Names under psychologist.applications.* or psychologist.groups.applications.* are acceptable if consistent.
+
+Use owner-scoped lookup:
+- group.owner_id = authenticated user id;
+- application.group_id = resolved group id.
+
+Foreign group/application combinations return 404 without leaking data.
+
+Do not globally bind an application and trust only policy afterward.
+
+### 5. Psychologist application list
+
+Connect psychologist.applications.index to real data.
+
+Requirements:
+- only one owned group selected by route;
+- real group title/counters;
+- filter processed:
+  - all;
+  - new;
+  - processed;
+- pagination 20;
+- newest first with deterministic id DESC tie-break;
+- query-string preservation;
+- real empty/no-results state;
+- no prototype links/actions;
+- no search field is required for psychologist list unless the approved view naturally supports it;
+- no N+1.
+
+Application rows show:
+- participant full name from last_name + first_name;
+- phone;
+- created_at;
+- processed/new status;
+- open;
+- mark processed / return unprocessed.
+
+### 6. Psychologist application detail
+
+Connect psychologist.applications.show to real data.
+
+Show:
+- participant name;
+- phone;
+- group link;
+- received date;
+- updated date;
+- processed date/status;
+- real process/unprocess action;
+- back link to the group’s application list.
+
+Do not expose:
+- group owner ID as editable data;
+- phone_normalized as a hidden internal field unless needed for search/debug;
+- unrelated participant/application rows.
+
+### 7. Process / unprocess workflow
+
+Add a small ApplicationWorkflow/ApplicationService or equivalent explicit service.
+
+Within transaction/row lock:
+- re-resolve application under owned group;
+- authorize owner access;
+- mark processed only if currently null;
+- unprocess only if currently non-null;
+- repeated same-state action returns success without changing processed_at again.
+
+Use current UTC time.
+No audit is required by SPEC for participant processing state.
+No email/job/API side effect.
+
+Do not allow administrator mutation in Stage 10; admin application detail is read-only.
+
+### 8. Application policy / IDOR
+
+Add GroupApplicationPolicy or equivalent.
+
+Psychologist:
+- view only if application.group.owner_id == actor.id;
+- process/unprocess only own group applications.
+
+Administrator:
+- can viewAny/view all;
+- no process/unprocess action required in Stage 10.
+
+Still prefer scoped queries/routes for owner endpoints so guessed foreign IDs return 404.
+
+Revoked psychologist/admin access continues through existing account middleware.
+
+### 9. Admin navigation
+
+Add real “Заявки” to admin navigation now that Stage 10 routes exist.
+
+Real admin nav becomes:
+- Главная;
+- Психологи;
+- Группы;
+- Заявки;
+- Платежи;
+- Справочники;
+- Настройки;
+- Выход.
+
+Psychologist navigation remains:
+- Мои группы;
+- Мои данные;
+- Выход.
+
+No separate global psychologist Applications nav item is required; applications are entered from a group.
+
+### 10. Admin routes
+
+Under account + role:admin add:
+
+GET /admin/applications
+GET /admin/applications/{application}
+
+No admin create/update/delete/process routes.
+
+### 11. Admin application list
+
+Connect admin.applications.index to real data.
+
+Implement:
+- search field over:
+  - participant last_name;
+  - participant first_name;
+  - combined participant name where practical;
+  - raw phone;
+  - normalized phone;
+  - group title;
+  - psychologist full name/email;
+- processed filter:
+  - all;
+  - new;
+  - processed;
+- pagination 20;
+- newest first with deterministic id DESC;
+- query preservation;
+- eager-load group + owner;
+- no N+1.
+
+Phone search:
+- normalize user-entered phone-like query to digits and match normalized phone;
+- textual search still searches participant/group/psychologist fields;
+- do not make phone normalization cause SQL errors for arbitrary text.
+
+Rows show:
+- participant;
+- phone;
+- group with real admin group link;
+- psychologist with real Stage 5 profile link;
+- created date;
+- status;
+- open detail.
+
+### 12. Admin application detail
+
+Connect admin.applications.show to real data.
+
+Show:
+- participant;
+- phone;
+- group;
+- psychologist;
+- received/updated/processed times;
+- status.
+
+Real links:
+- group -> admin.groups.show;
+- psychologist -> admin.psychologists.show;
+- back -> admin.applications.index.
+
+No admin processed/unprocessed action in Stage 10.
+
+### 13. Group/application counters in admin context
+
+At minimum, psychologist group surfaces must have real counters per SPEC.
+
+If existing admin group detail naturally contains application counters, connect them truthfully too, with a link to admin applications filtered by group where practical.
+
+Do not add expensive per-row admin counter queries.
+
+### 14. Retention cleanup service
+
+Add a small ApplicationRetentionService or equivalent.
+
+Use current SettingService::participantApplicationRetentionMonths() once per run.
+
+Behavior:
+- cutoff calculated in UTC;
+- delete only created_at < cutoff;
+- exact cutoff retained;
+- permanent physical DELETE;
+- process in bounded chunks;
+- application/group status does not exempt records;
+- records for soft-deleted groups are included;
+- do not delete groups/users;
+- do not log participant names/phones.
+
+Return only aggregate deleted count.
+
+### 15. Retention command
 
 Add an Artisan command such as:
 
-php artisan groups:expire
+php artisan applications:cleanup
 
-Behavior:
+Output/log only aggregate count, e.g.:
+Deleted applications: N
 
-- select non-deleted groups with status=active and expires_at <= now UTC;
-- ignore active groups whose expires_at is null;
-- process in bounded chunks (e.g. chunkById);
-- for each candidate, transactionally lock and re-read the row;
-- re-check status=active and expires_at <= now after lock;
-- transition active -> expired through GroupStatusTransitionService;
-- history actor_id=null, actor_type=system, comment=null;
-- do not alter published_at, expires_at or placement_days;
-- do not touch payments/applications;
-- do not queue email/jobs.
+No participant PII.
 
-Command must emit/log only a small aggregate result such as processed/expired count, no personal/group content.
+Repeated run after deletion should report 0.
 
-A repeated run must produce zero additional transitions/history for already expired groups.
+### 16. Scheduler registration
 
-### 3. Scheduler registration
+Schedule applications:cleanup once daily with withoutOverlapping.
 
-Register groups:expire in Laravel Scheduler every minute.
+Use Laravel Scheduler; exact wall-clock minute is not a product requirement, so standard daily() in app timezone/UTC is sufficient.
 
-Use withoutOverlapping or equivalent command-level guard.
+Keep existing groups:expire every-minute schedule unchanged.
 
-Do not add warning-email schedule/job in Stage 9.
+Do not add Stage 11 API or Stage 12 warning-mail schedules.
 
-Do not add WEBPAY recovery schedule.
+### 17. Retention race / boundary safety
 
-### 4. Scheduler / race safety
+Tests must cover:
+- record one second older than cutoff deleted;
+- exact cutoff retained;
+- one second newer retained;
+- retention setting change affects next run;
+- processed and unprocessed old applications both deleted;
+- application attached to soft-deleted group still deleted;
+- repeated command idempotent;
+- cleanup never deletes groups/users;
+- aggregate output contains no PII.
 
-Test and implement correctness for:
+Use transaction/chunk strategy safe for normal scheduler concurrency.
+Command-level withoutOverlapping is required; DB-level duplicate deletion is naturally safe but avoid chunk pagination bugs while deleting.
 
-- before expires_at: no transition;
-- exactly at expires_at: transition permitted;
-- after expires_at: transition;
-- repeated command run: exactly one active -> expired history row;
-- two lifecycle attempts observing the same candidate do not create duplicate transitions;
-- soft-deleted groups ignored;
-- non-active groups ignored;
-- disabled active groups still expire based on time because disabled is independent of lifecycle status.
-
-Do not rely only on candidate query state; re-check under lock.
-
-### 5. Remaining time / warning presentation
-
-Extend real GroupPages/presenter data without changing prototype fixtures.
-
-For active groups with expires_at:
-
-- expose the exact expiry date already shown;
-- expose a computed remaining duration/day count suitable for UI;
-- compute warning using current expiry_warning_days setting;
-- show a visible warning when within threshold.
-
-Use a deterministic rule:
-- remaining_days = max(0, ceil((expires_at - now) / 86400 seconds));
-- when remaining_days > 0, real UI may show “До окончания размещения: N дн.”;
-- when expiry is due/past but scheduler has not yet transitioned the record, show a truthful due/expired-soon state rather than a negative value.
-
-Do not hardcode “3 дня” in real mode.
-Prototype warning variant may retain its synthetic wording/state.
-
-Stage 9 must not set expiry_warning_sent_at from page rendering.
-
-### 6. Expired presentation
-
-For real expired group owner detail/list:
-
-- status “Закончена”;
-- show historical expires_at;
-- show whether extension window is still open;
-- if outside window, show approved existing warning “Срок продления закончился. Создайте новую группу.”;
-- no edit action.
-
-Admin real group detail/list for expired rows should clearly state that public unpublication is manual.
-
-Do not automatically call/update gruppa.info.
-
-### 7. Admin expired quick filter
-
-Extend real /admin/groups quick filters with:
-
-quick=expired
-
-It must select non-deleted status=expired groups requiring manual removal/unpublication from the public site.
-
-UI label should remain consistent with approved prototype wording, e.g. “Снять с публикации”.
-
-Requirements:
-- no WEBPAY/payment query;
-- query preserved through pagination/sort where applicable;
-- no N+1;
-- prototype filter behavior unchanged.
-
-Do not add a fake “unpublished” state or database flag; manual public-site work remains outside the cabinet.
-
-### 8. Real extension page
-
-Connect the existing approved psychologist.groups.extension Blade view to real Stage 9 data rather than creating a new page.
-
-Add owner-only GET route, recommended:
-
-GET /groups/{group}/extension
-
-Only owned, non-deleted group IDs are resolved.
-
-The page must support truthful real states:
-
-#### Current owner free=true, group active
-- show free extension;
-- show current expires_at;
-- show duration that will be added = group.placement_days;
-- real confirmed action available.
-
-#### Current owner free=true, group expired and inside window
-- show free extension;
-- explain it returns group to “Одобрена, ожидает публикации”;
-- explain admin must manually republish and activate;
-- real confirmed action available.
-
-#### Expired outside window
-- no extension POST action;
-- tell psychologist to create a new group.
-
-#### Current owner free=false
-- no payment form;
-- no payment record;
-- no WEBPAY link;
-- explain paid extension will become available after payment integration is connected;
-- no effective POST action.
-
-Use the CURRENT owner tariff in all real extension display logic.
-Do not use group.free to choose free/paid extension presentation.
-
-Prototype extension variants remain unchanged.
-
-### 9. Free extension action
-
-Add owner-only POST route, e.g.:
-
-POST /groups/{group}/extension
-
-Use a dedicated Form Request or explicit confirmed action request.
-
-Requirements:
-- CSRF;
-- confirmation;
-- owner-scoped group lookup;
-- existing account + role:psychologist;
-- reject group.disabled=true;
-- only active/expired groups;
-- current owner free must be true;
-- current owner row should be re-read transactionally;
-- no payment creation;
-- no email/job creation.
-
-### 10. Active free extension
-
-Within one transaction/row lock:
-
-- re-read current owner tariff;
-- lock/re-read group;
-- require status=active;
-- require expires_at not null;
-- require placement_days positive/non-null;
-- require the current placement not already effectively expired.
-
-Then:
-
-- expires_at = existing expires_at + placement_days;
-- status remains active;
-- published_at remains unchanged;
-- placement_days remains unchanged;
-- expiry_warning_sent_at = null.
-
-No status-history row is required because status does not change.
-
-Repeated explicit POSTs are separate user actions and each valid request may add one duration; however a single request must not apply twice because of retries inside the same application action.
-
-No payment row.
-
-### 11. Overdue active race behavior
-
-If an extension request reaches an active group whose expires_at <= now before the scheduler has marked it expired, it must NOT receive active-extension semantics.
-
-Choose one safe deterministic implementation:
-
-Preferred:
-- under lock transition active -> expired as system first;
-- then apply the expired extension rules in the same coordinated operation if still inside the extension window.
-
-Acceptable alternative:
-- reject the request with a clear validation result and require refresh/scheduler transition before retry.
-
-Whichever approach is used must be explicitly tested and documented.
-Do not extend from an already elapsed expires_at as though it were still active.
-
-### 12. Expired free extension
-
-Within a transaction:
-
-- current owner free must be true;
-- group status must be expired;
-- expires_at must exist;
-- compute deadline = expires_at + current expired_extension_window_days;
-- reject when now > deadline;
-- transition expired -> approved through GroupStatusTransitionService;
-- actor_type=system, actor=null, because this lifecycle transition is defined as a system transition;
-- no moderation;
-- no payment;
-- do not overwrite public_uuid/free/owner/content;
-- do not create new published_at/expires_at values at this moment.
-
-After transition:
-- psychologist detail shows approved waiting for manual publication;
-- admin approved quick filter includes it;
-- admin detail should identify it as a re-publication/extension case using real history, without introducing a new DB flag unless absolutely necessary.
-
-### 13. Re-publication activation
-
-Reuse Stage 7 approved -> active activation.
-
-When the approved group came from expired -> approved:
-
-- admin still sees public_uuid/reminder;
-- activation uses CURRENT SettingService::placementDurationDays();
-- published_at becomes current UTC time;
-- placement_days becomes current setting;
-- expires_at = new published_at + current duration;
-- expiry_warning_sent_at = null;
-- status history gets approved -> active with admin actor.
-
-Add explicit regression proving the old placement_days may differ from the new period.
-
-Do not rerun moderation.
-
-### 14. Extension window UI/data
-
-Use current SettingService::expiredExtensionWindowDays() at read/action time.
-
-Expose on real pages as needed:
-- extension_deadline;
-- outside_window boolean;
-- can_extend boolean;
-- current owner tariff mode.
-
-Do not persist a duplicate deadline column.
-
-A later settings change affects whether a currently expired group is still inside the extension window because the setting is evaluated at the extension attempt/page read.
-
-### 15. Current tariff regression
-
-Explicitly test both directions:
-
-- group was created with group.free=false, current owner.free=true -> Stage 9 free extension works;
-- group was created with group.free=true, current owner.free=false -> Stage 9 extension does NOT apply and no payment is created.
-
-The historical gp_groups.free value must remain unchanged in both cases.
-
-### 16. Paid-owner Stage 9 boundary
-
-For current owner.free=false:
-
-- active/expired extension page is informational only;
-- direct POST cannot extend or change status/dates;
-- no gp_payments row;
-- no payment route/redirect/provider request;
-- no extension_price usage is required to create an operation.
-
-Stage 14 will implement paid extension.
-
-### 17. No email/job boundary
+### 18. No external intake boundary
 
 Hard gate:
 
-- do not create warning mail classes/jobs;
-- do not queue jobs when a group enters warning window;
-- do not set expiry_warning_sent_at due to warning UI/scheduler;
-- do not add SMTP behavior.
+- no /api/v1 application endpoint;
+- no HMAC;
+- no X-Timestamp;
+- no X-Request-Id;
+- no public-site secret;
+- no rate limit specific to integration;
+- no browser/public application form inside cabinet;
+- no create route for participant applications.
 
-Stage 12 owns warning email.
+Stage 11 will create incoming applications.
 
-Tests should use Mail::fake()/Queue::fake() where useful to prove no warning dispatch.
+### 19. No payment/email side effects
 
-### 18. Admin/list query behavior
+Stage 10 application read/process/cleanup must not:
+- create/update payments;
+- invoke WEBPAY;
+- send/queue email;
+- alter group lifecycle.
 
-Real owner/admin lists must remain paginated and no-N+1.
-
-Adding lifecycle presentation must not introduce:
-- one Setting query per group;
-- one owner query per group;
-- payment/application queries.
-
-Read the relevant settings once per request/service calculation and map over loaded rows.
-
-Admin expired quick filter and owner list query counts should remain constant as row count grows.
-
-### 19. Policy / IDOR
-
-Extend GroupPolicy or add a narrow extension ability.
-
-Psychologist may access extension routes only for:
-- own group;
-- non-deleted group;
-- group not disabled;
-- status active or expired;
-- normal active account through existing middleware.
-
-Foreign group ID should return 404 through owner-scoped lookup.
-
-Admin cannot use psychologist-only extension route because role middleware remains psychologist-only.
-
-Paid/free eligibility may be enforced by service/action rather than static policy because it depends on current tariff/settings.
+Add regression assertions where useful.
 
 ### 20. Blade integration
 
-Reuse existing views/components:
+Reuse existing:
+- psychologist/applications/index;
+- psychologist/applications/show;
+- admin/applications/index;
+- admin/applications/show;
+- shared/application-list;
+- shared/application-detail;
+- shared/application-counters;
+- psychologist/groups/index/show;
+- group action/link surfaces as needed.
 
-- psychologist/groups/index;
-- psychologist/groups/show;
-- psychologist/groups/extension;
-- psychologist/groups/_actions;
-- shared/group-summary;
-- admin/groups/index;
-- admin/groups/show;
-- shared/group-history where needed.
+Adapt shared application partials with explicit real URLs/actions/capabilities rather than role guessing when practical.
 
-Real action behavior:
-
-- active/expired owner action routes to real extension page when appropriate;
-- expired outside window routes to/create-new behavior as approved;
-- paid owner gets truthful unavailable extension UX, not prototype WEBPAY;
-- real warning text uses configured threshold/remaining data;
-- admin expired filter is real.
-
-Prototype variants:
-- active/warning/expired/outside-window;
-- free-active/free-expired/paid-active/paid-expired/outside-window/pending
-remain synthetic/no-op and unchanged.
+Prototype modes remain:
+- synthetic;
+- no-op;
+- all existing variants unchanged.
 
 Do not redesign Stage 3.
+A global UI/UX audit is intentionally planned after Stage 10 as a separate task.
 
-### 21. Tests
+### 21. Pagination and query performance
 
-All tests use MySQL.
+All application lists paginate 20.
+
+Tests must verify constant query counts as rows/groups grow.
+
+Psychologist group list:
+- counters via withCount/subqueries;
+- no application query per group.
+
+Application lists:
+- no group/owner query per row.
+
+No payment queries should be introduced by application surfaces.
+
+### 22. Tests
+
+All tests run on MySQL.
 
 Add focused coverage for at least:
 
-#### Scheduler/expiration
-- command registered;
-- schedule registered every minute;
-- before expires_at unchanged;
-- exactly at expires_at -> expired;
-- after expires_at -> expired;
-- history system actor;
-- repeated command no duplicate history;
-- non-active/null-expires/soft-deleted ignored;
-- disabled active still expires;
-- candidate re-check/locking prevents duplicate transition.
+#### Factory / normalization
+- factory creates valid synthetic application;
+- phone normalization canonical cases;
+- formatted phone search matches normalized record;
+- invalid/ambiguous phone normalization handled explicitly;
+- no real personal data.
 
-#### Remaining/warning
-- active remaining_days computed deterministically;
-- no negative display;
-- warning starts at configured threshold;
-- outside threshold no warning;
-- changing expiry_warning_days affects presentation immediately;
-- page render does not change expiry_warning_sent_at;
-- no mail/job queued.
+#### Psychologist counters
+- 0/new/processed/all counts correct;
+- counts update immediately after process/unprocess;
+- multiple groups do not create N+1;
+- group detail/list link to correct application list.
 
-#### Active free extension
-- current owner.free=true required;
-- extends by group.placement_days, not current global placement duration;
-- published_at/placement_days unchanged;
-- expiry_warning_sent_at reset;
-- status remains active;
-- no payment/history transition;
-- no mail/job;
-- direct IDOR blocked.
+#### Owner application list/detail
+- only own group applications;
+- all/new/processed filters;
+- pagination/query preservation;
+- deterministic ordering;
+- empty state;
+- owner can open own;
+- foreign group/application IDOR returns 404;
+- cross-group application substitution returns 404.
 
-#### Expired free extension
-- inside window -> approved;
-- history expired -> approved with system actor;
-- no moderation/payment;
-- exact boundary allowed;
-- after boundary rejected;
-- old dates remain until activation;
-- outside-window UI has no effective extension action.
+#### Process/unprocess
+- new -> processed sets processed_at once;
+- repeated processed action keeps original timestamp;
+- processed -> unprocessed sets null;
+- repeated unprocessed remains null;
+- unauthorized actor cannot mutate;
+- admin has no mutation route.
 
-#### Current tariff
-- historical group.free=false + current owner.free=true -> free extension works;
-- historical group.free=true + current owner.free=false -> no extension;
-- group.free never changed by extension.
+#### Admin list/detail
+- sees all groups’ applications;
+- search participant name;
+- search raw/formatted phone;
+- search normalized phone digits;
+- search group title;
+- search psychologist name/email;
+- processed filters;
+- pagination/query preservation;
+- real group/profile links;
+- constant query count/no N+1.
 
-#### Re-publication
-- expired free extension -> approved appears in admin approved filter;
-- activation recalculates fresh dates using current placement_duration_days;
-- new placement_days may differ from previous snapshot;
-- public_uuid unchanged.
+#### Retention
+- command exists;
+- daily schedule + withoutOverlapping;
+- older than cutoff deleted;
+- exact cutoff retained;
+- newer retained;
+- current retention setting used;
+- processed/unprocessed both covered;
+- soft-deleted group application covered;
+- repeated run zero;
+- group/user records preserved;
+- output contains aggregate only/no participant PII.
 
-#### Paid boundary
-- paid owner extension GET informational only;
-- direct POST rejected;
-- gp_payments count unchanged;
-- no WEBPAY/payment route/action/link.
+#### Boundaries/regression
+- psychologist cannot use admin application routes;
+- admin cannot use psychologist owner routes;
+- disabled/rejected/deleted access revoked;
+- no API/create application route;
+- no payment/email/group lifecycle side effects;
+- Stage 4–9 suites remain green;
+- all 31/249 prototype variants remain green;
+- production prototype isolation remains.
 
-#### Admin expired filter
-- quick=expired selects expired only;
-- pagination/sort works;
-- real UI reminder for manual unpublication;
-- no payment/application queries.
+### 23. Runtime/manual verification
 
-#### Access/regression
-- foreign owner group 404;
-- admin 403 on psychologist extension;
-- revoked account middleware remains;
-- Stage 4–8 suites remain green;
-- all 31/249 prototype variants remain;
-- production route isolation remains.
+Using real Docker/browser with synthetic fixture rows:
 
-### 22. Runtime/manual verification
+1. Create or identify two approved psychologists with separate groups.
+2. Insert synthetic applications through factory/local fixture setup only.
+3. Login as psychologist A:
+   - group counters correct;
+   - open applications for own group;
+   - filter new/processed;
+   - open detail;
+   - mark processed;
+   - return unprocessed.
+4. Guess psychologist B group/application IDs -> no data/404.
+5. Login admin:
+   - Applications nav appears;
+   - global list includes both owners;
+   - search by name/phone/group/psychologist;
+   - filters/pagination;
+   - detail links to group and psychologist.
+6. Create retention boundary fixtures and run applications:cleanup.
+7. Confirm only strictly older rows were deleted.
+8. Confirm groups/users/payments/lifecycle unchanged.
+9. Verify no mail/queue work.
+10. Check representative group-with-counters/application-list/detail/admin pages at 1440/1024/390.
 
-Using real Docker HTTP/browser:
+Keep all synthetic data clearly non-production and clean up smoke-only fixtures where practical.
 
-1. Create/activate a free-owner group.
-2. Verify active dates and remaining-time display.
-3. Move time / prepare a near-expiry group and verify warning UI only, no email.
-4. Run groups:expire before expiry -> no change.
-5. Run at/after expiry -> status expired once.
-6. Verify admin “Снять с публикации” quick filter.
-7. Free active extension -> expiry shifts by stored placement_days.
-8. Free expired extension inside window -> approved.
-9. Admin republishes/activates -> new dates use current setting.
-10. Change current owner tariff after group creation and verify current tariff, not group.free, selects behavior.
-11. Paid current owner sees unavailable paid-extension state and cannot POST around it.
-12. Verify zero new gp_payments and zero queued warning-email jobs.
-13. Check representative active/warning/expired/extension/admin pages at 1440/1024/390.
-
-### 23. Documentation
+### 24. Documentation
 
 Update:
 
-- docs/architecture.md — lifecycle scheduler/locking, warning calculation, current-tariff extension boundary;
-- docs/development.md — groups:expire command, scheduler local verification, free-extension manual scenarios;
-- docs/project-status.md — Stage 9 completed and Stage 10+ pending;
-- docs/ui-pages.md — real extension/expired/warning route wiring while preserving prototypes.
+- docs/architecture.md — application ownership/policy, processing state, phone normalization boundary, retention cleanup;
+- docs/development.md — creating synthetic application fixtures and manual Stage 10 verification;
+- docs/project-status.md — Stage 10 complete; Stage 11 incoming integration pending;
+- docs/ui-pages.md — real application route wiring while preserving prototype catalogue.
 
-Document production requirement for normal Laravel schedule:run cron, but do not implement deployment.
+Document that the global UI/UX audit is the recommended next separate product task before Stage 11 if requested by product owner.
 
 Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
@@ -598,79 +618,76 @@ Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
 Do not implement:
 
-- warning email/job;
-- SMTP;
-- password/email onboarding;
-- WEBPAY;
-- placement payments;
-- paid extension payments;
-- payment notifications/recovery polling;
-- refund behavior;
-- applications/counters;
-- public API/HMAC;
-- automatic public-site publish/unpublish;
-- Stage 10 retention cleanup;
+- public /api/v1;
+- HMAC/signature/timestamp/idempotency integration;
+- public-site application intake;
+- participant application create form in cabinet;
+- email;
+- password onboarding;
+- WEBPAY/payment changes;
+- group moderation/lifecycle changes beyond reading counters;
+- automatic public-site behavior;
+- global UI redesign/audit in this task;
 - production deployment.
-
-Do not create active routes/actions for these future-stage behaviors.
 
 ## Constraints
 
 - Follow WORKFLOW.md and AGENTS.md.
 - Reuse accepted Stage 3 views.
-- Use GroupStatusTransitionService for active -> expired and expired -> approved.
-- Use current gp_users.free for extension eligibility.
-- Never use gp_groups.free to choose extension tariff.
-- Active free extension uses stored group.placement_days.
-- Re-publication activation uses current placement_duration_days.
-- Use current expired_extension_window_days at extension time.
-- Scheduler correctness must be transactional/lock-safe and idempotent.
-- No email or payment side effects.
+- Owner access is derived from application.group.owner_id.
+- Owner routes must use scoped lookup for 404-style IDOR protection.
+- processed_at is the processing source of truth.
+- Search normalization must not invent a country code for ambiguous local numbers.
+- Retention uses current typed setting.
+- Cleanup is permanent and PII-safe in output/logs.
 - Tests remain MySQL-only.
 - Preserve all 249 prototype variants.
 - No Node/npm/Vite.
-- No secrets/real data.
+- No secrets/real participant data.
 - Do not alter .ai/task.md.
 
 ## Acceptance Criteria
 
-1. groups:expire exists and is scheduled every minute.
-2. Active group remains active before expires_at.
-3. At/after expires_at active -> expired through domain transition service.
-4. Expiration history has system actor and is created once.
-5. Repeated/concurrent lifecycle processing does not duplicate transition/history.
-6. Soft-deleted/non-active/null-expiry records are ignored.
-7. Disabled active group still expires.
-8. Active real UI shows correct remaining/expiry state.
-9. Warning uses current expiry_warning_days and is not hardcoded.
-10. Warning UI does not queue email or set expiry_warning_sent_at.
-11. Real admin quick=expired filter lists groups requiring manual unpublication.
-12. Free active extension uses current owner.free=true and stored placement_days.
-13. Active extension keeps status/published_at/placement_days and resets expiry_warning_sent_at.
-14. Free expired extension inside current extension window transitions expired -> approved.
-15. expired -> approved history uses system actor.
-16. Exact extension-window boundary is allowed; after it direct POST is rejected.
-17. Expired extension does not run moderation or create payment.
-18. Old expired period dates remain until reactivation.
-19. Re-publication activation recalculates dates using current placement_duration_days.
-20. Current owner tariff, not gp_groups.free, controls extension mode.
-21. Historical gp_groups.free remains unchanged.
-22. Paid current owner cannot extend in Stage 9 and gets truthful unavailable UX.
-23. Paid direct POST creates no state/date/payment changes.
-24. No Stage 9 flow creates gp_payments or uses WEBPAY.
-25. No warning mail/job is introduced or queued.
-26. Foreign group IDOR is blocked; admin cannot use psychologist extension routes.
-27. Real UI uses existing Stage 3 group/extension/admin views.
-28. Prototype warning/extension variants and all 31/249 entries remain green.
-29. Stage 4–8 regression remains green.
-30. Full MySQL suite passes.
-31. Pint passes.
-32. Larastan passes.
-33. composer check-platform-reqs passes.
-34. Blade compilation passes.
-35. Representative pages work at 1440/1024/390.
-36. Documentation reflects actual Stage 9 behavior.
-37. Final diff is limited to lifecycle/extension/scheduler/UI integration/tests/docs and .ai/report.md.
+1. Real psychologist group list/detail show correct application counters.
+2. Counters use aggregate queries/no N+1.
+3. Owner can open real application list for own group.
+4. Owner list supports all/new/processed filters and pagination.
+5. Owner can open only own group application detail.
+6. Foreign/cross-group IDs return no application data.
+7. Owner can mark new application processed.
+8. Repeated process action does not change original processed_at again.
+9. Owner can return processed application to unprocessed.
+10. Repeated unprocess is idempotent.
+11. Admin Applications navigation and real global list exist.
+12. Admin sees applications across psychologists.
+13. Admin search works for participant/group/psychologist and normalized phone.
+14. Admin processed filters/pagination work.
+15. Admin detail links to real group and psychologist.
+16. Admin has no application mutation route in Stage 10.
+17. Phone normalization/search is centralized and reusable for Stage 11.
+18. Ambiguous local phone numbers are not silently assigned a country.
+19. applications:cleanup exists and uses current retention setting.
+20. Cleanup physically deletes only rows strictly older than cutoff.
+21. Exact cutoff/newer records remain.
+22. Processed/unprocessed and soft-deleted-parent records are covered.
+23. Cleanup output/log is aggregate-only and contains no participant PII.
+24. Cleanup is scheduled daily with overlap protection.
+25. Groups/users are never removed by retention cleanup.
+26. No real application creation/public API route exists.
+27. No payment/email/group-lifecycle side effects are introduced.
+28. Psychologist/admin role boundaries and revoked-account behavior remain.
+29. Real application/group pages reuse Stage 3 Blade views/components.
+30. Representative real pages work at 1440/1024/390.
+31. All 31 page groups / 249 prototype variants remain green.
+32. Stage 4–9 regression remains green.
+33. Full MySQL suite passes.
+34. Pint passes.
+35. Larastan passes.
+36. composer check-platform-reqs passes.
+37. Blade compilation passes.
+38. Production route isolation remains correct.
+39. Documentation reflects actual Stage 10 behavior.
+40. Final diff is limited to Stage 10 applications/counters/normalization/cleanup/UI integration/tests/docs and .ai/report.md.
 
 ## Verification Commands
 
@@ -678,25 +695,26 @@ Run and report exact results.
 
 1. Confirm Docker services healthy.
 2. Migrate/seed without destructive reset.
-3. Inspect scheduler list and confirm groups:expire cadence/overlap guard.
-4. Run groups:expire against before/due/after fixtures.
-5. Verify repeated execution creates one expiration history only.
-6. Verify active/expired free extension real browser flows.
-7. Verify paid current tariff cannot create payment/extension effect.
-8. Verify current-tariff changes override historical group.free for extension decision.
-9. Verify expired quick filter/manual-unpublish reminder.
-10. Verify no Mail/Queue warning dispatch and no gp_payments changes.
-11. Run:
+3. Inspect application routes: no create/API route.
+4. Inspect scheduler list: groups:expire unchanged + applications:cleanup daily overlap-protected.
+5. Create synthetic application fixtures via factory/local setup.
+6. Verify owner counters/list/detail/process/unprocess and cross-owner IDOR.
+7. Verify admin list/search/filter/detail.
+8. Verify phone search with formatted and normalized input.
+9. Run retention cutoff fixtures and applications:cleanup twice.
+10. Confirm groups/users remain and no PII appears in command output.
+11. Confirm no payments/mail/jobs/lifecycle changes.
+12. Run:
    - docker compose exec -T php php artisan test
    - docker compose exec -T php ./vendor/bin/pint --test
    - docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
    - docker compose exec -T php composer check-platform-reqs
    - docker compose exec -T php php artisan view:cache
-12. Inspect route list and production isolation.
-13. Inspect group status history/dates around expiration/extension/republication.
-14. Inspect representative UI at 1440/1024/390.
-15. Inspect git diff/status/staged files.
-16. Confirm no secrets, real data, browser artifacts, screenshots or unrelated files are staged.
+13. Inspect route list and production isolation.
+14. Inspect query counts for group counters and application lists.
+15. Inspect representative UI at 1440/1024/390.
+16. Inspect git diff/status/staged files.
+17. Confirm no secrets, real participant data, screenshots, browser artifacts or unrelated files are staged.
 
 ## Hard Workflow Gate
 
@@ -705,17 +723,17 @@ Before changing files:
 - read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
 - run git log --oneline -5;
 - run git status --short;
-- confirm base commit 28aabaab3bcc84622959f9e81088d0844c90fc5f;
-- inspect GroupWorkflow, GroupStatusTransitionService, SettingService, GroupPolicy and existing extension/group views;
+- confirm base commit 96b64c9323ba78ff434e35f2bdeadf15c623e344;
+- inspect GroupApplication, Group/owner relations, GroupPages, application prototype/shared views, current scheduler and SettingService;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- stay strictly in Stage 9;
-- do not implement Stage 10 applications;
-- do not implement Stage 12 email warning jobs;
-- do not implement Stage 13/14 WEBPAY/payment extension;
-- use domain transitions and row locks;
+- stay strictly in Stage 10;
+- do not begin Stage 11 external API/HMAC;
+- do not add application creation UI;
+- do not implement email/WEBPAY;
+- use scoped owner access and aggregate counters;
 - preserve prototype behavior/accepted design;
 - do not alter .ai/task.md;
 - do not change governance/spec files.
@@ -723,10 +741,10 @@ During implementation:
 Before commit:
 
 - run all required checks;
-- perform real browser/command lifecycle smoke verification;
-- update .ai/report.md with command/schedule, locking/idempotency, warning UI calculation, extension rules/current tariff, no-email/no-payment evidence, tests/runtime checks, facts/assumptions/unknowns;
+- perform real browser/command Stage 10 smoke verification;
+- update .ai/report.md with routes/policies/services, counters/query behavior, processing idempotency, phone normalization, retention command/schedule, no-API/no-PII evidence, tests/runtime checks, facts/assumptions/unknowns;
 - inspect full diff and staged files;
-- stage only Stage 9 files plus .ai/report.md;
+- stage only Stage 10 files plus .ai/report.md;
 - ensure no runtime/test artifacts are staged.
 
 Completion:
@@ -735,6 +753,6 @@ Completion:
 - otherwise use partial, blocked, or failed;
 - if complete, commit with:
 
-codex: TASK-2026-09-21-07 implement group lifecycle free extension
+codex: TASK-2026-09-21-08 implement internal applications workflow
 
 - do not create an accept commit.
