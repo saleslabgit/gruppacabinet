@@ -22,9 +22,11 @@
 <x-button kind="danger" data-bs-toggle="modal" data-bs-target="#delete-document">Удалить</x-button>
 @endif
 @else
-<x-button kind="ghost" :href="route('admin.psychologists.documents.view', [$user['id'], $document])">Просмотр</x-button>
-<x-button kind="ghost" :href="route('admin.psychologists.documents.download', [$user['id'], $document])">Скачать</x-button>
+<x-button kind="ghost" :href="$documentActions[$document->id]['view']">Просмотр</x-button>
+<x-button kind="ghost" :href="$documentActions[$document->id]['download']">Скачать</x-button>
+@if(isset($documentActions[$document->id]['delete']))
 <x-button kind="danger" data-bs-toggle="modal" :data-bs-target="'#delete-document-'.$document->id">Удалить</x-button>
+@endif
 @endif
 </div>
 </x-cell>
@@ -35,8 +37,10 @@
 
 @if(!($prototype ?? true))
 @foreach($documents as $document)
-<x-confirmation :id="'delete-document-'.$document->id" title="Удалить документ?" action="Удалить документ" :url="route('admin.psychologists.documents.destroy', [$user['id'], $document])" method="DELETE">
+@if(isset($documentActions[$document->id]['delete']))
+<x-confirmation :id="'delete-document-'.$document->id" title="Удалить документ?" action="Удалить документ" :url="$documentActions[$document->id]['delete']" method="DELETE">
 <p>Документ «{{ $document->original_name }}» будет удалён.</p>
 </x-confirmation>
+@endif
 @endforeach
 @endif

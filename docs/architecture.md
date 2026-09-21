@@ -174,4 +174,31 @@ retry. Restoring deleted documents is not part of this stage.
 
 Production and prototype modes share the original views/components. Confirmed
 real actions have CSRF-protected forms; prototype forms and buttons remain
-no-op. There are no real Stage 6/7+ links or resend-invitation action.
+no-op. There are no real Stage 7+ links or resend-invitation action.
+
+## Stage 6 psychologist profile and owner documents
+
+`GET /profile` (`psychologist.profile`) uses the authenticated account, with no
+user ID in the route. It loads only education and documents and renders the
+accepted `psychologist/profile/show`, `shared/profile-data` and shared document
+table. `PsychologistPages::profile()` supplies the same explicit questionnaire
+mapping used by administrators; credentials and internal columns are excluded.
+Dates retain the existing shared display conventions. PsychologistCabinetPages
+supplies Home/Profile navigation and POST logout for both real cabinet pages.
+The root remains empty and never queries groups, even when group records exist.
+
+`GET /profile/documents/{document}/view` and `/download` use `account` and
+`role:psychologist`. The controller looks up the document through the current
+user's documents relation before applying `UserDocumentPolicy::viewOwn`.
+Cross-owner IDs return 404; admins receive 403 on these psychologist routes.
+The policy also requires a non-deleted, approved, enabled, non-admin owner.
+Existing middleware revokes ineligible sessions before profile/file handling.
+
+Both owner and admin controllers authorize first, then call the shared
+`PsychologistDocuments::response()` for private streaming, file existence and
+MIME allowlist checks, safe filenames, inline/attachment disposition, nosniff,
+private/no-store and sandbox headers. Admin authorization is unchanged.
+The shared table receives explicit per-document view/download URLs and an
+optional delete URL. Only admin management supplies delete; owner pages expose
+no upload, delete or profile editing controls or mutation routes. Prototype
+fixtures and no-op actions remain separate and unchanged.

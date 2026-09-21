@@ -8,10 +8,23 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class PsychologistDocuments
 {
+    public function response(UserDocument $document, string $disposition): StreamedResponse
+    {
+        $disk = Storage::disk(config('psychologist_documents.disk'));
+        abort_unless($disk->exists($document->path), 404);
+        abort_unless(in_array($document->mime_type, config('psychologist_documents.mime_types'), true), 404);
+
+        return $disk->response($document->path, $this->safeName($document->original_name), [
+            'Content-Type' => $document->mime_type, 'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, no-store', 'Content-Security-Policy' => "sandbox; default-src 'none'",
+        ], $disposition);
+    }
+
     public function upload(User $psychologist, UploadedFile $file, string $type): UserDocument
     {
         $disk = Storage::disk(config('psychologist_documents.disk'));

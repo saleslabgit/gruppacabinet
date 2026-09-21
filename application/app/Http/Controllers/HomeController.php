@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\PsychologistCabinetPages;
 use App\Support\PsychologistPages;
 use Illuminate\Contracts\View\View;
 
@@ -9,15 +10,10 @@ class HomeController extends Controller
 {
     public function psychologist(): View
     {
-        return view('psychologist.groups.index', [
-            'title' => 'Мои группы',
-            'prototype' => false,
+        return view('psychologist.groups.index', array_merge(PsychologistCabinetPages::layout('Мои группы'), [
             'empty' => true,
             'canCreateGroup' => false,
-            'navigation' => [['label' => 'Мои группы', 'url' => route('psychologist.home'), 'current' => true]],
-            'logoutUrl' => route('logout'),
-            'homeUrl' => route('psychologist.home'),
-        ]);
+        ]));
     }
 
     public function admin(): View

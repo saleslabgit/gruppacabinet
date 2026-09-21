@@ -75,9 +75,24 @@ navigation offers Home, Psychologists and Logout. New MySQL tests cover CRUD,
 protected fields, audit, session revocation, IDOR, file failures and constant
 list query counts. No migrations or dependencies were added.
 
+## Stage 6 psychologist cabinet profile
+
+Approved enabled psychologists can open their real read-only questionnaire and
+own document list at `/profile`. The accepted Blade pages now share real
+Groups/Profile navigation and POST logout. The profile mapping is reused from
+admin pages, and document actions are explicit capabilities of the shared table.
+
+Owner-scoped lookup plus policy and existing account/role middleware protect
+private view/download endpoints. Cross-owner document IDs return 404; admin
+accounts cannot use owner routes. Both controller paths use the same secure
+private streaming service. MySQL tests cover real and nullable questionnaire
+data, IDOR, MIME/security headers, missing files, navigation, role boundaries
+and session revocation. Stage 7 group integration remains pending: the root
+stays empty without group queries or creation links.
+
 ## Intentionally not implemented
 
-No psychologist self-service, group/payment/dictionary/settings CRUD,
+No psychologist profile editing or document mutations, group/payment/dictionary/settings CRUD,
 public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 

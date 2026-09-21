@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Psychologist\ProfileController;
 use App\Http\Controllers\SessionController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -14,6 +15,12 @@ Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
 Route::middleware('account')->group(function (): void {
     Route::get('/', [HomeController::class, 'psychologist'])->middleware('role:psychologist')->name('psychologist.home');
     Route::get('/admin', [HomeController::class, 'admin'])->middleware('role:admin')->name('admin.home');
+});
+
+Route::middleware(['account', 'role:psychologist'])->group(function (): void {
+    Route::get('/profile', [ProfileController::class, 'show'])->name('psychologist.profile');
+    Route::get('/profile/documents/{document}/view', [ProfileController::class, 'view'])->name('psychologist.documents.view');
+    Route::get('/profile/documents/{document}/download', [ProfileController::class, 'download'])->name('psychologist.documents.download');
 });
 
 Route::middleware(['account', 'role:admin'])->prefix('admin/psychologists')->name('admin.psychologists.')->group(function (): void {

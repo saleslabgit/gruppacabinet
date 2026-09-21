@@ -169,3 +169,32 @@ The explicit analysis memory limit avoids exhausting the default PHP CLI
 128 MiB; it does not change production PHP configuration. Tests use only the
 disposable MySQL test database. Browser smoke data must be synthetic, and test
 uploads/browser artifacts must not be committed.
+
+## Stage 6 real psychologist profile
+
+Log in at `http://localhost:8080/cabinet/login` with the local seeded
+`psychologist@gruppa.test` / `password` account. The root still shows empty
+groups with creation unavailable. Open «Мои данные» to visit
+`http://localhost:8080/cabinet/profile`: only the current questionnaire and
+documents are shown, with no edit/upload/delete controls. Missing questionnaire
+values and an empty document list use the approved empty states.
+
+In a separate browser session, log in as the local administrator, find this
+psychologist and upload a synthetic PDF/JPEG/PNG through its Documents page.
+Refresh the psychologist profile, open «Просмотр» and «Скачать», and verify the
+original filename and file content. Another approved psychologist must receive
+404 for the same `/profile/documents/{id}/view` and `/download` URLs. Admins
+receive 403 on these owner routes and `/profile`; psychologists still receive
+403 on admin routes. Admin document management stays on its existing URLs.
+
+Check the profile with long email/document names at 1440, 1024 and 390 px:
+navigation wraps, details collapse to one column on mobile, document rows become
+cards, actions remain available and the page has no horizontal overflow. Use
+«Выход» to verify POST logout. Delete synthetic uploads through admin management
+after verification. Existing data should not be removed or overwritten.
+
+Focused MySQL regression:
+
+```bash
+docker compose exec -T php php artisan test tests/Feature/PsychologistProfileTest.php
+```

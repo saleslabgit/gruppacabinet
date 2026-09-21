@@ -12,7 +12,6 @@ use App\Support\PsychologistPages;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PsychologistDocumentController extends Controller
@@ -25,6 +24,11 @@ class PsychologistDocumentController extends Controller
         return view('admin.users.documents', array_merge(PsychologistPages::layout('Документы психолога'), [
             'user' => PsychologistPages::profile($psychologist), 'psychologist' => $psychologist,
             'documents' => $documents, 'empty' => $documents->isEmpty(),
+            'documentActions' => $documents->mapWithKeys(fn (UserDocument $document) => [$document->id => [
+                'view' => route('admin.psychologists.documents.view', [$psychologist, $document]),
+                'download' => route('admin.psychologists.documents.download', [$psychologist, $document]),
+                'delete' => route('admin.psychologists.documents.destroy', [$psychologist, $document]),
+            ]])->all(),
         ]));
     }
 
@@ -48,14 +52,8 @@ class PsychologistDocumentController extends Controller
     private function respond(User $psychologist, UserDocument $document, PsychologistDocuments $documents, string $disposition): StreamedResponse
     {
         Gate::authorize('manage', [$document, $psychologist]);
-        $disk = Storage::disk(config('psychologist_documents.disk'));
-        abort_unless($disk->exists($document->path), 404);
-        abort_unless(in_array($document->mime_type, config('psychologist_documents.mime_types'), true), 404);
 
-        return $disk->response($document->path, $documents->safeName($document->original_name), [
-            'Content-Type' => $document->mime_type, 'X-Content-Type-Options' => 'nosniff',
-            'Cache-Control' => 'private, no-store', 'Content-Security-Policy' => "sandbox; default-src 'none'",
-        ], $disposition);
+        return $documents->response($document, $disposition);
     }
 
     public function destroy(PsychologistActionRequest $request, User $psychologist, UserDocument $document, PsychologistDocuments $documents): RedirectResponse
