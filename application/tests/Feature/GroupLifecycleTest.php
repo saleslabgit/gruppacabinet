@@ -344,7 +344,9 @@ class GroupLifecycleTest extends TestCase
                 DB::disableQueryLog();
                 foreach ($queries as $query) {
                     $this->assertStringNotContainsString('gp_payments', $query['query']);
-                    $this->assertStringNotContainsString('gp_group_applications', $query['query']);
+                    if ($role === 'admin') {
+                        $this->assertStringNotContainsString('gp_group_applications', $query['query']);
+                    }
                 }
                 $counts[$role][$size] = count($queries);
                 if ($role === 'admin') {

@@ -18,7 +18,7 @@ class GroupController extends Controller
 {
     public function index(Request $request): View
     {
-        $paginator = Group::query()->where('owner_id', $request->user()->id)->with(['format', 'gender'])
+        $paginator = Group::query()->where('owner_id', $request->user()->id)->with(['format', 'gender'])->withCount(Group::applicationCounts())
             ->orderByDesc('created_at')->orderByDesc('id')->paginate(20);
         $paginator->getCollection()->each(fn (Group $group) => $group->setRelation('owner', $request->user()));
 
@@ -39,10 +39,12 @@ class GroupController extends Controller
 
     public function show(Request $request, string $group): View
     {
-        $model = Group::query()->where('owner_id', $request->user()->id)->findOrFail($group);
+        $model = Group::query()->where('owner_id', $request->user()->id)->withCount(Group::applicationCounts())->findOrFail($group);
         Gate::authorize('view', $model);
 
-        return view('psychologist.groups.show', GroupPages::detail($model, false));
+        return view('psychologist.groups.show', GroupPages::detail($model, false) + [
+            'latestApplication' => $model->applications()->orderByDesc('created_at')->orderByDesc('id')->first(),
+        ]);
     }
 
     public function edit(Request $request, string $group): View

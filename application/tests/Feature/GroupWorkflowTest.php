@@ -112,7 +112,7 @@ class GroupWorkflowTest extends TestCase
         $this->assertSame($before, $group->fresh()->getAttributes());
         $this->assertSame($historyCount, $group->statusHistory()->count());
         $this->assertDatabaseCount('gp_payments', 0);
-        $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY')->assertSee('Продлить размещение')->assertSee('Заявки пока недоступны');
+        $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY')->assertSee('Продлить размещение')->assertSee('Все заявки группы');
     }
 
     public function test_validation_and_protected_fields_for_both_roles(): void
@@ -287,7 +287,7 @@ class GroupWorkflowTest extends TestCase
         $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
     }
 
-    public function test_lists_filters_pagination_and_constant_queries_without_payment_or_applications(): void
+    public function test_lists_filters_pagination_and_constant_queries_without_payments(): void
     {
         $first = $this->draft();
         $first->update(['title' => 'Unique title', 'status' => 'approved']);
@@ -320,7 +320,9 @@ class GroupWorkflowTest extends TestCase
                 DB::disableQueryLog();
                 foreach ($queries as $query) {
                     $this->assertStringNotContainsString('gp_payments', $query['query']);
-                    $this->assertStringNotContainsString('gp_group_applications', $query['query']);
+                    if ($role === 'admin') {
+                        $this->assertStringNotContainsString('gp_group_applications', $query['query']);
+                    }
                 }
                 $counts[$role][$size] = count($queries);
                 if ($role === 'owner') {

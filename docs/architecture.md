@@ -359,3 +359,48 @@ Admin detail identifies re-publication from the latest real status history.
 Existing manual activation then sets new UTC dates and snapshots the current
 placement duration; moderation is not repeated. No Stage 9 path creates a
 payment, email or queued warning job.
+
+## Stage 10 internal participant applications
+
+Owner endpoints are nested under `/groups/{group}/applications`. The account and
+psychologist middleware run before an owner-scoped group lookup and a nested
+application lookup. Foreign or mismatched IDs return 404. Existing applications
+remain accessible regardless of group lifecycle status or disabled flag; deleted
+groups are excluded from owner routes. GroupApplicationPolicy checks eligible
+accounts and ownership through the group; administrators can read but cannot
+process. Admin lists include historical soft-deleted groups/owners via explicit
+eager loading, without changing global relationship scopes.
+
+`processed_at` is the sole processing state. ApplicationWorkflow re-reads and
+locks the owned group and application inside a transaction, authorizes the actor,
+and changes the timestamp only on a state transition. Processing uses UTC;
+repeated same-state requests leave both processed_at and updated_at unchanged.
+POST forms use CSRF. No payment, email, audit, queue or group transition occurs.
+
+Owner group lists use three aliased `withCount` subqueries in the main query;
+detail loads the same counts and one latest application. Application lists use
+20-row pagination, created_at DESC/id DESC and preserved query strings. Owner
+rows reuse the resolved group; admin rows eager-load group and owner. The admin
+search combines participant name, raw/canonical phone, group title and owner
+name/email. No application surface queries payments.
+
+PhoneNormalizer accepts explicit `+` or `00` international notation, removes
+spaces/parentheses/hyphens/dots, and requires 7–15 digits starting with a nonzero
+digit. Bare/local, malformed and overlong values fail explicitly without echoing
+the phone in the exception. This is syntactic normalization, not a country or
+subscriber validity check. No country code is guessed. digitsForSearch accepts
+phone-like punctuation and yields comparable digits (stripping the international
+00 prefix); arbitrary text yields an empty key and still uses textual search.
+Stage 11 can reuse this boundary. The synthetic factory requires an existing
+group via `for($group)`, uses reserved fictional NANP numbers and derives the
+canonical phone from its raw phone, including attribute overrides. Production
+seeds do not create applications; there is no intake/create/API route.
+
+`applications:cleanup` reads the current typed retention-month setting once,
+computes a UTC calendar-month cutoff without month overflow, and physically
+deletes only created_at < cutoff. Exact equality remains. A chunkById scan of
+500 IDs avoids deletion pagination gaps; each DELETE rechecks the cutoff and
+concurrent deletes are harmless. It includes processed/unprocessed applications
+and deleted parents, never deletes groups/users, and prints only the aggregate
+count. The daily scheduler has withoutOverlapping; groups:expire remains every
+minute. Running the scheduler/cron is still an operational prerequisite.

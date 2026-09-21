@@ -317,3 +317,51 @@ Docker. The concurrency tests use committed disposable test fixtures and two
 independent PHP processes against MySQL, including a candidate whose expiry
 changes while workers wait for its row lock. Browser verification uses external
 tools; keep scripts/screenshots outside the repository.
+
+## Stage 10 applications and retention
+
+Create only clearly synthetic fixtures locally; no participant creation endpoint
+exists. A local PHP script bootstrapped through the console kernel can use:
+
+```php
+$group = App\Models\Group::query()->where('owner_id', $syntheticOwner->id)->findOrFail($syntheticGroupId);
+App\Models\GroupApplication::factory()->for($group)->count(23)->create();
+App\Models\GroupApplication::factory()->for($group)->processed()->create();
+```
+
+The factory requires an existing synthetic group and uses fictional +1 202
+555-01xx phone numbers without Faker or any new dependency. Never use real
+participant data or add fixture seeding to production. Keep temporary scripts
+and screenshots outside Git; remove only the smoke fixture IDs afterward.
+
+Manual verification with two approved synthetic psychologists and separate groups:
+
+1. Login as the first owner: verify new/processed/all counters on group list and
+   detail, then open the group's applications. Check filters, 20-row pagination,
+   detail and process/unprocess; repeat each action to verify idempotency.
+2. Substitute the other owner's group/application IDs and mismatched group IDs:
+   all owner reads/actions must return 404. Admin accounts cannot use owner routes.
+3. Login as admin, use «Заявки»: search name, formatted/normalized phone, group,
+   psychologist name/email; combine search with processed filters and pagination.
+   Open detail and its real group/profile links. There are no admin mutations.
+4. In an isolated local fixture run, freeze Carbon's UTC clock, calculate the
+   current retention cutoff with subMonthsNoOverflow, and create rows at cutoff
+   minus one second, exact cutoff, and plus one second. Include processed/new
+   rows and a soft-deleted synthetic parent. Run the command twice under the same
+   clock: only strictly older rows disappear, then the aggregate count is zero.
+   Do not run this fixture cleanup against unrelated data eligible for deletion.
+5. Compare groups/users/payments/history/jobs before and after; verify no mail or
+   queued work. Inspect representative owner groups/applications/detail and admin
+   list/detail at 1440, 1024 and 390 px, including long text and empty results.
+
+```bash
+docker compose exec -T php php artisan test --filter=Application
+docker compose exec -T php php artisan applications:cleanup
+docker compose exec -T php php artisan schedule:list
+```
+
+Cleanup is permanent and reports `Deleted applications: N` only. Its daily
+schedule has overlap protection; the existing every-minute group expiry schedule
+is unchanged. Stage 11 intake/integration remains pending. A global UI/UX audit
+is the recommended next separate product task before Stage 11 if requested by
+the product owner.

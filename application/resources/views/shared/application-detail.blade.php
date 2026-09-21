@@ -10,14 +10,14 @@
 <div>
 <dt>Группа</dt>
 <dd>
-<a href="{{ $links[$admin ? 'admin-group' : 'group'] }}">{{ $group['title'] }}</a>
+<a href="{{ $application['group_url'] ?? $links[$admin ? 'admin-group' : 'group'] }}">{{ $application['group_title'] ?? $group['title'] }}</a>
 </dd>
 </div>
 @if($admin)
 <div>
 <dt>Психолог</dt>
 <dd>
-<a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a>
+<a href="{{ $application['owner_url'] ?? $links['admin-user'] }}">{{ $application['owner_name'] ?? $user['name'] }}</a>
 </dd>
 </div>
 @endif
@@ -42,7 +42,13 @@
 </dl>
 <div class="actions mt-4">
 @unless($admin)
+@if($application['action_url'] ?? null)
+<form method="POST" action="{{ $application['action_url'] }}">@csrf
+<x-button type="submit">{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+</form>
+@else
 <x-button data-noop>{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+@endif
 @endunless
 <x-button kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Назад к заявкам</x-button>
 </div>

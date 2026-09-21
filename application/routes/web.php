@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Psychologist\ApplicationController;
 use App\Http\Controllers\Psychologist\GroupController;
 use App\Http\Controllers\Psychologist\ProfileController;
 use App\Http\Controllers\SessionController;
@@ -56,6 +57,17 @@ Route::middleware(['account', 'role:psychologist'])->prefix('groups')->name('psy
     Route::get('/{group}/extension', [$controller, 'extension'])->name('extension');
     Route::post('/{group}/extension', [$controller, 'extend'])->name('extend');
     Route::delete('/{group}', [$controller, 'destroy'])->name('destroy');
+    $applications = ApplicationController::class;
+    Route::get('/{group}/applications', [$applications, 'index'])->name('applications.index');
+    Route::get('/{group}/applications/{application}', [$applications, 'show'])->name('applications.show');
+    Route::post('/{group}/applications/{application}/processed', [$applications, 'action'])->name('applications.processed');
+    Route::post('/{group}/applications/{application}/unprocessed', [$applications, 'action'])->name('applications.unprocessed');
+});
+
+Route::middleware(['account', 'role:admin'])->prefix('admin/applications')->name('admin.applications.')->group(function (): void {
+    $controller = App\Http\Controllers\Admin\ApplicationController::class;
+    Route::get('/', [$controller, 'index'])->name('index');
+    Route::get('/{application}', [$controller, 'show'])->name('show');
 });
 
 Route::middleware(['account', 'role:admin'])->prefix('admin/groups')->name('admin.groups.')->group(function (): void {

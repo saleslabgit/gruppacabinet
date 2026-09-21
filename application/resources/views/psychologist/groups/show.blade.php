@@ -15,7 +15,13 @@
 </div>
 <x-panel title="Заявки участников">
 @if($realGroups ?? false)
-<p>Заявки пока недоступны.</p>
+@include('shared.application-counters')
+@if($latestApplication)
+<p>{{ $latestApplication->last_name }} {{ $latestApplication->first_name }} · {{ $latestApplication->phone }}</p>
+@else
+<p>Заявок пока нет.</p>
+@endif
+<a href="{{ route('psychologist.groups.applications.index', $group['id']) }}">Все заявки группы</a>
 @else
 @include('shared.application-counters')@if($group['all_count'])
 <p>{{ $application['name'] }} · {{ $application['phone'] }}</p>

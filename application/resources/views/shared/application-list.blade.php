@@ -4,19 +4,23 @@
 </x-panel>
 @endunless
 <x-panel title="Поиск и фильтры" :compact="true" class="panel-compact">
-<form data-prototype-form>
+<form @if($realApplications ?? false) method="GET" action="{{ $links[$admin ? 'admin-applications' : 'applications'] }}" @else data-prototype-form @endif>
 <div class="row">
 @if($admin)
 <div class="col-md-6">
-<x-input name="search" label="Участник, телефон, группа или психолог" :value="$variant === 'no-results' ? 'Нет совпадений' : ''" />
+<x-input name="search" label="Участник, телефон, группа или психолог" :value="($realApplications ?? false) ? ($filters['search'] ?? '') : ($variant === 'no-results' ? 'Нет совпадений' : '')" />
 </div>
 @endif
 <div class="col-md-6">
-<x-select name="processed" label="Состояние заявки" :options="['all'=>'Все','new'=>'Новые','processed'=>'Обработанные']" :value="in_array($variant,['new','processed']) ? $variant : 'all'" />
+<x-select name="processed" label="Состояние заявки" :options="['all'=>'Все','new'=>'Новые','processed'=>'Обработанные']" :value="($realApplications ?? false) ? ($filters['processed'] ?? 'all') : (in_array($variant,['new','processed']) ? $variant : 'all')" />
 </div>
 </div>
 <div class="actions">
+@if($realApplications ?? false)
+<x-button kind="secondary" type="submit">Применить</x-button>
+@else
 <x-button kind="secondary" data-noop>Применить</x-button>
+@endif
 <x-button kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Сбросить</x-button>
 </div>
 </form>
@@ -25,7 +29,7 @@
 <x-empty title="Заявок не найдено" text="Когда участники запишутся в группу, здесь появятся их контакты." />
 @else
 <x-table :headers="$admin ? ['Участник','Группа и психолог','Дата и состояние','Действия'] : ['Участник','Дата','Состояние','Действия']">
-@foreach([$application] as $item)
+@foreach(($realApplications ?? false) ? $applications : [$application] as $item)
 <tr>
 <x-cell label="Участник">
 <strong>{{ $item['name'] }}</strong>
@@ -33,9 +37,9 @@
 </x-cell>
 <x-cell :label="$admin ? 'Группа и психолог' : 'Дата'">
 @if($admin)
-<a href="{{ $links['admin-group'] }}">{{ $group['title'] }}</a>
+<a href="{{ $item['group_url'] ?? $links['admin-group'] }}">{{ $item['group_title'] ?? $group['title'] }}</a>
 <p>
-<a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a>
+<a href="{{ $item['owner_url'] ?? $links['admin-user'] }}">{{ $item['owner_name'] ?? $user['name'] }}</a>
 </p>
 @else
 <x-date :value="$item['created_at']" />
@@ -51,9 +55,15 @@
 </x-cell>
 <x-cell label="Действия">
 <div class="actions">
-<x-button kind="ghost" :href="route('prototype.'.($admin ? 'admin-application' : 'application'), ['variant' => $variant === 'processed' ? 'processed' : 'new'])">Открыть</x-button>
+<x-button kind="ghost" :href="$item['show_url'] ?? route('prototype.'.($admin ? 'admin-application' : 'application'), ['variant' => $variant === 'processed' ? 'processed' : 'new'])">Открыть</x-button>
 @unless($admin)
+@if($item['action_url'] ?? null)
+<form method="POST" action="{{ $item['action_url'] }}">@csrf
+<x-button kind="secondary" type="submit">{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+</form>
+@else
 <x-button kind="secondary" data-noop>{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
+@endif
 @endunless
 </div>
 </x-cell>

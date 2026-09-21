@@ -27,7 +27,8 @@
 <div>
 <h3>Заявки участников</h3>
 @if($realGroups ?? false)
-<p class="meta">Заявки пока недоступны.</p>
+@include('shared.application-counters')
+<a href="{{ route('psychologist.groups.applications.index', $group['id']) }}">Открыть заявки</a>
 @else
 @include('shared.application-counters')
 <a href="{{ $links['applications'] }}">Открыть заявки</a>

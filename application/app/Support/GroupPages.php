@@ -35,7 +35,7 @@ class GroupPages
             'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at', 'placement_days']) + [
                 'title' => $group->title ?: 'Новая группа', 'status' => $group->status->value,
                 'format' => $group->format->name ?? 'Не указан', 'gender' => $group->gender->name ?? 'Не указан',
-                'all_count' => 0,
+                'all_count' => (int) $group->all_count, 'new_count' => (int) $group->new_count, 'processed_count' => (int) $group->processed_count,
                 'owner' => $group->relationLoaded('owner') && $group->owner ? PsychologistPages::profile($group->owner) : null,
             ] + app(GroupLifecycleService::class)->presentation($group, $context);
     }

@@ -102,15 +102,15 @@ from activation, resets the warning marker and records admin history. UUID
 copy/reminder is available before activation. Owner draft/rejected deletion and
 admin abandoned-draft deletion are soft deletes with historical payment safety.
 Lists use eager loading, filters/search, deterministic sorting and pagination;
-payment/application queries are excluded from normal listing. Applications are
-unavailable; payment operations have no real routes or links. Stage 9 connects free extension.
+payment queries are excluded from normal listing. Stage 10 adds aggregate
+application counters and real application links; payment operations have no real routes or links. Stage 9 connects free extension.
 Stage 8 adds only an informational admin payment-list route.
 
 MySQL coverage includes both tariffs, history/atomicity, IDOR, immutability,
 validation/dictionaries/integer money, activation, deletion and query counts.
 Stage 8 adds dictionary/settings administration and an informational payment page.
-Stage 9 adds lifecycle automation/free extension. Stages 10+ (applications,
-external integration, mail and payments) remain pending.
+Stage 9 adds lifecycle automation/free extension. Stage 10 connects internal applications below; external integration, mail and
+payments remain pending.
 
 ## Stage 8 dictionaries, settings and payment information
 
@@ -141,10 +141,28 @@ Manual re-publication starts a new period using the current duration setting.
 Paid owners receive an informational unavailable state and cannot extend by POST.
 No payments, mail or jobs are created. Approved Blade/prototype structure remains.
 
+## Stage 10 internal participant applications
+
+Owners can list/filter/page/open applications of their own groups and mark them
+processed/unprocessed. Scoped lookups and policy protect IDs; transactional row
+locks preserve idempotency. Group list/detail show aggregate counters and real
+links. Admin Applications navigation opens the global searchable read-only list
+and details with group/psychologist links. Lists remain constant-query and use
+the accepted Blade pages without changing prototype variants.
+
+Reusable phone normalization requires explicit international input and never
+invents a country code. Synthetic factories use reserved fictional phones.
+Daily overlap-protected applications:cleanup permanently removes only records
+strictly older than the current retention setting, including deleted parents;
+output is aggregate-only. There is no intake endpoint, email, payment or lifecycle
+side effect. Stage 11 incoming integration remains pending. The recommended next
+separate product task is a global UI/UX audit before Stage 11, if requested by the
+product owner. Verification evidence is in `.ai/report.md`.
+
 ## Intentionally not implemented
 
 No psychologist profile editing or document mutations, payment CRUD,
-public API, mail/warning jobs, application retention scheduling, or WEBPAY
+public API, mail/warning jobs, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 
 ## External prerequisites and unknowns

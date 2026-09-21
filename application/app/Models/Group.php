@@ -15,6 +15,9 @@ use Illuminate\Support\Str;
 /**
  * @property GroupStatus $status
  * @property Carbon|null $expires_at
+ * @property int|null $all_count
+ * @property int|null $new_count
+ * @property int|null $processed_count
  */
 class Group extends Model
 {
@@ -81,9 +84,19 @@ class Group extends Model
         return $this->belongsTo(DictionaryItem::class, 'gender_id');
     }
 
+    /** @return HasMany<GroupApplication, $this> */
     public function applications(): HasMany
     {
         return $this->hasMany(GroupApplication::class);
+    }
+
+    public static function applicationCounts(): array
+    {
+        return [
+            'applications as all_count',
+            'applications as new_count' => fn ($query) => $query->whereNull('processed_at'),
+            'applications as processed_count' => fn ($query) => $query->whereNotNull('processed_at'),
+        ];
     }
 
     /** @return HasMany<Payment, $this> */
