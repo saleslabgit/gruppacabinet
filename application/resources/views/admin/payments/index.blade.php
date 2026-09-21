@@ -1,6 +1,6 @@
 @extends('layouts.admin')
 @section('content')
-<x-panel title="Поиск платежей">
+<x-panel title="Поиск платежей" :compact="true" class="panel-compact">
 <form data-prototype-form>
 <x-input name="search" label="Номер заказа или транзакции" />
 <div class="row">

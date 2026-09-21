@@ -3,7 +3,7 @@
 @include('shared.application-counters')
 </x-panel>
 @endunless
-<x-panel title="Поиск и фильтры">
+<x-panel title="Поиск и фильтры" :compact="true" class="panel-compact">
 <form data-prototype-form>
 <div class="row">
 @if($admin)

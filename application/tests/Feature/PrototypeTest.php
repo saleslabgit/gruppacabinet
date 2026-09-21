@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Support\PrototypeCatalog;
 use App\Support\PrototypeFixtures;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -25,6 +26,7 @@ class PrototypeTest extends TestCase
         config()->set('database.default', 'missing-prototype-database');
         $catalog = $this->get('http://localhost/_prototype')->assertOk();
         $this->assertCount(31, PrototypeCatalog::pages());
+        $this->assertSame(249, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
         foreach (PrototypeCatalog::pages() as $slug => $page) {
             foreach ($page['variants'] as $variant) {
                 $path = '/_prototype/'.$slug.'/'.$variant;
@@ -85,6 +87,31 @@ class PrototypeTest extends TestCase
             $this->assertFileExists(public_path('fonts/montserrat/montserrat-'.$weight.'.woff2'));
         }
         $this->assertStringContainsString('font-display:swap', $css);
+    }
+
+    public function test_shared_controls_and_notices_use_the_revised_design_constraints(): void
+    {
+        $css = file_get_contents(public_path('ui.css'));
+        preg_match('/--control-radius:\s*(\d+)px/', $css, $radius);
+        $this->assertNotEmpty($radius);
+        $this->assertGreaterThanOrEqual(8, (int) $radius[1]);
+        $this->assertLessThanOrEqual(10, (int) $radius[1]);
+        $this->assertMatchesRegularExpression('/\.form-control,\.form-select\s*\{[^}]*border-radius:var\(--control-radius\)/s', $css);
+        $this->assertDoesNotMatchRegularExpression('/(?:form-control|form-select)[^{]*\{[^}]*border-radius:var\(--pill\)/s', $css);
+        foreach (['title' => 38, 'section' => 24, 'subsection' => 18] as $token => $size) {
+            $this->assertStringContainsString('--'.$token.':'.$size.'px', $css);
+        }
+        $this->assertStringContainsString('--title:30px', $css);
+        $this->assertDoesNotMatchRegularExpression('/(?:https?:)?\/\//', $css);
+
+        $form = $this->get('http://localhost/_prototype/group-form/validation')->assertOk();
+        $form->assertSee('form-control', false)->assertSee('form-select', false)
+            ->assertSee('is-invalid', false);
+        $html = Blade::render('<x-alert tone="warning" title="Notice">Body</x-alert>');
+        $this->assertStringContainsString('<strong class="notice-title">Notice</strong>', $html);
+        $this->assertDoesNotMatchRegularExpression('/<h[1-6]\b/', $html);
+        $this->get('http://localhost/_prototype/payment-pending/pending')->assertOk()
+            ->assertSee('<strong class="notice-title">Оплата подтверждается WEBPAY</strong>', false);
     }
 
     public function test_unrefunded_payment_blocks_delete_even_for_a_historically_free_group(): void

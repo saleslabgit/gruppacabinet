@@ -4,6 +4,7 @@
 <x-validation-summary :errors="array_intersect_key($errors, array_flip(['email','graduation_year','training_hours','license_expires_at','education_type_id','documents_confirmed']))" />
 <x-panel title="Анкета">
 <p class="meta mb-4">Email обязателен. Остальные поля могут быть не заполнены.</p>
+<h3>Контактные данные</h3>
 <div class="row">
 <div class="col-md-6">
 <x-input name="last_name" label="Фамилия" type="text" :value="$variant === 'create' ? '' : $user['last_name']" :required="false" :error="$errors['last_name'] ?? null" />
@@ -19,6 +20,12 @@
 </div>
 <div class="col-md-6">
 <x-input name="email" label="Email" type="email" :value="$variant === 'create' ? '' : $user['email']" :required="true" :error="$errors['email'] ?? null" />
+</div>
+</div>
+<h3 class="mt-3">Образование и опыт</h3>
+<div class="row">
+<div class="col-md-6">
+<x-select name="education_type_id" label="Тип образования" :error="$errors['education_type_id'] ?? null" :options="[''=>'Не указан','demo'=>$user['education_type']]" value="demo" />
 </div>
 <div class="col-md-6">
 <x-input name="other_education" label="Другое образование" type="text" :value="$variant === 'create' ? '' : $user['other_education']" :required="false" :error="$errors['other_education'] ?? null" />
@@ -47,11 +54,11 @@
 <div class="col-md-6">
 <x-input name="groups_conducted_count" label="Количество проведённых групп" type="number" :value="$variant === 'create' ? '' : $user['groups_conducted_count']" :required="false" :error="$errors['groups_conducted_count'] ?? null" />
 </div>
+</div>
+<h3 class="mt-3">Подтверждения и согласие</h3>
+<div class="row">
 <div class="col-md-6">
 <x-input name="personal_data_consent_version" label="Версия согласия" type="text" :value="$variant === 'create' ? '' : $user['personal_data_consent_version']" :required="false" :error="$errors['personal_data_consent_version'] ?? null" />
-</div>
-<div class="col-md-6">
-<x-select name="education_type_id" label="Тип образования" :error="$errors['education_type_id'] ?? null" :options="[''=>'Не указан','demo'=>$user['education_type']]" value="demo" />
 </div>
 <div class="col-md-6">
 <x-input name="personal_data_consent_at" label="Дата согласия, Минск" type="datetime-local" value="2026-08-11T12:00" />

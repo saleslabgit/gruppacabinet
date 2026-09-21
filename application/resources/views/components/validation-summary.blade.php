@@ -1,7 +1,6 @@
 @props(['errors' => []])
 @if($errors)
-<x-alert tone="danger">
-<strong>Проверьте заполнение формы</strong>
+<x-alert tone="danger" title="Проверьте заполнение формы">
 <ul class="mb-0">
 @foreach($errors as $name => $error)
 <li>

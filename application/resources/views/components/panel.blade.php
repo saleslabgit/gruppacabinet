@@ -1,5 +1,5 @@
-@props(['title' => null])
+@props(['title' => null, 'compact' => false])
 <section {{ $attributes->class(['panel']) }}>
 @if($title)
-<h2>{{ $title }}</h2>
+<h2 @class(['panel-title-compact' => $compact])>{{ $title }}</h2>
 @endif{{ $slot }}</section>

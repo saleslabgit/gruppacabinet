@@ -8,8 +8,8 @@
 <x-button :href="$links['group-form']">Добавить группу</x-button>
 </x-empty>
 @else
+<div class="group-list">
 @foreach($groups as $group)
-<x-panel>
 <article class="group-row">
 <div>
 <p class="eyebrow">Группа № {{ $group['id'] }}</p>
@@ -25,8 +25,8 @@
 @include('psychologist.groups._actions')
 </div>
 </article>
-</x-panel>
 @endforeach
+</div>
 <x-pagination :pages="$pages" :current="$currentPage" />
 @include('shared.group-delete')@endif
 @endsection

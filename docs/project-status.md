@@ -27,12 +27,15 @@ in `.ai/report.md`.
 
 The final Blade view tree covers all 31 page groups with 249 direct catalog
 variants, shared layouts/components, local Montserrat 500/600 with Cyrillic,
-fixed CSS tokens, responsive lists/forms, and confirmation dialogs.
+shared CSS tokens, responsive lists/forms, and confirmation dialogs.
+The Stage 3 visual revision separates page/section/card typography, reduces
+notice and surface scale, applies restrained form-control rounding, compacts
+group lists and adapts admin navigation for tablet/mobile.
 Development-only GET routes render synthetic data without business database
 records. UUID copying is functional; business actions remain no-op. Payment
 wording distinguishes an unknown browser-return outcome from trusted success.
 
-The page and state index is `docs/ui-pages.md`. The implementation is awaiting
+The page and state index is `docs/ui-pages.md`. The visual revision is awaiting
 Stage 3 acceptance; exact automated and browser verification results are in
 `.ai/report.md`. Stages 4 and later are not started.
 

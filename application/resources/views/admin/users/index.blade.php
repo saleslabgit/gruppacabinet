@@ -3,7 +3,7 @@
 <x-button :href="$links['admin-user-form']">Создать психолога</x-button>
 @endsection
 @section('content')
-<x-panel title="Поиск психологов">
+<x-panel title="Поиск психологов" :compact="true" class="panel-compact">
 <form data-prototype-form>
 <div class="row">
 <div class="col-lg-6">

@@ -1,6 +1,5 @@
 @if($variant === 'revision')
-<x-alert tone="warning">
-<strong>Доработайте описание</strong>
+<x-alert tone="warning" title="Доработайте описание">
 <p>{{ $group['moderator_comment'] }}</p>
 </x-alert>
 @include('shared.group-history')@endif

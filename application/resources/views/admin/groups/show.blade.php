@@ -2,11 +2,13 @@
 @section('content')
 <x-panel title="Интеграция с gruppa.info">
 <p class="meta">ID группы для gruppa.info</p>
-<p id="public_uuid" class="mb-4">{{ $group['public_uuid'] }}</p>
+<div class="integration-id">
+<p id="public_uuid">{{ $group['public_uuid'] }}</p>
 <x-button kind="secondary" data-copy="public_uuid">Скопировать ID</x-button>
+</div>
 <p id="copy-feedback" role="status" class="mt-3">
 </p>
-<p class="mt-3">Сохраните этот ID у соответствующей группы на основном сайте. Перед активацией убедитесь, что группа опубликована вручную и ID сохранён. Автоматическая проверка связи не выполняется.</p>
+<p class="small mt-3">Сохраните этот ID у соответствующей группы на основном сайте. Перед активацией убедитесь, что группа опубликована вручную и ID сохранён. Автоматическая проверка связи не выполняется.</p>
 </x-panel>
 <x-panel title="Психолог">
 <a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a>

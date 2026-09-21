@@ -6,14 +6,12 @@
 <span class="meta">{{ $group['free'] ? 'Бесплатное размещение' : 'Платное размещение' }}</span>
 </div>
 @if($group['status'] === 'revision')
-<x-alert tone="warning">
-<strong>Комментарий администратора</strong>
+<x-alert tone="warning" title="Комментарий администратора">
 <p>{{ $group['moderator_comment'] }}</p>
 </x-alert>
 @endif
 @if($group['status'] === 'rejected')
-<x-alert tone="danger">
-<strong>Причина отклонения</strong>
+<x-alert tone="danger" title="Причина отклонения">
 <p>{{ $group['rejection_reason'] }}</p>
 </x-alert>
 @endif
