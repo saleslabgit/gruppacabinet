@@ -1,630 +1,537 @@
-# Task: TASK-2026-09-21-03
+# Task: TASK-2026-09-21-04
 
 Status: planned
-Created from: 2fdf26b751c27ec6e0a60e419085d5ecab2a43cc (main)
+Created from: 2f82b0e525f5c8633d79c2a69d7dab1922314ab0 (main)
 
 ## Title
 
-Stage 5 — Implement real administrator CRUD for psychologists, moderation actions, tariff/access management, private documents, audit, and session revocation
+Stage 6 — Connect the real psychologist cabinet profile and owner-only private document access
 
 ## Goal
 
-Implement the complete Stage 5 psychologist-administration milestone from SPEC.md using the accepted Stage 3 Blade views and the Stage 4 authentication/access foundation.
+Implement Stage 6 from SPEC.md using the accepted Stage 3 psychologist Blade views and the Stage 4 authentication/access foundation.
 
-An authenticated administrator must be able to:
+After this task, an approved enabled psychologist can:
 
-- list psychologists with search, filters, and pagination;
-- open a psychologist profile with all stored questionnaire fields;
-- create and edit psychologists;
-- approve or reject pending psychologists through the existing domain transition service;
-- change free/paid tariff;
-- enable or disable cabinet access;
-- soft-delete psychologists;
-- upload, list, securely view/download, and delete private psychologist documents;
-- see relevant business-audit history;
-- have disable/reject/delete revoke all sessions immediately.
+- enter the cabinet at `/`;
+- see the existing Stage 6 placeholder/empty “Мои группы” page until Stage 7;
+- navigate to “Мои данные”;
+- see only their own real questionnaire/profile data;
+- see only their own real document list;
+- securely view/download only their own private documents;
+- log out through the existing real POST logout control.
 
-This stage is only administrator management of psychologists and their documents. Do not implement psychologist self-service, invitation/password email delivery, group CRUD, public questionnaire intake, or later payment/API workflows.
+This is a read-only psychologist profile/document milestone.
+
+Do not implement psychologist self-editing, document upload/delete, group CRUD, group queries/workflow, applications, payments, email, or admin changes.
 
 ## Facts
 
-- Stage 4 is accepted through commit 2fdf26b751c27ec6e0a60e419085d5ecab2a43cc.
-- Real administrator authentication and /admin role protection already exist.
-- Approved final views already exist for admin psychologist list/detail/form/documents.
-- Prototype routes must continue rendering the same final Blade files with synthetic fixtures.
-- gp_users, gp_user_documents, gp_audit_log, database sessions, and required indexes already exist.
-- UserStatusTransitionService already enforces pending -> approved, pending -> rejected, rejected -> pending.
-- approved -> rejected is intentionally not a normal transition; approved users are disabled instead.
-- SessionInvalidator already rotates remember_token and deletes target database sessions.
-- AuditService already writes stable non-sensitive business audit entries.
-- The local filesystem disk root is storage/app/private.
-- status is lifecycle truth; accept is compatibility-only and derived centrally.
-- gp_users.free is the current psychologist tariff; existing gp_groups.free values are historical snapshots and must not change when user tariff changes.
-- Development admin remains admin@gruppa.test / password.
+- Stage 5 is accepted through commit `2f82b0e525f5c8633d79c2a69d7dab1922314ab0`.
+- Stage 4 already provides:
+  - real session login/logout;
+  - per-request account eligibility checks;
+  - psychologist/admin role separation;
+  - psychologist root `/`;
+  - real POST logout.
+- Stage 5 already provides:
+  - real psychologist questionnaire data in `gp_users`;
+  - private document metadata in `gp_user_documents`;
+  - private storage under `storage/app/private`;
+  - MIME-safe authorized admin document streaming;
+  - document configuration and safe filename handling.
+- The accepted Stage 3 psychologist profile view is:
+  - `resources/views/psychologist/profile/show.blade.php`.
+- Shared profile/document partials already exist:
+  - `shared/profile-data.blade.php`;
+  - `shared/documents.blade.php`.
+- The Stage 3 psychologist prototype navigation already contains:
+  - “Мои группы”;
+  - “Мои данные”;
+  - “Выход”.
+- The real Stage 4 psychologist navigation currently exposes only “Мои группы”.
+- Independent psychologist questionnaire editing is not required in MVP.
+- SPEC requires private document viewing/downloading by either the owner or administrator after authorization.
+- Stage 6 acceptance explicitly requires that the psychologist:
+  - sees only self and own data;
+  - has no admin access;
+  - sees an empty group list until Stage 7;
+  - cannot retrieve another psychologist’s data/documents;
+  - works on mobile;
+  - reuses approved Stage 3 templates.
 
-## Assumptions
+## Product Routes
 
-- Administrator management routes operate only on psychologists with admin=false.
-- Administrator accounts must never be editable/deletable through psychologist CRUD.
-- A psychologist manually created by an administrator:
-  - is forced to admin=false;
-  - starts pending;
-  - starts enabled;
-  - has password=null;
-  - receives no email in this stage.
-- On create, administrator may select the initial free/paid tariff.
-- For existing psychologists, status, tariff, and access changes happen only through explicit confirmed actions, not ordinary profile editing.
-- Soft delete is implemented; restore is out of scope.
-- Pagination default is 20 psychologists per page, newest first with deterministic ID tie-break.
-- Product requirements do not specify document max size. Use configurable technical default:
-  PSYCHOLOGIST_DOCUMENT_MAX_KB=10240.
-- Allowed document business types are diploma, certificate, license/membership, state registration certificate.
-- Allowed actual file content types are PDF, JPEG, PNG.
+Add real psychologist routes behind existing `account` + `role:psychologist` middleware:
 
-## Unknowns
+```text
+GET /                         psychologist.home
+GET /profile                  psychologist.profile
+GET /profile/documents/{document}/view
+GET /profile/documents/{document}/download
+```
 
-- Approved education dictionary item values remain unavailable. Load real active DB items; do not invent values.
-- Password invitation/resend email remains Stage 11–12.
-- Restore of soft-deleted psychologists is not part of Stage 5.
+Names should be stable and explicit, e.g.:
+
+```text
+psychologist.profile
+psychologist.documents.view
+psychologist.documents.download
+```
+
+Do not put a psychologist/user ID into the psychologist profile URL.
+
+The current authenticated user is always the profile owner.
 
 ## Scope
 
-### 1. Real admin routes and navigation
+### 1. Real psychologist navigation
 
-Add real routes under /admin/psychologists for:
+Create/reuse one shared psychologist navigation builder/data contract for real psychologist pages.
 
-- index;
-- create/store;
-- show;
-- edit/update;
-- approve;
-- reject;
-- enable/disable;
-- tariff change;
-- soft delete;
-- documents list/upload/view/download/delete.
+Real psychologist navigation must contain:
 
-All routes stay behind the existing active-admin middleware.
+- “Мои группы” → `psychologist.home`;
+- “Мои данные” → `psychologist.profile`;
+- “Выход” → existing CSRF-protected POST logout.
 
-Update real admin navigation so Psychologists links to the real list.
-Never route real production actions into /_prototype.
-Prototype navigation remains synthetic/no-op.
+Correct `aria-current` state must be rendered on both pages.
 
-### 2. Policies and IDOR protection
+Prototype navigation must remain unchanged and continue using prototype routes.
 
-Use Laravel policies.
+Do not add future group/application/payment routes.
 
-Psychologist management policy must require an authenticated administrator and target admin=false.
+### 2. Keep “Мои группы” truthful until Stage 7
 
-Administrator accounts must not be returned/manipulated by changing an ID.
+The real root `/` must continue rendering the accepted `psychologist.groups.index` view.
 
-Document access must require:
-- active administrator;
-- parent psychologist admin=false;
-- document belongs to that psychologist.
+For Stage 6:
 
-Use nested scoped binding or an equally explicit ownership check.
-Cross-psychologist user/document ID substitution must fail safely.
-Do not add a permissions package.
+- keep the list empty even if development/test database contains groups;
+- do not query or expose group data yet;
+- keep group creation unavailable;
+- do not link to prototype or future create-group routes;
+- update only navigation/data plumbing required for Stage 6.
 
-### 3. Psychologist list
+Stage 7 will connect real groups.
 
-Connect the approved admin users index to real data.
+### 3. Real “Мои данные”
 
-Show:
-- safe full name from nullable name parts;
-- email;
-- phone;
-- status;
-- free/paid;
-- enabled/disabled;
-- registration date.
+Add a small psychologist cabinet/profile controller or equivalent conventional controller.
 
-Implement:
-- search across name parts, email, phone;
-- status filter;
-- free/paid filter;
-- pagination;
-- empty/no-results state;
-- filter persistence across pages.
+`GET /profile` must:
 
-Exclude admin=true and soft-deleted records.
-Order by created_at desc then id desc.
-No per-row queries/N+1.
-Add a query-count regression test.
+- get the authenticated user from the request/guard;
+- not accept a user ID;
+- load only relations needed for this page:
+  - education type;
+  - documents;
+- render the existing `psychologist.profile.show` view;
+- reuse `shared.profile-data` and `shared.documents`.
 
-### 4. Psychologist detail
+Display the current psychologist’s stored questionnaire data, including nullable fields already covered by the shared profile partial:
 
-Connect the approved detail view to real data.
+- surname/name/patronymic;
+- phone/email;
+- education type / other education;
+- modality/program;
+- training center;
+- graduation year;
+- training hours;
+- license number/expiry;
+- group-leading experience;
+- groups conducted count;
+- documents/education confirmation flags;
+- webinar/live-session readiness;
+- personal-data consent date;
+- personal-data consent version.
 
-Show all relevant questionnaire fields from SPEC section 6, including education/license, confirmations, consent, status, tariff, access state, registration date.
+Do not expose:
 
-Also show:
-- real document count and document management link;
-- relevant audit history;
-- group count/basic summary if safely available.
-
-Do not create Stage 7 production group-management links.
-
-Never expose password or remember token.
-
-### 5. Create psychologist
-
-Connect approved form to POST + CSRF + Form Request.
-
-Server must force:
-- admin=false;
-- status=pending;
-- disabled=false;
-- password=null.
-
-Request must not be able to set:
-- admin;
-- status;
-- accept;
 - password;
-- remember_token;
-- deleted_at.
+- remember token;
+- active_email generated column;
+- raw filesystem paths;
+- internal session identifiers.
 
-Email is required.
-Profile fields follow nullable schema.
-Allow initial free/paid tariff.
-Validate active-email uniqueness and retain DB constraint as race protection.
-Do not send mail.
-Redirect to real detail with success notice.
+Do not add edit buttons or self-service update actions.
 
-### 6. Edit psychologist profile
+### 4. Profile data presentation
 
-Connect approved edit form to real update.
+Reuse the same safe profile mapping/presentation logic where practical instead of creating divergent field interpretation between admin and psychologist pages.
 
-Ordinary profile update may edit questionnaire/profile fields and email only.
+A small refactor of `PsychologistPages::profile()` into a neutral shared presenter/helper is allowed if it materially improves reuse.
 
-It must not directly write:
-- status;
-- accept;
-- admin;
-- password;
-- remember_token;
-- deleted_at;
-- free;
-- disabled.
+Do not introduce a generalized presentation framework.
 
-Tariff/access/status are dedicated actions.
+Date/time display must continue using the project’s timezone/display conventions.
 
-Use Form Request validation and active-email uniqueness.
+### 5. Psychologist document list
 
-### 7. Education dictionary data
+The profile page must show only documents where:
 
-Load education_type dictionary from DB.
+```text
+gp_user_documents.user_id = authenticated_user.id
+```
 
-Offer active items only.
-If an existing psychologist references an inactive item, preserve/display it while editing so data is not silently lost.
-Do not invent dictionary values.
-Do not implement dictionary CRUD.
+Use real document metadata:
 
-### 8. Approve
+- business type label;
+- original filename;
+- size;
+- created date;
+- actions: View, Download.
 
-Explicit confirmation action for pending -> approved.
+Psychologist must not see Delete or Upload actions.
 
-Requirements:
-- use UserStatusTransitionService;
-- no direct status assignment in controller;
-- AuditService action user.approved;
-- current admin as actor;
-- only minimal old/new status metadata;
-- transition + audit coordinated transactionally;
-- no email;
-- no password assignment.
+Admin Stage 5 document management must remain unchanged.
 
-Invalid transition must not partially write audit/state.
+Empty document state must use the approved Stage 3 empty state.
 
-### 9. Reject
+### 6. Adapt shared document partial safely
 
-Explicit confirmation action for pending -> rejected.
+The existing `shared.documents` real mode currently assumes admin document routes and delete controls.
 
-Requirements:
-- use UserStatusTransitionService;
-- audit user.rejected;
-- call SessionInvalidator;
-- coordinate transition/audit/session invalidation safely;
-- no email.
+Refactor the shared partial/component contract so it can render at least three contexts without duplicate page markup:
 
-Do not add approved -> rejected.
+1. prototype psychologist/admin fixture mode;
+2. real admin management mode:
+   - view;
+   - download;
+   - delete;
+3. real psychologist owner read-only mode:
+   - view;
+   - download;
+   - no delete.
 
-### 10. Enable / disable
+Prefer explicit passed route URLs/capabilities over detecting role implicitly inside the Blade template.
 
-Dedicated confirmed actions.
+Do not create a second psychologist-only document table with duplicated markup.
 
-Disable:
-- set disabled=true;
-- SessionInvalidator immediately;
-- audit user.disabled with old/new values.
+### 7. Owner-only document authorization
 
-Enable:
-- set disabled=false;
-- audit user.enabled;
-- do not create session.
+Extend/reuse `UserDocumentPolicy` or use an equally explicit policy method for owner read access.
 
-Repeated actions must be safely idempotent or clearly rejected without misleading duplicate state changes.
+Psychologist document authorization must require:
 
-### 11. Free / paid
+- authenticated user is a non-admin psychologist;
+- user is approved/enabled by the existing account middleware;
+- `document.user_id === authenticated_user.id`.
 
-Dedicated confirmed tariff action.
+The psychologist routes themselves must not permit an administrator simply because they are an admin; admin access stays on the existing admin routes.
 
-Requirements:
-- update gp_users.free;
-- audit user.tariff_changed with minimal old/new value;
-- do not update existing gp_groups.free;
-- explicitly test existing group snapshot remains unchanged;
-- no payment behavior.
+For a document belonging to another psychologist, no file content or metadata may be returned.
 
-### 12. Soft delete
+Prefer a 404 for cross-owner document lookup where practical to avoid exposing another user’s document existence.
 
-Dedicated destructive confirmed action.
+### 8. Owner document lookup / IDOR defense
 
-Requirements:
-- only admin=false psychologist;
-- soft delete only;
-- SessionInvalidator immediately;
-- audit user.deleted;
-- preserve related historical/payment data;
-- redirect list with success notice.
+Do not trust only a globally bound `UserDocument $document`.
 
-Restore is out of scope.
+Use an owner-scoped lookup such as:
 
-### 13. Audit presentation
+```text
+currentUser->documents()->whereKey($documentId)->firstOrFail()
+```
 
-Mandatory Stage 5 audit actions:
-- user.approved;
-- user.rejected;
-- user.enabled;
-- user.disabled;
-- user.tariff_changed;
-- user.deleted.
+or an equivalent route binding explicitly scoped to the authenticated owner.
 
-Do not place full questionnaire/document data in metadata.
+This ensures:
 
-Psychologist detail should show a human-readable chronological audit list with date, action, actor, and minimal state change where useful.
-Do not dump raw JSON.
+- another psychologist’s document ID returns 404;
+- an administrator account cannot use psychologist-only routes because of role middleware;
+- soft-deleted/disabled/non-approved owners lose access through Stage 4 middleware before document handling.
 
-### 14. Private document configuration
+Add explicit IDOR tests.
 
-Add small config for:
-- private disk;
-- max KB;
-- allowed document type codes;
-- allowed file/content types.
+### 9. Secure document view/download
 
-Add to .env.example:
-PSYCHOLOGIST_DOCUMENT_MAX_KB=10240
+Reuse the existing Stage 5 private-file response/security behavior.
 
-Document the value as a configurable technical ceiling, not a business price/setting.
+For both owner endpoints:
 
-### 15. Upload private documents
+- authorize/owner-scope first;
+- verify private file exists;
+- verify stored MIME is still in the configured allowlist;
+- serve through Laravel/controller only;
+- set safe Content-Type;
+- set `X-Content-Type-Options: nosniff`;
+- set private/no-store cache headers;
+- use safe filename handling;
+- do not reveal filesystem path;
+- do not create public or temporary URLs.
 
-Connect real admin document upload.
+View should use inline disposition.
+Download should use attachment disposition.
 
-Validate:
-- allowed document type;
-- configured max size;
-- actual content/file type limited to PDF/JPEG/PNG;
-- do not trust only extension.
+If useful, extract the duplicated secure streaming logic from the admin controller into a very small shared document response service so admin and owner paths cannot drift.
 
-Store on private disk rooted at storage/app/private.
-Use application-generated random filename/path.
-Original filename is DB metadata only.
-Persist MIME and byte size.
-Never copy to public or storage/app/public.
-Never expose a direct public storage URL.
+Do not weaken Stage 5 admin authorization while refactoring.
 
-If DB persistence fails after writing a file, remove orphaned file.
+### 10. No psychologist document mutations
 
-### 16. View / download private documents
+Do not add psychologist routes/actions for:
 
-Serve only through authorized controller endpoints.
+- upload;
+- delete;
+- rename;
+- replace;
+- change document type.
 
-View:
-- authorize admin + nested ownership;
-- inline safe response for supported files;
-- safe Content-Type;
-- no filesystem path exposure.
+A psychologist may only list, view, and download documents in Stage 6.
 
-Download:
-- authorize;
-- stream/download through Laravel;
-- safe original filename;
-- no private storage URL.
+The admin retains full Stage 5 document management.
 
-Do not use Storage::temporaryUrl as a replacement for controller authorization.
+### 11. No self-edit flow
 
-Test that guessed /storage paths do not expose private documents.
+Do not add PATCH/PUT/POST profile mutations.
 
-### 17. Delete document
+The psychologist profile is read-only in MVP at this stage.
 
-Confirmed delete action.
+No button should imply that the psychologist can edit their questionnaire.
+
+### 12. Authorization boundaries
+
+Tests and implementation must prove:
+
+- guest → login for `/profile`;
+- admin → 403 for psychologist `/profile`;
+- psychologist → 200 for own profile;
+- psychologist → 403 for admin routes remains unchanged;
+- disabled/rejected/soft-deleted psychologist loses profile/document access via Stage 4 middleware;
+- psychologist cannot choose another user via URL/request data because no user identifier is accepted;
+- document IDOR returns no content for another psychologist.
+
+### 13. Mobile / accepted UI
+
+Do not redesign Stage 3.
+
+Verify the real profile/document page at:
+
+- desktop ~1440;
+- tablet ~1024;
+- mobile ~390.
 
 Requirements:
-- authorize nested ownership;
-- delete DB row and private file;
-- cross-user document ID substitution fails;
-- success notice after real deletion.
 
-Handle storage failure deliberately; do not silently claim success with file left behind.
+- no page-level horizontal overflow;
+- long email/document names wrap;
+- profile detail grid collapses correctly;
+- document table uses approved mobile card transformation;
+- View/Download actions remain visible and usable;
+- navigation with “Мои группы”, “Мои данные”, and “Выход” fits/wraps intentionally.
 
-### 18. Reuse approved Blade views
+No screenshots need to be committed.
 
-All real pages must reuse existing Stage 3 views and components.
+### 14. Prototype regression
 
-Each relevant view must support both:
-- prototype fixture mode;
-- real backend mode.
+All existing prototype behavior must remain:
 
-Real list/detail/forms/documents use real routes, CSRF, validation, old input, real DB options/actions.
-Prototype mode remains no-op and retains all variants.
+- 31 page groups;
+- 249 variants;
+- profile prototype variants:
+  - normal;
+  - long;
+  - no-documents;
+  - permission;
+- prototype document actions remain no-op;
+- prototype routes remain local/testing only.
 
-Existing prototype "Resend password setup" may remain for catalog coverage.
-Real Stage 5 detail must not offer a working resend-email action; hide it or mark it unavailable until email stage.
+Do not replace fixture data with database data inside `/_prototype`.
 
-Do not redesign the accepted Stage 3 interface.
-
-### 19. Admin navigation/home
-
-Real admin navigation should expose:
-- Home;
-- Psychologists;
-- Logout.
-
-Do not add real group/payment/dictionary/settings routes yet.
-
-Admin home may show a real pending-psychologist count/link if simple.
-Other future work-queue items must not use fixture counts.
-
-### 20. Transaction/orchestration
-
-Use a small explicit service for multi-effect psychologist actions if helpful.
-
-Coordinate transactionally where possible:
-- status + audit;
-- disable + token/session invalidation + audit;
-- reject + invalidation + audit;
-- tariff + audit;
-- soft delete + invalidation + audit.
-
-Do not build a generic workflow framework.
-
-Filesystem writes require explicit compensation/cleanup because filesystem and MySQL are not one transaction.
-
-### 21. Tests
+### 15. Tests
 
 All tests run on MySQL.
 
-Cover at minimum:
+Add focused tests for at least:
 
-#### List
-- admin-only access;
-- no admin accounts in psychologist list;
-- name/email/phone search;
-- status filter;
-- free/paid filter;
-- pagination/query preservation;
-- no N+1/per-row query pattern.
+#### Profile
+- real psychologist profile route renders approved view;
+- current user’s real questionnaire values are shown;
+- nullable/missing values render safely;
+- education relation is loaded correctly;
+- password/remember token/internal values are not present;
+- no edit/upload/delete controls exist;
+- no query for groups is introduced on real Stage 6 root/profile unless required by existing middleware.
 
-#### Create/update
-- successful create;
-- forced pending/admin=false/disabled=false/password=null;
-- initial tariff;
-- active-email uniqueness;
-- validation errors;
-- profile update;
-- protected fields cannot be mass-written;
-- prototype form still no-op.
-
-#### State/actions
-- approve through domain transition;
-- reject through domain transition;
-- invalid transition no partial write;
-- enable/disable;
-- tariff change;
-- soft delete;
-- correct audit actor/action/minimal metadata;
-- no email dispatch;
-- existing group tariff snapshot unchanged.
-
-#### Session invalidation
-- disable removes target sessions;
-- reject removes target sessions;
-- delete removes target sessions;
-- other users' sessions remain;
-- remember token rotates.
-
-#### Authorization/IDOR
-- psychologist cannot access admin CRUD;
-- admin cannot manage another admin via psychologist routes;
-- soft-deleted psychologist is not exposed by normal route;
-- cross-psychologist document IDs fail safely.
+#### Navigation
+- root and profile both show real “Мои группы” / “Мои данные” URLs;
+- current nav state is correct;
+- POST logout remains real;
+- root remains empty/unavailable groups until Stage 7.
 
 #### Documents
-- valid PDF/JPEG/PNG;
-- invalid text/executable content rejected;
-- max size enforced;
-- generated storage name;
-- original filename DB metadata only;
-- private physical storage;
-- no public direct URL;
-- authorized view/download;
-- cross-owner access denied;
-- delete removes DB row + file;
-- orphan cleanup on failed persistence where reasonably testable.
+- own documents appear;
+- other users’ documents do not appear;
+- authorized inline view;
+- authorized download;
+- correct MIME/disposition/security headers;
+- another psychologist’s document ID returns 404/no content;
+- missing physical file returns 404;
+- disallowed stored MIME returns 404;
+- no private storage path/public URL in HTML or response headers.
+
+#### Role/access
+- guest redirect;
+- admin 403 on psychologist profile;
+- psychologist 403 on admin;
+- disabled/rejected/deleted access revocation regression remains green.
 
 #### Regression
-- Stage 4 auth/access remains green;
-- 31 prototype groups / 249 variants remain;
-- production excludes prototype/foundation routes;
-- no Stage 6/7+ implementation.
+- Stage 4 auth tests remain green;
+- Stage 5 admin psychologist/document tests remain green;
+- all 31 / 249 prototype variants remain;
+- production has no prototype/foundation routes.
 
-### 22. Documentation
+### 16. Documentation
 
-Update:
-- docs/architecture.md;
-- docs/development.md;
-- docs/project-status.md;
-- docs/ui-pages.md only where real route wiring needs documentation.
+Update actual-state docs:
 
-Document private storage and configurable document max size.
+- `docs/architecture.md` — psychologist self-profile owner-only boundary and shared private document streaming;
+- `docs/development.md` — how to manually verify “Мои данные” with the local psychologist account;
+- `docs/project-status.md` — Stage 6 implemented, Stage 7 groups still pending;
+- `docs/ui-pages.md` only as needed to document real `/profile` wiring.
+
+Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
 ## Explicit Out Of Scope
 
 Do not implement:
-- public questionnaire API/registration;
-- invitation/password email;
-- resend password email;
-- SMTP;
-- temporary/product password assignment;
-- psychologist self-service profile/documents;
-- group CRUD/moderation;
-- applications;
-- payments;
-- dictionary/settings CRUD;
-- scheduler business jobs;
-- WEBPAY;
-- production deployment;
-- user restore.
 
-Do not create real links to unimplemented stages.
+- psychologist questionnaire editing;
+- psychologist document upload/delete;
+- profile password/change-password UI;
+- invitation/password setup email;
+- public questionnaire/API intake;
+- real psychologist group listing;
+- group create/edit/delete;
+- moderation;
+- applications;
+- group history;
+- payments;
+- dictionaries/settings;
+- scheduler/jobs;
+- WEBPAY;
+- production deployment.
+
+Do not create routes or links for these future stages.
 
 ## Constraints
 
-- Follow WORKFLOW.md and AGENTS.md.
-- Reuse accepted Stage 3 UI.
-- Stay behind Stage 4 admin access.
-- Use Laravel policies and Form Requests.
-- Use UserStatusTransitionService for approve/reject.
-- Use SessionInvalidator for disable/reject/delete.
-- Use AuditService for mandatory audit.
-- status, not accept, drives lifecycle.
-- Profile request cannot directly write protected workflow/access fields.
-- Documents remain private outside public web root.
-- Never log/audit document bodies or full questionnaires.
-- Never send email in Stage 5.
-- Preserve all 249 prototype variants.
-- Tests use MySQL only.
-- No new frontend framework/build pipeline.
-- No secrets/real personal data.
-- Do not alter .ai/task.md.
+- Follow `WORKFLOW.md` and `AGENTS.md`.
+- Reuse accepted Stage 3 views/components.
+- Preserve Stage 4 auth/access behavior.
+- Preserve Stage 5 admin CRUD/document behavior.
+- Psychologist profile routes use current authenticated user, never a user ID.
+- Owner document access must be explicit and IDOR-safe.
+- Private files remain outside public web root.
+- No alternate frontend or redesign.
+- Tests remain MySQL-only.
+- No Node/npm/Vite or new frontend framework.
+- No new dependency unless absolutely required; none is expected.
+- No secrets or real personal data.
+- Do not alter `.ai/task.md`.
 
 ## Acceptance Criteria
 
-1. Real admin navigation reaches real psychologist list.
-2. Only active authenticated admins access Stage 5 routes.
-3. Psychologists receive 403 for Stage 5 routes.
-4. Index contains only non-deleted admin=false psychologists.
-5. Search works for name/email/phone.
-6. Status and free/paid filters work.
-7. Pagination works and preserves filters.
-8. List has no N+1/per-row query pattern.
-9. Admin creates psychologist using approved Blade form.
-10. Created psychologist is forced pending/admin=false/disabled=false/password=null with chosen initial tariff.
-11. Profile editing cannot bypass protected status/tariff/access fields.
-12. Active-email uniqueness is enforced by validation and DB.
-13. Detail shows all relevant questionnaire data without password/token.
-14. Approve uses UserStatusTransitionService.
-15. Reject uses UserStatusTransitionService.
-16. Invalid transition cannot partially write state/audit.
-17. Approve/reject audit actor/action/metadata are correct and non-sensitive.
-18. Disable immediately invalidates target sessions and audits.
-19. Enable restores access eligibility and audits.
-20. Tariff action audits and does not mutate existing group snapshots.
-21. Soft delete invalidates sessions, audits, and preserves historical relations.
-22. Admin accounts cannot be manipulated through psychologist routes.
-23. Documents exist only on private disk.
-24. Upload enforces max size and actual allowed file type.
-25. Storage filename/path is application-generated.
-26. Authorized admin views/downloads documents only through controller.
-27. Cross-psychologist document IDOR is blocked.
-28. Private documents have no direct public URL.
-29. Delete removes DB row and private file.
-30. Existing real/prototype Blade files are reused.
-31. Real Stage 5 UI has no working resend-password-email action.
-32. No mail is sent by create/approve.
-33. Stage 4 auth/access remains green.
-34. All 31/249 prototype variants remain green.
-35. Full MySQL suite passes.
-36. Pint passes.
-37. Larastan passes.
-38. composer check-platform-reqs passes.
-39. Blade compilation passes.
-40. Documentation matches implementation.
-41. Final diff is limited to Stage 5 admin psychologist/document functionality, necessary UI integration, tests/docs/config, and .ai/report.md.
+1. Real psychologist navigation contains “Мои группы”, “Мои данные”, and POST logout.
+2. `GET /profile` is protected by active psychologist access rules.
+3. Psychologist sees only the authenticated user’s questionnaire data.
+4. No user ID is accepted/needed for the profile route.
+5. Profile remains read-only; no profile update endpoint is introduced.
+6. Real profile uses approved `psychologist.profile.show` and shared profile/document partials.
+7. Psychologist document list contains only own documents.
+8. Psychologist can view own private PDF/JPEG/PNG through Laravel.
+9. Psychologist can download own private documents through Laravel.
+10. Another psychologist’s document ID returns no file content and is not exposed.
+11. Admin cannot use psychologist-only profile/document routes; existing admin routes remain functional.
+12. Psychologist has no upload/delete document action.
+13. No private path or direct public URL is exposed.
+14. Missing file/disallowed stored MIME fails safely.
+15. Root “Мои группы” remains empty and no real group query/CRUD is introduced before Stage 7.
+16. Admin access boundaries remain unchanged.
+17. Disabled/rejected/deleted access revocation remains unchanged.
+18. Real profile works at 1440/1024/390 without horizontal overflow.
+19. Prototype profile variants and all 31/249 prototype catalogue entries remain green.
+20. Stage 5 admin CRUD/document tests remain green.
+21. Full MySQL test suite passes.
+22. Pint passes.
+23. Larastan passes.
+24. `composer check-platform-reqs` passes.
+25. Blade compilation passes.
+26. Documentation matches actual Stage 6 behavior.
+27. Final diff is limited to Stage 6 psychologist profile/document read access, necessary shared refactor, tests/docs, and `.ai/report.md`.
 
 ## Verification Commands
 
 Run and report exact results.
 
-1. Confirm Docker services and real admin login.
-2. Migrate/seed without destructive reset of normal development DB.
-3. Verify through real Docker HTTP runtime:
-   - list/search/filter;
-   - create/edit;
-   - approve/reject;
-   - tariff change;
-   - enable/disable;
-   - soft delete;
-   - document upload/view/download/delete.
-4. Verify psychologist role receives 403.
-5. Verify admin-account ID substitution fails.
-6. Verify cross-psychologist document ID substitution fails.
-7. Verify guessed public storage path does not expose private file.
-8. Verify no email/job is emitted by create/approve.
-9. Verify disable/reject/delete remove target database sessions.
+1. Confirm Docker services healthy.
+2. Login with local psychologist:
+   - `psychologist@gruppa.test` / `password`.
+3. Verify real HTTP/browser flows:
+   - `/cabinet/` shows empty groups;
+   - navigation opens `/cabinet/profile`;
+   - profile shows current account data;
+   - own document View/Download works;
+   - no edit/upload/delete controls.
+4. Create/attach synthetic test document through existing admin flow, then verify owner can see/view/download it.
+5. Verify a second psychologist cannot access that document by guessed ID.
+6. Verify administrator receives 403 on psychologist-only profile/document routes.
+7. Verify psychologist still receives 403 on admin routes.
+8. Verify no group query/CRUD route was introduced.
+9. Verify mobile rendering at 390px and no horizontal overflow.
 10. Run:
-   - docker compose exec -T php php artisan test
-   - docker compose exec -T php ./vendor/bin/pint --test
-   - docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
-   - docker compose exec -T php composer check-platform-reqs
-   - docker compose exec -T php php artisan view:cache
-11. Inspect real route list and production route isolation.
-12. Inspect private/public storage tree.
-13. Inspect representative audit rows for sensitive data.
-14. Inspect query count for populated psychologist index.
-15. Inspect git diff/status/staged files.
-16. Confirm no uploaded test files, .env, real user data, secrets, browser artifacts, or unrelated files are staged.
+   - `docker compose exec -T php php artisan test`
+   - `docker compose exec -T php ./vendor/bin/pint --test`
+   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
+   - `docker compose exec -T php composer check-platform-reqs`
+   - `docker compose exec -T php php artisan view:cache`
+11. Inspect route list and production route isolation.
+12. Inspect HTML/headers for private path leakage.
+13. Inspect `git diff`, `git status --short`, and staged files.
+14. Confirm no uploaded test files, .env, real personal data, screenshots, secrets, or temporary artifacts are staged.
 
 ## Hard Workflow Gate
 
 Before changing files:
 
-- read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
-- run git log --oneline -5;
-- run git status --short;
-- confirm base commit 2fdf26b751c27ec6e0a60e419085d5ecab2a43cc;
-- inspect existing Stage 3 psychologist/document views and Stage 4 auth/session services;
+- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/project-status.md`, `docs/ui-pages.md`, and this task;
+- run `git log --oneline -5`;
+- run `git status --short`;
+- confirm base commit `2f82b0e525f5c8633d79c2a69d7dab1922314ab0`;
+- inspect Stage 3 profile/documents views and Stage 4/5 access/document code;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- stay strictly in Stage 5;
-- do not implement email/onboarding or Stage 6/7 flows;
-- keep protected fields out of ordinary profile mass assignment;
-- keep documents private;
-- preserve prototype behavior and accepted design;
-- do not alter .ai/task.md;
+- stay strictly in Stage 6;
+- do not implement real group functionality;
+- do not add profile/document mutations for psychologist;
+- use owner-scoped document access;
+- preserve admin document routes;
+- preserve prototype fixtures/no-op behavior;
+- preserve accepted visual design;
+- do not alter `.ai/task.md`;
 - do not change governance/spec files.
 
 Before commit:
 
 - run all required checks;
-- perform real HTTP CRUD/document smoke verification;
-- update .ai/report.md with routes/controllers/requests/policies/services, list/filter/pagination, audit/session behavior, document storage/security, checks, facts/assumptions/unknowns;
-- inspect complete diff and staged files;
-- stage only Stage 5 files plus .ai/report.md;
-- confirm no private uploads, secrets, runtime artifacts, or unrelated files are staged.
+- perform real owner profile/document HTTP/browser smoke verification;
+- update `.ai/report.md` with routes, authorization, owner-scoping, shared-view changes, tests/runtime verification, facts/assumptions/unknowns;
+- inspect full diff and staged files;
+- stage only Stage 6 files plus `.ai/report.md`;
+- ensure no private uploads/runtime artifacts are staged.
 
 Completion:
 
-- use Status: done only if all Stage 5 acceptance criteria are satisfied;
-- otherwise use partial, blocked, or failed;
+- use `Status: done` only if all acceptance criteria are satisfied;
+- otherwise use `partial`, `blocked`, or `failed`;
 - if complete, commit with:
 
-codex: TASK-2026-09-21-03 implement psychologist admin CRUD
+```text
+codex: TASK-2026-09-21-04 connect psychologist profile cabinet
+```
 
-- do not create an accept commit.
+- do not create an `accept:` commit.
