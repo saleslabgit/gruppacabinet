@@ -6,6 +6,7 @@ use App\Enums\UserStatus;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PsychologistActions
@@ -52,6 +53,15 @@ class PsychologistActions
                 $user->delete();
             }
             $this->audit->record('user', $user->id, 'user.'.$action, $metadata, $actor);
+            if ($action === 'approved' && PasswordSetupService::eligible($user)) {
+                DB::afterCommit(function () use ($user): void {
+                    try {
+                        app(PasswordSetupService::class)->invite($user->id);
+                    } catch (\Throwable) {
+                        Log::error('Password setup invitation could not be queued.', ['user_id' => $user->id]);
+                    }
+                });
+            }
         });
     }
 }

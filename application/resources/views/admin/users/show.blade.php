@@ -23,6 +23,11 @@
 <li>
 <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#tariff-user">{{ $user['free'] ? 'Назначить платный тариф' : 'Назначить бесплатный тариф' }}</button>
 </li>
+@if(!$prototype && auth()->user()->can('passwordSetup', $psychologist))
+<li><form method="POST" action="{{ route('admin.psychologists.password-setup', $psychologist) }}">@csrf
+<button type="submit" class="dropdown-item">Отправить ссылку установки пароля</button>
+</form></li>
+@endif
 @if($prototype && $user['status'] === 'approved')
 <li>
 <button type="button" class="dropdown-item" data-noop>Повторно отправить установку пароля</button>
@@ -62,7 +67,7 @@
 @if(!$prototype)
 @foreach($history as $entry)
 <li>
-<strong>{{ ['user.approved'=>'Анкета принята','user.rejected'=>'Анкета отклонена','user.enabled'=>'Доступ включён','user.disabled'=>'Доступ отключён','user.tariff_changed'=>'Тариф изменён','user.deleted'=>'Психолог удалён'][$entry->action] ?? 'Действие администратора' }}</strong>
+<strong>{{ ['user.approved'=>'Анкета принята','user.rejected'=>'Анкета отклонена','user.enabled'=>'Доступ включён','user.disabled'=>'Доступ отключён','user.tariff_changed'=>'Тариф изменён','user.deleted'=>'Психолог удалён','user.password_setup_resent'=>'Повторная отправка ссылки установки пароля'][$entry->action] ?? 'Действие администратора' }}</strong>
 @if(isset($entry->metadata['old_free']))
 <p class="actions"><x-tariff :free="$entry->metadata['old_free']" /><span aria-label="изменён на">→</span><x-tariff :free="$entry->metadata['new_free']" /></p>
 @endif
@@ -80,7 +85,7 @@
 </x-panel>
 <x-confirmation :url="$prototype ? null : route('admin.psychologists.approve', $user['id'])" id="approve-user" title="Принять анкету?" action="Принять" kind="primary">
 <p class="confirmation-object">{{ $user['name'] }}</p>
-<p>Психолог сможет установить пароль и войти после подключения отправки писем.</p>
+<p>Если пароль ещё не задан и доступ включён, психолог получит письмо со ссылкой установки пароля.</p>
 </x-confirmation>
 <x-confirmation :url="$prototype ? null : route('admin.psychologists.reject', $user['id'])" id="reject-user" title="Отклонить анкету?" action="Отклонить">
 <p class="confirmation-object">{{ $user['name'] }}</p>

@@ -3,19 +3,23 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\PasswordSetupRequest;
 use App\Http\Requests\Admin\PsychologistActionRequest;
 use App\Http\Requests\Admin\PsychologistRequest;
 use App\Models\AuditLog;
 use App\Models\DictionaryItem;
 use App\Models\User;
+use App\Services\PasswordSetupService;
 use App\Services\PsychologistActions;
 use App\Support\DateTimeFormatter;
 use App\Support\PsychologistPages;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PsychologistController extends Controller
@@ -126,6 +130,21 @@ class PsychologistController extends Controller
             throw $exception;
         }
         throw ValidationException::withMessages(['email' => 'Этот email уже используется.']);
+    }
+
+    public function passwordSetup(PasswordSetupRequest $request, User $psychologist, PasswordSetupService $setup): RedirectResponse
+    {
+        try {
+            $setup->invite($psychologist->id, $request->user());
+        } catch (AuthorizationException|ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable) {
+            Log::error('Password setup resend could not be queued.', ['user_id' => $psychologist->id]);
+
+            return redirect()->route('admin.psychologists.show', $psychologist)->withErrors(['action' => 'Не удалось поставить письмо в очередь. Повторите отправку позже.']);
+        }
+
+        return redirect()->route('admin.psychologists.show', $psychologist)->with('success', 'Письмо со ссылкой установки пароля поставлено в очередь.');
     }
 
     public function action(PsychologistActionRequest $request, User $psychologist, PsychologistActions $actions): RedirectResponse

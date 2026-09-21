@@ -8,6 +8,12 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+
+// Queue exception traces must never include serialized invitation payloads.
+ini_set('zend.exception_ignore_args', '1');
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -17,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->web(replace: [StartSession::class => App\Http\Middleware\StartSession::class]);
         // Preserve the exact signed manifest; API DTOs normalize validated fields explicitly.
         $middleware->trimStrings(except: [fn ($request) => ApiErrors::matches($request)]);
         $middleware->convertEmptyStringsToNull(except: [fn ($request) => ApiErrors::matches($request)]);
@@ -27,12 +34,24 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->dontFlash(['token', 'password', 'password_confirmation']);
         $exceptions->report(function (Throwable $exception) {
+            if (request()->routeIs('password.*')) {
+                Log::error('Password setup request failed.', ['exception_type' => get_class($exception)]);
+
+                return false;
+            }
             if (ApiErrors::matches(request())) {
                 return false; // The renderer writes only safe technical diagnostics.
             }
         });
         $exceptions->render(function (Throwable $exception, Request $request) {
+            if ($request->routeIs('password.*')) {
+                $status = $exception instanceof HttpExceptionInterface ? $exception->getStatusCode() : 500;
+
+                return response('Не удалось выполнить запрос. Попробуйте позже или обратитесь к администратору.', $status)
+                    ->header('Cache-Control', 'no-store, private')->header('Referrer-Policy', 'no-referrer');
+            }
             if (ApiErrors::matches($request)) {
                 if ($exception instanceof HttpResponseException) {
                     return $exception->getResponse();

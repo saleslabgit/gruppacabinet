@@ -406,3 +406,50 @@ IDs and compare journal/file counts. Inspect only newly produced log records for
 redaction. Clean only your smoke IDs/files and restore temporary configuration.
 No public-site repository changes, emails or payment operations are part of this
 verification.
+
+## Stage 12: local SMTP and database worker
+
+Compose includes Mailpit `axllent/mailpit:v1.27.8`, SMTP `mailpit:1025` inside
+Docker and capture UI at `http://localhost:8025` bound to loopback only. PHP and
+queue-worker use SMTP without credentials, the same application build/storage
+and database queue. Worker restarts after its one-hour max-time. No Node tools
+or mail application dependency are required.
+
+```bash
+docker compose up -d --build
+docker compose exec -T php php artisan migrate --force
+docker compose exec -T php php artisan db:seed --force
+docker compose ps
+docker compose exec -T php php artisan schedule:list
+docker compose exec -T php php artisan queue:failed
+```
+
+For deterministic smoke verification, stop the persistent worker and process a
+single job explicitly (restart the service afterward):
+
+```bash
+docker compose stop queue-worker
+docker compose exec -T php php artisan queue:work database --once --tries=3 --timeout=45
+docker compose start queue-worker
+```
+
+Use synthetic `@example.test` psychologists. Approve a pending password-null
+account via the real admin detail form; observe one database job, process it,
+open the actual Mailpit link, choose a password, verify login and link reuse
+rejection. For resend, leave an old invitation queued, use the eligible admin
+resend action, check immediate old-link rejection, process the old job (no mail)
+and the new job (working link). Do not copy tokens or message bodies into reports.
+
+Create a synthetic active group outside the warning threshold and run
+`groups:queue-expiry-warnings` (zero), move its expiry inside the threshold,
+run twice (one, then zero), process one job and verify capture plus marker.
+Run again (zero). For SMTP failure, stop Mailpit, queue a fresh eligible period
+and process once: marker stays null and job is available for retry after backoff.
+Make a synthetic group due and run `groups:expire` while Mailpit is stopped:
+it still expires. Start Mailpit and retry; stale expired jobs finish without mail.
+Inspect logs, audit, sessions and error/validation pages for token/password absence.
+Remove only smoke-created records/messages/jobs and release any manually removed
+unique job's lock; do not clear application queues or mailbox indiscriminately.
+
+See `email.md` for TTL semantics, production SMTP/worker/scheduler prerequisites
+and shared lock storage. Never deploy local Compose credentials or Mailpit.

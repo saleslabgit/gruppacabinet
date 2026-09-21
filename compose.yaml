@@ -30,11 +30,16 @@ services:
     build:
       context: .
       dockerfile: docker/php/Dockerfile
-    environment:
+    environment: &app-environment
       APP_ENV: local
       APP_DEBUG: "true"
       APP_URL: http://localhost:8080/cabinet
       APP_TIMEZONE: UTC
+      MAIL_MAILER: smtp
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      MAIL_TIMEOUT: 15
+      QUEUE_CONNECTION: database
       DB_CONNECTION: mysql
       DB_HOST: mysql
       DB_PORT: 3306
@@ -53,6 +58,26 @@ services:
     volumes:
       - ./application:/var/www/application
       - ./docker/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  queue-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    environment: *app-environment
+    entrypoint: ["php", "artisan", "queue:work", "database", "--sleep=2", "--tries=3", "--timeout=45", "--max-time=3600"]
+    restart: unless-stopped
+    depends_on:
+      php:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    volumes:
+      - ./application:/var/www/application
 
   web:
     image: nginx:1.28-alpine

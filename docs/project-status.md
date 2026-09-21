@@ -67,7 +67,7 @@ policies, row locks, the existing transition/audit/session services and database
 transactions. Historical group tariff snapshots remain unchanged. Documents
 are stored privately with random paths, content MIME validation and authorized
 nested-owner view/download/delete endpoints. Uploads have a configurable
-10 MiB technical ceiling. No email or password invitation is sent.
+10 MiB technical ceiling. Stage 12 now adds queued first-password invitations after approval.
 
 The same Blade files retain all 31 prototype groups / 249 variants. Real admin
 navigation now also exposes Payments, Dictionaries and Settings (Stage 8). New MySQL tests cover CRUD,
@@ -109,7 +109,7 @@ Stage 8 adds only an informational admin payment-list route.
 MySQL coverage includes both tariffs, history/atomicity, IDOR, immutability,
 validation/dictionaries/integer money, activation, deletion and query counts.
 Stage 8 adds dictionary/settings administration and an informational payment page.
-Stage 9 adds lifecycle automation/free extension. Stage 10 connects internal applications below; Stage 11 adds incoming integration. Mail and
+Stage 9 adds lifecycle automation/free extension. Stage 10 connects internal applications below; Stage 11 adds incoming integration. Stage 12 adds mail below;
 payments remain pending.
 
 ## Stage 8 dictionaries, settings and payment information
@@ -173,14 +173,33 @@ domain transitions are reused, with rollback cleanup for new files. Applications
 resolve immutable group UUIDs and derive ownership internally. Existing Stage 5
 and 10 pages/counters receive real incoming data without UI changes.
 
-The public-site contract is `docs/integration.md`. Stage 12 email/password setup
-and later payment stages remain pending. No SMTP, mail jobs, password tokens or
-WEBPAY behavior was added. Public-site implementation/deployment is external.
+The public-site contract is `docs/integration.md`. Stage 11 itself adds no mail
+or payment effects. Public-site implementation/deployment is external; Stage 12
+adds the email flows described below.
+
+## Stage 12 email and onboarding
+
+Stage 12 is complete and verified locally; verification details are in `.ai/report.md`.
+
+Queued first-password invitations follow committed admin approval. Admin resend
+replaces the broker token and invalidates older queued invitations. The real
+password Blade page validates current eligibility and typed TTL, consumes tokens,
+hashes passwords and supports normal login afterward. No public reset request or
+password replacement is provided.
+
+Hourly expiry warnings use database jobs and a shared unique lock for each exact
+placement period. Jobs recheck current state, then mark only after successful
+SMTP. Lifecycle expiration stays independent. Local Mailpit and a dedicated
+worker provide reproducible SMTP/queue verification. Production prerequisites,
+TTL semantics and delivery limits are in `docs/email.md`.
+
+Stage 13 WEBPAY Sandbox remains pending; prices, Sandbox merchant credentials,
+provider contract/configuration and externally reachable callback URLs must be
+resolved for that stage. No payment behavior was introduced by Stage 12.
 
 ## Intentionally not implemented
 
-No psychologist profile editing or document mutations, payment CRUD,
-mail/warning jobs, or WEBPAY
+No psychologist profile editing or document mutations, payment CRUD, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 
 ## External prerequisites and unknowns

@@ -8,14 +8,15 @@
 @elseif($variant === 'success')
 <x-alert tone="success">Пароль установлен. Теперь можно войти в кабинет.</x-alert>
 @else
-<form data-prototype-form>
-<input type="hidden" name="token" value="DEMO-NONFUNCTIONAL-TOKEN">
+<form @if($prototype) data-prototype-form @else method="POST" action="{{ route('password.store') }}" @endif>
+@if(!$prototype) @csrf @endif
+<input type="hidden" name="token" value="{{ $prototype ? 'DEMO-NONFUNCTIONAL-TOKEN' : $setupToken }}">
 <p>Создайте пароль для первого входа.</p>
 <x-validation-summary :errors="array_intersect_key($errors, array_flip(['email','password','password_confirmation']))" />
 <x-input name="email" :error="$errors['email'] ?? null" label="Email" type="email" :value="$user['email']" readonly autocomplete="username" :required="true" />
 <x-input name="password" label="Новый пароль" type="password" autocomplete="new-password" :required="true" help="Не менее 8 символов. Не используйте пароль от других сервисов." :error="$errors['password'] ?? null" />
 <x-input name="password_confirmation" label="Повторите пароль" type="password" autocomplete="new-password" :required="true" :error="$errors['password_confirmation'] ?? null" />
-<x-button data-noop>Установить пароль</x-button>
+@if($prototype)<x-button data-noop>Установить пароль</x-button>@else<x-button type="submit">Установить пароль</x-button>@endif
 </form>
 @endif
 <p class="mt-4">

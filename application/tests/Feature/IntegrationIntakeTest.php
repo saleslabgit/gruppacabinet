@@ -19,7 +19,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -144,7 +143,7 @@ class IntegrationIntakeTest extends TestCase
         Mail::assertNothingSent();
         Mail::assertNothingQueued();
         Queue::assertNothingPushed();
-        $this->assertFalse(Schema::hasTable('password_reset_tokens'));
+        $this->assertDatabaseCount('password_reset_tokens', 0);
     }
 
     public function test_idempotency_conflicts_semantic_normalization_and_distinct_ids(): void

@@ -1,190 +1,171 @@
-# Report: TASK-2026-09-21-10
+# Report: TASK-2026-09-21-11
 
 Status: done
 
 ## Summary
 
-Реализован Stage 11: stateless server-to-server приём анкет психологов и заявок
-участников с общей HMAC-защитой, MySQL-идемпотентностью, приватными документами,
-едиными JSON-ошибками и безопасными техническими логами. UI Stage 10 сохранён.
-Полный регрессионный прогон пройден: 342 tests / 4349 assertions.
-Окончательный focused Stage 11 прогон: 20 tests / 331 assertions, все пройдены.
+Реализован Stage 12: одноразовая установка первого пароля, приглашение после
+commit одобрения, admin resend, письма через database queue, часовые уведомления
+об окончании размещения. Реальный HTTP/SMTP smoke и полный MySQL regression пройдены: 365 tests /
+4545 assertions. Окончательный focused прогон: 40 tests / 477 assertions.
+WEBPAY и Stage 11 API implementation не изменялись.
 
-## API / security contract
+## Architecture / behavior
 
-Production:
-
-- `POST https://gruppa.info/cabinet/api/v1/psychologists`
-- `POST https://gruppa.info/cabinet/api/v1/group-applications`
-
-Маршруты зарегистрированы через `routes/api.php`, middleware `api`,
-`throttle:integration`, `AuthenticateIntegration`; без web/session/CSRF/login.
-Production route inspection: 68 маршрутов, оба POST API присутствуют,
-`_prototype`, `_foundation`, `redirect-check` отсутствуют. Web login и страницы
-заявок сохраняют `web`/account/role middleware.
-
-Подпись: lowercase hex HMAC-SHA256, `hash_equals`, шесть строк с LF без завершающего
-LF: `v1`, `POST`, `/api/v1/<endpoint>`, timestamp, request ID, SHA-256 payload.
-Префикс `/cabinet` исключён из канонического пути. JSON подписывает точные raw
-bytes; multipart — точную строку `payload` и descriptor каждого файла с hash/size.
-PHP/FPM parsing остаётся штатным, `enable_post_data_reading=1`. Boundary не
-подписывается. Global trim/null middleware пропускает API; нормализация явная в DTO.
-
-Timestamp — Unix UTC seconds; ±300 включительно, ±301 отклоняется. Request ID
-обязателен: 1–128 символов безопасного ASCII-набора, регистр значим. Секрет только
-env/config, отсутствие секрета закрывает доступ (503). Rate limit по IP + endpoint,
-по умолчанию 60/min, configurable, считает также неуспешную аутентификацию.
-Allowlist — необязательный список точных IP; пустой отключает проверку.
-
-Ответы: `data/status + request_id`; ошибки `code/message`, опциональные `errors`,
-безопасный request ID или null. HTTP 400/401/403/404/405/409/413/415/422/429/500/503
-описаны в integration guide. Неожиданные исключения не раскрывают SQL/пути/trace.
-Для API подавлен стандартный exception report, способный включать SQL bindings;
-логируются только endpoint, безопасный ID, code, IP, UTC time, exception class и
-server-side source file/line. Тела, email/имена/телефоны, файлы и подписи не пишутся.
-Web error handling не изменён.
-
-## Idempotency / business behavior
-
-Новая таблица/модель `gp_integration_requests`:
-
-- unique `request_id` (128, `utf8mb4_bin`);
-- endpoint, SHA-256 semantic fingerprint;
-- response_status, точный сериализованный response_body;
-- completed_at с индексом, timestamps.
-
-Нет колонок raw payload, персональных данных, файлов или секрета. Atomic no-op
-upsert и row lock координируют конкурентные запросы. Бизнес-изменения и завершение
-журнала находятся в одной транзакции. Replay возвращает исходные status/body без
-повторного эффекта; другое содержимое/endpoint с тем же ID — 409. Откат не оставляет
-завершённого/отравленного ID. Bounded retries обрабатывают deadlock/insert race.
-Fingerprint нормализует поля и телефон заявки, сортирует descriptors и не зависит
-от JSON formatting, multipart boundary, порядка/транспортных имён файлов.
-Автоматическая очистка журнала не добавлена.
-
-Анкеты:
-
-- новый email → 201 pending, non-admin, enabled, free=false, password=null;
-- pending → 200, полная замена nullable questionnaire fields, append documents;
-- rejected → то же + domain transition в pending;
-- approved/disabled/soft-deleted match → 409, без изменения/восстановления;
-- education_type_code разрешается только в нужном словаре; новый выбор active,
-  текущий inactive code допустим при повторе;
-- consent обязателен, UTC `YYYY-MM-DDTHH:mm:ssZ`; внутренние поля запрещены;
-- доступ/тариф/пароль/admin при повторе не перезаписываются.
-
-Документы: PDF/JPEG/PNG по фактическому MIME, configurable 10240 KiB/file,
-подписанные type/name/size/hash; safe name, случайный путь, private local storage.
-Расширен существующий `PsychologistDocuments`: signed original name и очистка
-известного случайного пути даже после частичной записи. При сбое бизнес-операции,
-следующей загрузки или завершения журнала удаляются новые файлы запроса.
-
-Заявка ищет только `public_uuid`; soft-deleted/unknown → 404, не active/disabled
-→ 422. Создаётся через связь найденной группы; владелец определяется group.owner_id.
-Телефон нормализует существующий `PhoneNormalizer`, processed_at=null. Внутренние
-ID/owner/status-поля не принимаются. Разные request IDs — отдельные заявки.
+- Новая миграция `2026_09_21_120000_create_password_reset_tokens_table` создаёт
+  стандартную таблицу `password_reset_tokens` с email, хешем token, created_at.
+- `PasswordSetupService` на каждой операции создаёт Laravel PasswordBroker и
+  DatabaseTokenRepository, использует штатный Eloquent provider и APP_KEY.
+  Генерация, хеширование, проверка и удаление токенов — framework code.
+- Текущий SettingService::passwordSetupLinkTtlHours() переводится в секунды;
+  broker не кешируется в worker. Изменение TTL влияет на ранее выданные токены.
+  Проверенная граница Laravel isPast: точный момент expiry ещё допустим,
+  момент после него — нет; хранение с точностью до секунды. Увеличение TTL
+  может вернуть валидность ещё не использованной ссылки, что документировано.
+- GET `/password/setup/{token}?email=...`, POST `/password/setup`; общий лимит
+  10/min/IP. Существующий login limiter сохранён. Успех: hashed cast пароля,
+  ротация remember_token, удаление broker token под user lock, без автовхода.
+- Допускаются только approved/enabled/non-deleted/non-admin/password-null.
+  POST требует email/token/password/confirmation, пароль 8–255 символов.
+  Открытого forgot-password/reset-request endpoint нет.
+- Approval регистрирует afterCommit callback: rollback не создаёт приглашение.
+  После commit отдельная транзакция заменяет токен и вставляет database job.
+  Ошибка инфраструктуры оставляет approval/audit сохранёнными и пишет только
+  безопасное сообщение/user_id; восстановление — admin resend.
+- Admin POST `/admin/psychologists/{id}/password-setup`: account/admin, policy,
+  Form Request, CSRF, 1/min/admin/target. Токен и queue insert атомарны;
+  прежняя ссылка сразу теряет валидность после успешного commit. Audit action
+  `user.password_setup_resent`, actor/entity, metadata=null, без email/URL/token.
+- SendPasswordSetup перед отправкой проверяет текущее состояние и тот же токен.
+  Старое queued job после resend завершается без письма. Retry не меняет токен.
+- GET setup не сохраняется в session previous URL; validation не flash-ит ввод.
+  no-store/no-referrer, безопасные ответы при исключениях даже в APP_DEBUG.
+  Письмо и hidden input действительной формы содержат токен по назначению;
+  закрытые database queue payloads также могут содержать его.
+- `groups:queue-expiry-warnings`: hourly + withoutOverlapping; текущий threshold
+  читается один раз, выборка chunkById(200), eligibility owner через EXISTS,
+  вывод только фактического queued count. Disabled группы исключены без маркера.
+- SendExpiryWarning implements ShouldBeUnique. Ключ: group ID + exact expires_at
+  UTC `Y-m-d H:i:s`, совпадающая с БД точность. Команда берёт Laravel UniqueLock
+  явно перед Bus dispatch, worker освобождает тот же lock после завершения;
+  при dispatch failure команда освобождает lock. TTL блокировки не ограничен,
+  поэтому ожидание/выполнение/retry не открывает окно повторной постановки.
+- Job повторно читает группу/владельца/current threshold. После успешного SMTP
+  отдельная транзакция блокирует группу и проверяет active, exact expiry и null
+  marker, затем пишет expiry_warning_sent_at. SMTP exception/cancel не ставит
+  marker. Старое письмо не отмечает новый период при конкурентном продлении.
+- Письма содержат только необходимые данные, HTML/text по-русски без внешних
+  ресурсов. Warning указывает Europe/Minsk и защищённую ссылку группы.
+- Оба job: database queue, 3 tries, backoff 60/300, timeout 45; SMTP timeout 15.
+  Разрешён SMTP transport, чтобы log/failover-to-log не раскрывал ссылку.
+  Transport exceptions заменяются техническими без previous exception.
+  Bootstrap включает zend.exception_ignore_args=1: worker exception traces
+  не содержат аргументы с serialized payload и токеном.
+- Lifecycle expiration не зависит от писем/очереди. Warning не меняет
+  status/expires_at/placement_days, не создаёт платёжных эффектов.
 
 ## Changed Files
 
-- `application/routes/api.php`, `bootstrap/app.php`, `AppServiceProvider`:
-  маршруты, limiter, API error boundary и сохранение signed bytes.
-- `app/Http/Middleware/AuthenticateIntegration.php`, API `IntakeController`;
-  `app/Integration/{ApiErrors,IntegrationException,IntakeData,IntakeService}`.
-- `app/Models/IntegrationRequest.php`, migration
-  `2026_09_21_000001_create_integration_requests_table.php`.
-- `config/integration.php`, `.env.example` — только placeholders/defaults.
-- `app/Services/PsychologistDocuments.php` — общая политика хранения/cleanup.
-- `IntegrationIntakeTest`, `IntegrationConcurrencyTest`, отдельный test worker;
-  Stage 10 route assertion уточнён до web, поскольку API теперь существует.
-- `docs/integration.md`, `development.md`, `architecture.md`, `project-status.md`.
-- `.ai/report.md`.
-
-Blade/CSS/JS, scheduler, payment-код, SPEC/WORKFLOW/AGENTS и `.ai/task.md` не менялись.
+Добавлены broker/setup service, два jobs, два mailables и четыре mail templates,
+password controller/Form Request/session middleware, warning command, миграция,
+два feature suites и тестовый SMTP receipt fake. Подключены approval, admin
+controller/policy/action/history, rate limits, routes/schedule, existing password
+Blade. Добавлены Mailpit/worker в корневой Compose и SMTP defaults. Обновлены
+email/development/architecture/project-status/ui-pages docs и этот отчёт.
+Task/SPEC/WORKFLOW/AGENTS, Stage 11 API, CSS и lifecycle implementation не менялись.
+В существующих тестах login ограничен срок действия Auth mock и добавлен
+assertOk; Stage 11 теперь проверяет отсутствие token rows после API вместо
+устаревшего ожидания отсутствия самой таблицы.
 
 ## Checks
 
-- `docker compose ps`: MySQL/PHP healthy, Nginx running.
-- `docker compose exec -T php php artisan migrate --seed --no-interaction`: PASS,
-  применена только новая миграция, выполнен идемпотентный seed, без reset/fresh.
-- Первый завершённый focused `IntegrationIntakeTest`: 14 passed / 266 assertions;
-  затем добавлены проверки partial file write, replay после изменения состояния,
-  malformed inputs и реального QueryException с sensitive bindings.
-- MySQL concurrency: отдельные 4 PHP процесса; same-ID application → одна строка,
-  same-ID questionnaire → одна строка/исходный 201 у всех; разные IDs одного нового
-  email → один 201, остальные 200, без duplicate-key 500.
-- Production `route:list --json`: PASS, результаты указаны выше.
-- Larastan: PASS (No errors).
-- Pint: PASS, 133 files; дополнительный изменённый тест отдельно форматирован.
-- Composer platform requirements: PASS, PHP 8.2.32 и необходимые расширения.
-- `docker compose exec -T php php artisan test`: **342 passed / 4349 assertions**,
-  391.45 s; Stage 4–10, Stage 11, все 249 prototype variants и production isolation.
-- `docker compose exec -T php php artisan view:cache`: PASS.
-- `git diff --check`: PASS.
-- `docker compose exec -T php php artisan test --filter='Integration(Intake|Concurrency)Test'`:
-  **20 passed / 331 assertions**, 33.84 s, после последнего уточнения сохранения
-  admin-флага и проверки настоящего QueryException с SQL bindings.
-- Финальные Pint (133 files), Larastan и `git diff --check`: PASS.
-- Полный diff и staged inspection: PASS, ровно 23 файла задачи;
-  `git diff --cached --check`: PASS. Нет секретов, real PII, uploaded files,
-  логов, screenshots, runtime config cache или посторонних артефактов.
+- `docker compose ps`: MySQL/PHP/Mailpit healthy, web и queue-worker запущены.
+- Non-destructive `php artisan migrate --force`: новая миграция выполнена;
+  `php artisan db:seed --force`: успешно, существующие данные не очищались.
+- `schedule:list`: warnings hourly, groups:expire every minute,
+  applications:cleanup daily, overlap protection сохранена.
+- `queue:failed`: No failed jobs found; после smoke очередь пуста.
+- Profile suites проверяют broker/hash/TTL, rollback и queue failure, роли,
+  CSRF/лимиты, invalid/expired/reused links, stale mail, marker ordering,
+  очередь/исполнение/retry uniqueness, extension/republication и lifecycle.
+  Финальный запуск `docker compose exec -T -e APP_DEBUG=false php php artisan
+  test --filter='PasswordSetupTest|ExpiryWarningTest|IntegrationIntakeTest'`:
+  40 passed / 477 assertions, 29.57 s. Включает 22 новых password/warning tests
+  и 18 тестов Stage 11; выполнен после последней настройки exception traces.
+- Полный MySQL прогон `docker compose exec -T -e APP_DEBUG=false php php artisan
+  test`: 365 passed / 4545 assertions, 303.54 s. Все 31/249 прототипов и
+  production isolation прошли, включая Stage 11 concurrency/signatures/replay.
+  Команда без APP_DEBUG override также запускалась, но тот ранний прогон был
+  остановлен до завершения. Промежуточный полный прогон выявил два описанных
+  выше устаревших тестовых ожидания; они исправлены до успешного финального.
+- `./vendor/bin/pint --test`: PASS, 146 PHP files.
+- `./vendor/bin/phpstan analyse --no-progress`: PASS, no errors. Первый холодный
+  прогон превысил 128 MiB; повтор с --memory-limit=512M прошёл, затем точная
+  команда без override тоже прошла.
+- `composer check-platform-reqs`: все требования проходят (PHP 8.2.32).
+- `php artisan view:cache`: успешно.
+- Local/production route lists: setup/resend присутствуют, production не имеет
+  prototype/foundation routes; публичного forgot-password endpoint нет.
+- `git diff --check` и `git diff --cached --check`: успешно. Финальный diff и
+  staged review выполнены: 37 файлов текущей задачи, нет credentials/raw tokens,
+  captured messages, runtime artifacts или посторонних изменений. Task/SPEC/
+  WORKFLOW/AGENTS не staged.
 
-Промежуточные исправленные неуспехи: limiter callback выбрасывает Laravel
-HttpResponseException, для него сохранён готовый JSON response; UI fixture требовал
-настройки placement lifecycle; сравнение raw Eloquent attributes до refresh
-различало bool/int. `pint --dirty` неприменим без Git внутри контейнера — использован
-явный список файлов. Одноразовый runtime-клиент исправлен для обхода системного HTTP
-proxy и корректного импорта urllib; production-код для этих клиентских ошибок не
-менялся. Все временные smoke-данные очищались в finally.
+## Runtime smoke
 
-## Runtime / manual signed evidence
+Выполнен через реальные HTTP-формы/CSRF и Docker, синтетические @example.test
+адреса. Временный сценарий/вывод хранились вне репозитория. Графический браузер
+для этого прогона не использовался; CSS/layout не изменены.
 
-Одноразовый Python test-client из `/tmp` отправил реальные HTTP-запросы через
-локальный Nginx → PHP 8.2 FPM под `/cabinet`. Временный случайный секрет установлен
-через локальный config cache; первоначальная конфигурация восстановлена после
-проверки. Секрет не выводился и не коммитился.
+1. Реальный admin login, detail и approval POST двух pending password-null
+   пользователей; по одной job на approval до запуска worker.
+2. `queue:work database --once --tries=3 --timeout=45` отправил реальное письмо
+   в Mailpit. Открыт именно полученный URL, установлен пароль, выполнен login,
+   повторное использование URL отвергнуто.
+3. Resend через admin POST немедленно сделал старую ссылку недействительной;
+   старое ожидающее job не отправило письмо, новое отправило рабочую ссылку,
+   по ней успешно установлен пароль.
+4. Outside threshold — 0; inside — 1; повтор до worker — 0; реальное письмо
+   warning захвачено, marker установлен, последующий scheduler — 0.
+5. Mailpit остановлен: реальное SMTP-падение оставило marker=null, job осталась
+   для retry (attempts=1). Группа стала due; groups:expire успешно перевёл её
+   в expired при недоступном SMTP. После восстановления stale retry завершился
+   без нового письма.
+6. Проверены application logs, audit и decoded session payloads: известных
+   smoke tokens и выбранного пароля нет. Failed jobs=0.
+7. Синтетические пользователи/группа/history/audit и captured messages удалены,
+   jobs завершены; Mailpit и persistent queue-worker восстановлены.
+8. Дополнительный реальный smoke приглашения: SMTP остановлен, worker сохранил
+   job для retry; raw token отсутствует в worker exception log, bootstrap flag=1.
+   После восстановления SMTP та же job доставила письмо с тем же токеном,
+   очередь опустела. Дополнительные пользователь/token/message удалены.
 
-Проверено:
+## Facts / Assumptions / Unknowns
 
-- signed multipart → 201; новая boundary + тот же ID → идентичный ответ;
-- анкета присутствует в real admin pending list;
-- реальный защищённый admin document view возвращает исходный PDF и правильный MIME;
-- private exists/public missing, случайный путь и имя из signed descriptor;
-- pending/rejected repeats → 200; approved/disabled/deleted → 409;
-- completed replay после удаления анкеты возвращает исходный 201;
-- signed JSON active group → 201, повтор не создаёт дубль;
-- owner list/detail, admin list, group detail показывают новую заявку;
-- counters all/new/processed = 1/1/0; другой психолог получает 404;
-- unknown UUID 404, inactive/disabled 422, bad signature/stale 401,
-  missing ID 400, rate limit 429, всё в JSON;
-- 4 completed journal entries, 3 append-only private documents после повторов;
-- inspection новых логов и journal rows: нет synthetic email/имён/телефона,
-  document name, questionnaire body, секретов и подписей;
-- payment/history/job counts до и после intake совпадают;
-- удалены собственные smoke rows/documents/sessions/dictionary item/journal,
-  восстановлен исходный config cache, временный секрет удалён.
-
-Это HTTP-проверка реальных страниц и действий; визуальная переработка или новая
-браузерная responsive-сертификация не выполнялась, UI не менялся.
-
-## Facts
-
-Начальная рабочая директория чистая. HEAD `0a779ce` — актуальная planner-коррекция
-multipart; после implementation base `ccd546b` были только два planner-коммита,
-менявшие `.ai/task.md`. Задача ранее не реализована. Все данные проверок синтетические.
-Тесты используют MySQL `gruppa_cabinet_test`; runtime smoke — отдельные временные
-записи локальной development DB. Для Laravel routing/error hooks запрошен Context7,
-а доступность API сверена с установленными Laravel 12 исходниками.
-
-## Assumptions / Unknowns
-
-Продуктовые предположения не добавлены. UTC consent format и conservative rate
-limit выбраны в разрешённых задачей рамках и явно описаны в контракте.
-Production/staging секрет, source IPs, staging URL и реальные education codes
-неизвестны и не выдуманы. Деплой и интеграция внешнего публичного сайта не выполнялись.
+- Base `7bb1c7410e9e6db2d3225c5b8637681a7459ee8f`, planner `208c452`;
+  исходное рабочее дерево было чистым. Новая задача однозначно разрешена.
+- Осмотрены установленные Laravel 12 PasswordBroker, DatabaseTokenRepository,
+  PasswordBrokerManager и unique queue implementation. Context7 вернул docs
+  текущей ветки 13, поэтому детали сверены с installed 12 source и официальной
+  документацией https://laravel.com/docs/12.x/queues.
+- Mailpit pinned v1.27.8, SMTP mailpit:1025, UI 127.0.0.1:8025, без credentials.
+- Локальный file cache доступен контейнерам через общий mount. В production
+  нужен shared cache/lock store для всех экземпляров и актуальных settings.
+- В production нужны настоящий SMTP, APP_URL=https://gruppa.info/cabinet,
+  supervisor/systemd либо cron worker, scheduler cron и ограниченный доступ
+  к queue/failed jobs/storage. Локальный образ не имеет PCNTL; SMTP timeout
+  ограничивает ожидание транспорта. Production worker должен иметь PCNTL
+  для жёсткого job timeout, retry_after должен превышать timeout.
+- SMTP acceptance не гарантирует доставку в inbox. При аварии процесса между
+  SMTP success и DB marker возможна повторная доставка; это документированное
+  окно между двумя системами, которое unique dispatch не устраняет.
+- Production SMTP/deployment и внешняя доставка не проверялись и не входят
+  в задачу. HTTP access/error logging в production должно редактировать setup
+  path/query. Настоящие SMTP credentials не использовались.
 
 ## Risks / Next Step
 
-Разработчику публичного сайта: реализовать server-side signing/retries и хранение
-request IDs, связать `cabinet_group_uuid`, согласовать dictionary codes, provision
-secret/HTTPS/proxy/allowlist и проверить staging по `docs/integration.md`.
-Stage 12 email/password setup и WEBPAY остаются отдельными этапами.
+Stage 12 завершён и проверен локально. Production deployment не выполнялся.
+Stage 13 WEBPAY
+Sandbox остаётся pending: нужны цены, merchant/Sandbox configuration, актуальный
+provider contract и доступные callback URLs. Stage 12 не выполняет платежи.

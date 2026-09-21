@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\PasswordSetupController;
 use App\Http\Controllers\Psychologist\ApplicationController;
 use App\Http\Controllers\Psychologist\GroupController;
 use App\Http\Controllers\Psychologist\ProfileController;
@@ -13,6 +14,11 @@ use App\Http\Controllers\SessionController;
 use App\Support\PsychologistPages;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+
+Route::middleware('throttle:password-setup')->group(function (): void {
+    Route::get('/password/setup/{token}', [PasswordSetupController::class, 'show'])->name('password.setup');
+    Route::post('/password/setup', [PasswordSetupController::class, 'store'])->name('password.store');
+});
 
 Route::get('/login', [SessionController::class, 'create'])->name('login');
 Route::post('/login', [SessionController::class, 'store'])->name('login.store');
@@ -34,6 +40,7 @@ Route::middleware(['account', 'role:admin'])->prefix('admin/psychologists')->nam
     Route::get('/create', [PsychologistController::class, 'create'])->name('create');
     Route::post('/', [PsychologistController::class, 'store'])->name('store');
     Route::get('/{psychologist}', [PsychologistController::class, 'show'])->name('show');
+    Route::post('/{psychologist}/password-setup', [PsychologistController::class, 'passwordSetup'])->middleware('throttle:password-setup-resend')->name('password-setup');
     Route::get('/{psychologist}/edit', [PsychologistController::class, 'edit'])->name('edit');
     Route::put('/{psychologist}', [PsychologistController::class, 'update'])->name('update');
     foreach (['approve', 'reject', 'enable', 'disable', 'tariff'] as $action) {

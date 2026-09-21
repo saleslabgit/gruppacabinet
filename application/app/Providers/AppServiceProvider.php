@@ -24,6 +24,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('password-setup', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
+        RateLimiter::for('password-setup-resend', fn (Request $request) => Limit::perMinute(1)->by($request->user()?->id.'|'.$request->route('psychologist')));
         RateLimiter::for('integration', function (Request $request) {
             return Limit::perMinute(max(1, config('integration.rate_per_minute')))
                 ->by($request->ip().'|'.$request->path())

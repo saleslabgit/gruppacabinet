@@ -446,3 +446,19 @@ ID, IP, UTC time and exception class/source location. No payload, names, phones,
 file metadata, signatures or secrets are logged. Stage 11 has no email/password
 invitation, job, payment or group lifecycle effect. See `integration.md` for the
 external contract and deployment prerequisites.
+
+## Stage 12 mail boundary
+
+`PasswordSetupService` creates a fresh framework broker/token repository using
+current typed TTL; standard password_reset_tokens stores only token hashes.
+Approval registers an after-commit invitation, while token replacement and the
+database queue insert share a separate atomic transaction. Resend and setup
+serialize on the user row. Setup consumes the token without automatic login.
+
+Dedicated jobs recheck eligibility and stale tokens/placement periods before
+SMTP. Expiry warning uniqueness uses Laravel UniqueLock/ShouldBeUnique for
+(group ID, exact UTC expiry), retained while queued/running/retrying; bounded
+candidate queries filter owners without N+1. Marker writes follow successful
+SMTP and a locked period recheck. Lifecycle expiration never depends on email.
+See `email.md` for crash-window limits, sensitive queue storage, dynamic TTL and
+production shared-cache/worker/scheduler requirements.

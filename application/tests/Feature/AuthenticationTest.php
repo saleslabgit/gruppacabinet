@@ -110,10 +110,12 @@ class AuthenticationTest extends TestCase
             $this->post('http://localhost/login', ['email' => 'person@example.test', 'password' => 'wrong'])
                 ->assertSessionHas('login_state', 'error');
         }
+        $auth = Auth::getFacadeRoot();
         Auth::shouldReceive('guard')->never();
         $this->post('http://localhost/login', ['email' => 'PERSON@example.test', 'password' => 'password'])
             ->assertSessionHas('login_state', 'rate-limit');
-        $this->get('http://localhost/login')->assertSee('Слишком много попыток входа. Попробуйте позже.');
+        Auth::swap($auth);
+        $this->get('http://localhost/login')->assertOk()->assertSee('Слишком много попыток входа. Попробуйте позже.');
     }
 
     public function test_throttle_expires_after_sixty_seconds(): void
