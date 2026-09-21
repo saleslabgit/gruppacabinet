@@ -1,1060 +1,923 @@
-# Task: TASK-2026-09-21-10
+# Task: TASK-2026-09-21-11
 
 Status: planned
-Created from: ccd546b0a484e085345aa8ddd30bc00123d05288 (main)
+Created from: 7bb1c7410e9e6db2d3225c5b8637681a7459ee8f (main)
 
 ## Title
 
-Stage 11 — Implement signed incoming API integration for psychologist questionnaires and group applications
+Stage 12 — Implement queued email, one-time password setup, admin resend, and expiry warning notifications
 
 ## Goal
 
-Implement Stage 11 from SPEC.md: the cabinet becomes the secure server-to-server receiving side for the existing public site `https://gruppa.info/`.
+Implement Stage 12 from SPEC.md on top of the accepted Stage 11 incoming integration.
 
-Add two versioned incoming API flows:
+This milestone completes the first real email flows:
 
-1. psychologist questionnaire submission;
-2. participant application submission for a published group.
+1. an approved psychologist with no password receives a queued one-time password-setup link;
+2. an administrator can resend the setup link, invalidating the previous one;
+3. the psychologist sets their own password through the existing password Blade page and can then log in;
+4. active group owners receive one queued expiry-warning email per placement period;
+5. warning mail failures never break group lifecycle expiration and never mark a warning as sent.
 
-Both flows must use the same integration security boundary:
+Use Laravel's password-broker/token infrastructure and the existing database queue.
 
-- HMAC-SHA256 over a canonical signed envelope; JSON signs a raw-body digest, while multipart signs a JSON manifest that cryptographically binds every uploaded file by SHA-256;
-- `X-Timestamp` with a ±5 minute acceptance window;
-- constant-time signature comparison with `hash_equals`;
-- required `X-Request-Id`;
-- durable MySQL idempotency;
-- rate limiting;
-- unified JSON errors;
-- PII-safe technical logging;
-- no browser/session/CSRF authentication.
-
-The API must integrate with already accepted Stages 5 and 10:
-
-- incoming psychologist questionnaires appear in the existing admin psychologist workflow;
-- incoming group applications appear immediately in the existing owner/admin Stage 10 application UI and counters.
-
-Do not implement Stage 12 email/password onboarding or any WEBPAY behavior.
+Do not implement WEBPAY or any Stage 13+ behavior.
 
 ## Current Base
 
-Use the current main HEAD exactly:
+Use current main HEAD exactly:
 
-`ccd546b0a484e085345aa8ddd30bc00123d05288`
+`7bb1c7410e9e6db2d3225c5b8637681a7459ee8f`
 
-This includes the accepted Stage 1–10 backend and the latest Stage 10 UI/design corrections.
+This includes:
 
-Do not revert or overwrite the current UI baseline.
+- accepted Stages 1–11;
+- current redesigned UI baseline;
+- signed incoming API;
+- database queue tables;
+- Stage 9 expiry lifecycle and `expiry_warning_sent_at`;
+- typed settings including:
+  - `expiry_warning_days`;
+  - `password_setup_link_ttl_hours`.
+
+Do not revert current UI or Stage 11 integration behavior.
 
 ## Facts
 
-- Laravel 12 / PHP 8.2+ / MySQL.
-- Application production base path is `/cabinet`.
-- API production base is `https://gruppa.info/cabinet/api/v1/...`.
-- Current bootstrap registers web + console routes only; no public API route file exists yet.
-- Current public/site integration endpoints do not exist.
-- `gp_users` already stores the full questionnaire, consent, lifecycle/access/tariff fields and soft delete.
-- Active email uniqueness is already enforced by generated `active_email`.
-- Existing repeat-email rules are defined in SPEC §5.
-- `gp_user_documents` and `PsychologistDocuments` already provide private storage, MIME validation conventions and safe filenames.
-- Document types are:
-  - diploma;
-  - certificate;
-  - license;
-  - registration.
-- Existing private file MIME allowlist is PDF/JPEG/PNG and max size comes from `config/psychologist_documents.php`.
-- `education_type` is an existing dictionary whose item codes are stable.
-- `gp_groups.public_uuid` is immutable and unique.
-- Stage 10 already implements real group applications, owner/admin access, counters, process/unprocess and phone normalization/search.
-- `PhoneNormalizer` already exists and must be reused for participant phone storage.
-- Group applications may only be accepted for `status=active` and `disabled=false`.
-- The public site must not submit `psychologist_id` or `owner_id` for a group application.
-- Stage 12 owns approval email/password setup; Stage 11 sends no email.
-- Current UI must remain the design baseline; this task is API/backend integration, not another UI redesign.
+- `gp_users.password` is nullable and hashed by the User model cast.
+- Login already requires approved + enabled account and valid password.
+- Login already has rate limiting.
+- Stage 11 questionnaire intake creates pending users with password=null.
+- Admin approval is implemented in `PsychologistActions`.
+- No email is currently sent after approval.
+- `auth.passwords.users` exists, but the standard `password_reset_tokens` table has not yet been migrated.
+- Existing `auth.password` Blade view/prototype already contains normal, validation, expired/invalid and success states.
+- Database queue tables `jobs`, `job_batches`, `failed_jobs` already exist.
+- Default queue connection is database.
+- Current local Docker has no SMTP capture service or persistent queue worker.
+- `gp_groups.expiry_warning_sent_at` exists.
+- Stage 9 activation and active free extension reset `expiry_warning_sent_at=null`.
+- Stage 9 expiration runs every minute.
+- Stage 8 typed setting `expiry_warning_days` is current warning threshold.
+- Stage 8 typed setting `password_setup_link_ttl_hours` is the business source of truth for setup-token lifetime.
+- Stage 12 must not change group placement/extension semantics.
+- Stage 12 must not create or mutate payments.
 
-## Architecture Correction — PHP 8.2/FPM Multipart Signing
+## Product / Architecture Decisions
 
-This section is authoritative and replaces any earlier requirement to HMAC the raw serialized multipart body.
+### 1. This is setup, not a public forgot-password feature
 
-The implementation was blocked before code changes because standard PHP 8.2 FPM consumes `POST multipart/form-data` before userland when `enable_post_data_reading=1`: Laravel receives parsed fields/files, but `php://input` is not available for verifying the original multipart bytes.
+Stage 12 implements one-time first-password setup for approved psychologists.
 
-Production decision:
+Do NOT add:
 
-- keep standard PHP/FPM multipart handling;
-- keep `enable_post_data_reading=1`;
-- do NOT add a custom multipart parser;
-- do NOT require an Nginx/OpenResty body-HMAC module;
-- do NOT upgrade PHP solely for this task;
-- do NOT disable automatic POST parsing for the whole cabinet;
-- questionnaire multipart integrity is provided by a signed JSON manifest plus verified file hashes.
+- a public “forgot password” request form;
+- a public email-address reset-request endpoint;
+- self-service resend.
 
-This preserves the existing admin multipart upload behavior and remains compatible with PHP 8.2.32 FPM.
+Only an administrator can explicitly resend a setup invitation.
 
-### Canonical signing envelope
+The setup page itself is public because the one-time token authenticates that flow.
 
-Both Stage 11 endpoints use this exact signing string, UTF-8/ASCII, with LF (`\n`) separators and no trailing newline:
+### 2. Eligibility for password setup
 
-```text
-v1
-POST
-/api/v1/<endpoint>
-<X-Timestamp>
-<X-Request-Id>
-<payload-sha256>
-```
+A setup link is valid only for a user who is currently:
 
-Then:
+- non-admin;
+- approved;
+- not disabled;
+- not soft-deleted;
+- password is null.
 
-```text
-X-Signature = lowercase_hex(HMAC-SHA256(signing_string, INTEGRATION_SECRET))
-```
+If account state becomes ineligible after the email was queued/sent, the link must stop working.
 
-The canonical path intentionally excludes the deployment prefix `/cabinet` so the same contract works in local/staging/production. It is exactly one of:
+If the password is already set, setup/resend is unavailable.
 
-- `/api/v1/psychologists`
-- `/api/v1/group-applications`
+Do not clear or replace an existing password through this flow.
 
-Because timestamp, request ID and endpoint are inside the HMAC, an intercepted signed payload cannot be replayed with a fresh timestamp/request ID or against another endpoint.
+### 3. Laravel Password Broker is mandatory
 
-### JSON application payload digest
+Use Laravel framework password-broker/token classes.
 
-For `POST /api/v1/group-applications`:
+Do not implement:
 
-`payload-sha256 = lowercase_hex(SHA-256(EXACT_RAW_JSON_BODY_BYTES))`
+- custom random token format;
+- custom token hashing;
+- plaintext token storage;
+- JWT setup links.
 
-The server may read `php://input` / Laravel raw content because this request is `application/json`.
+Add the standard `password_reset_tokens` table required by Laravel.
 
-### Multipart psychologist payload digest
+Because the authoritative TTL is the typed database setting, do not rely on the static 60-minute value currently present in `config/auth.php`.
 
-For `POST /api/v1/psychologists` keep normal PHP multipart parsing.
+Create a small dedicated setup-broker service/factory that uses Laravel's standard `PasswordBroker` / `DatabaseTokenRepository` (or an equivalent framework-supported construction after inspecting the installed Laravel 12 source) with:
 
-The multipart request contains:
+`SettingService::passwordSetupLinkTtlHours()`
 
-- exactly one scalar form field named `payload`;
-- zero or more file parts whose field names are declared inside the signed payload manifest.
-
-`payload` is a compact UTF-8 JSON string. The exact string value of that form field is signed:
-
-`payload-sha256 = lowercase_hex(SHA-256(EXACT_PAYLOAD_FIELD_BYTES))`
-
-The signed JSON manifest has this logical shape:
-
-```json
-{
-  "questionnaire": {
-    "last_name": "Synthetic",
-    "first_name": "Person",
-    "email": "synthetic@example.test",
-    "education_type_code": "example_code",
-    "...": "..."
-  },
-  "documents": [
-    {
-      "field": "document_0",
-      "type": "diploma",
-      "original_name": "diploma.pdf",
-      "size": 12345,
-      "sha256": "<lowercase hex SHA-256 of file bytes>"
-    }
-  ]
-}
-```
-
-Rules:
-
-- all questionnaire scalar data lives inside `payload.questionnaire`; no duplicate unsigned questionnaire form fields;
-- every uploaded file must have exactly one signed descriptor;
-- every descriptor must point to exactly one multipart file field;
-- reject undeclared file parts;
-- reject missing declared files;
-- reject duplicate descriptor field names;
-- recompute SHA-256 and byte size from the uploaded temporary file and compare to the signed descriptor;
-- validate the document type from the signed descriptor;
-- use the signed `original_name` only after existing safe-name sanitization; do not trust multipart filename metadata as authoritative;
-- MIME is still detected server-side from actual file content and is not trusted from the manifest;
-- tampered file/type/name/size/hash causes authentication/integrity rejection before business mutation;
-- raw serialized multipart boundaries/headers are intentionally NOT part of the signature.
-
-This is the production contract to document for the public-site developer.
-
-### Semantic idempotency
-
-The idempotency fingerprint remains semantic, not transport-specific.
-
-For JSON:
-- normalized validated application fields + endpoint.
-
-For multipart:
-- normalized validated questionnaire fields;
-- each signed document descriptor using type, safe original name, size and verified SHA-256;
-- endpoint.
-
-Therefore a retry may use a new multipart boundary and still replay the original response when the logical request is identical.
-
-## Architecture Decisions
-
-### API endpoints
-
-Use:
-
-- `POST /api/v1/psychologists`
-- `POST /api/v1/group-applications`
-
-Full production URLs:
-
-- `https://gruppa.info/cabinet/api/v1/psychologists`
-- `https://gruppa.info/cabinet/api/v1/group-applications`
-
-The psychologist route is the stable Stage 11 contract because SPEC requires a versioned psychologist endpoint but does not name the path.
-
-### Stateless route boundary
-
-Add a dedicated `routes/api.php` and register it through Laravel routing.
+converted to the framework expiration unit.
 
 Requirements:
 
-- stateless API middleware;
-- no session authentication;
-- no CSRF;
-- no web login redirect;
-- no HTML error responses;
-- no prototype/local behavior mixed into the API.
+- token generation/hashing/verification/deletion is performed by Laravel framework code;
+- current typed TTL is read for setup-token operations;
+- it works correctly in normal FPM requests and long-running queue workers;
+- do not cache a broker forever with stale TTL;
+- do not duplicate Laravel token cryptography in application code.
 
-Use the normal Laravel `api` prefix plus a route-level `v1` prefix so the application path resolves as `/cabinet/api/v1/...`.
+Document the chosen framework construction in `.ai/report.md`.
 
-### Integration configuration
+### 4. TTL semantics
 
-Add `config/integration.php` with environment-backed values:
+The current `password_setup_link_ttl_hours` setting is authoritative when token validity is checked.
 
-- `INTEGRATION_SECRET`;
-- timestamp tolerance, default 300 seconds;
-- rate limit per minute, choose/document a conservative technical default (e.g. 60) and keep it configurable;
-- optional source IP allowlist.
+No additional TTL snapshot column is required.
 
-Add placeholders/defaults only to `.env.example`; never commit a real secret.
+Tests must prove that changing the typed setting affects setup-token validity consistently.
 
-The application must fail closed for signed integration routes when no secret is configured outside explicit testing overrides.
+### 5. Setup-link contract
 
-### HMAC implementation boundary
+Recommended routes:
 
-Implement the canonical signing contract defined in the authoritative “Architecture Correction — PHP 8.2/FPM Multipart Signing” section above.
+- `GET /password/setup/{token}`
+- `POST /password/setup`
 
-Do not reintroduce raw serialized multipart-body verification.
+The email link includes:
 
-Implementation requirements:
+- token in the route/path;
+- psychologist email as a query parameter.
 
-- JSON endpoint computes SHA-256 from exact raw request bytes;
-- multipart endpoint computes SHA-256 from the exact parsed `payload` form-field string;
-- canonical signing string binds version, method, endpoint path, timestamp, request ID and payload digest;
-- expected/provided HMAC values are compared using `hash_equals`;
-- malformed/missing signature is rejected;
-- full signatures are never logged;
-- file descriptors in signed multipart payload are verified against actual uploaded file bytes before business mutation.
+POST includes:
 
-### Required request ID
-
-`X-Request-Id`:
-
-- required;
-- opaque string;
-- max 128 chars;
-- allow a practical safe character set such as UUID/ULID/token characters;
-- never derive business meaning from it.
-
-Missing/invalid request id returns a unified protocol error.
-
-### Durable idempotency
-
-Use MySQL, not cache, for authoritative idempotency.
-
-Add a migration/model for an integration request journal, recommended table:
-
-`gp_integration_requests`
-
-Minimum fields:
-
-- id;
-- request_id — unique;
-- endpoint/action code;
-- request_fingerprint — SHA-256;
-- response_status;
-- response_body JSON/text suitable for exact replay;
-- completed_at;
-- timestamps.
-
-Do not store the request body, questionnaire fields, file contents, HMAC secret or signature.
-
-Behavior:
-
-1. Authentication/timestamp protocol validation happens before business execution.
-2. Build a semantic request fingerprint after parsing:
-   - endpoint code;
-   - normalized scalar request values;
-   - for every uploaded file: document type + SHA-256 file-content hash;
-   - no file bytes are persisted in the journal.
-3. First authenticated request claims/processes the request ID.
-4. Business mutation and final idempotency response must be coordinated transactionally.
-5. A later request with the same request ID + same endpoint + same semantic fingerprint returns the original HTTP status/body without executing business effects again.
-6. Same request ID with a different endpoint or fingerprint returns HTTP 409 `idempotency_conflict`.
-7. Concurrent duplicate requests must create exactly one business effect.
-8. A failed transaction must not permanently poison the request ID as completed.
-9. Do not use process-local locks as the authoritative guarantee.
-
-For multipart retries, semantic fingerprinting must not depend on the random MIME boundary; identical logical fields/files with a newly serialized boundary must still match.
-
-### Unified JSON response/error envelope
-
-Use JSON for all API responses.
-
-Success should use a stable shape, for example:
-
-`{"data": {...}, "request_id": "..."}`
-
-Errors:
-
-`{"code": "...", "message": "...", "errors": {...optional...}, "request_id": "...optional..."}`
-
-Do not expose stack traces, SQL, filesystem paths or internal exception messages.
-
-Stable error codes must exist for at least:
-
-- missing_request_id;
-- invalid_request_id;
-- missing_timestamp;
-- invalid_timestamp;
-- expired_timestamp;
-- missing_signature;
-- invalid_signature;
-- rate_limited;
-- validation_failed;
-- idempotency_conflict;
-- psychologist_conflict;
-- group_not_found;
-- group_not_accepting_applications;
-- internal_error.
-
-Use correct HTTP semantics:
-
-- 400 for malformed protocol headers/request ID;
-- 401 for invalid/missing/stale signed authentication;
-- 404 unknown group UUID;
-- 409 idempotency/business conflict;
-- 422 validated business/input rejection;
-- 429 rate limit;
-- 500 only for genuine unexpected failures.
-
-### Rate limiting
-
-Define a dedicated limiter for Stage 11 integration endpoints.
-
-Requirements:
-
-- configured limit;
-- keyed at minimum by source IP and endpoint;
-- response uses the same JSON error envelope;
-- log rejection using safe technical context only;
-- do not use request payload content as a rate-limit key.
-
-### Safe logging
-
-Follow SPEC §4.10.
-
-For rejected integration requests log only:
-
-- endpoint/action;
-- request ID if syntactically available;
-- reason/error code;
-- source IP;
-- timestamp/technical context needed for diagnosis.
-
-Never log:
-
-- full request body;
-- questionnaire values;
-- participant names/phone;
-- uploaded document metadata beyond non-PII technical count if necessary;
-- file content;
-- integration secret;
-- full signature;
-- password/reset tokens.
-
-Approved/disabled/deleted email conflicts may be logged with a safe internal user ID and technical code; do not log the email itself unless existing production logging policy explicitly requires it (default: do not).
-
-### Optional IP allowlist
-
-Support a configurable allowlist if `INTEGRATION_ALLOWED_IPS` is set.
-
-- empty config = do not enforce IP allowlist;
-- non-empty = reject outside addresses;
-- use trusted Laravel request IP handling;
-- document proxy/trusted-proxy prerequisite;
-- do not hardcode current public-site IPs.
-
-## Scope
-
-### 1. API routing and middleware
-
-Add:
-
-- `routes/api.php`;
-- API v1 route group;
-- dedicated integration HMAC/timestamp/request-id middleware or equivalent cohesive layer;
-- dedicated rate limiter;
-- optional IP allowlist middleware/check;
-- unified exception/error rendering for these API routes.
-
-Do not alter web auth behavior.
-
-### 2. Integration request journal migration/model
-
-Add the durable idempotency table/model described above.
-
-Indexes:
-
-- unique request_id;
-- endpoint/action if useful operationally;
-- created_at/completed_at as useful for maintenance.
-
-No PII payload column.
-
-A cleanup policy for this small journal is not required in Stage 11 unless trivially safe; document that retention can be added later. Do not silently delete active idempotency history on a short schedule.
-
-### 3. Psychologist questionnaire endpoint
-
-Implement:
-
-`POST /api/v1/psychologists`
-
-Content type:
-
-- `multipart/form-data`, using the signed `payload` JSON manifest defined above because documents may be included.
-
-The multipart body itself contains no unsigned questionnaire fields other than the single signed `payload` string and its declared file parts.
-
-Accepted `payload.questionnaire` fields:
-
-- last_name;
-- first_name;
-- middle_name;
-- phone;
+- token;
 - email;
-- education_type_code;
-- other_education;
-- modality_program;
-- training_center;
-- graduation_year;
-- training_hours;
-- license_number;
-- license_expires_at;
-- group_leading_experience;
-- groups_conducted_count;
-- documents_confirmed;
-- education_confirmed;
-- live_session_ready;
-- personal_data_consent_at;
-- personal_data_consent_version;
-- documents.
-
-Do NOT accept writable internal fields:
-
-- id;
-- status;
-- accept;
-- disabled;
-- free;
-- admin;
 - password;
-- remember_token;
-- deleted_at;
-- education_type_id.
+- password_confirmation.
 
-Unexpected protected/internal fields should be rejected, not silently applied.
+Do not put token values in application logs, audit metadata or flash messages.
 
-### 4. Questionnaire validation
+### 6. Password validation
 
-Do not invent stricter product requirements than SPEC.
+Use server-side validation:
 
-Required for incoming public questionnaire:
+- password required;
+- string;
+- minimum 8 characters;
+- reasonable maximum;
+- confirmed.
 
-- email;
-- personal_data_consent_at;
-- personal_data_consent_version.
+Do not invent materially stricter password rules in this milestone.
 
-Other questionnaire fields remain nullable unless technical type/range validation applies.
+Password is written through the existing hashed User cast / Laravel hashing.
 
-Normalize:
+On success:
 
-- email = lower-case + trim;
-- nullable text = trimmed;
-- integer/date/boolean fields through explicit validation;
-- consent timestamp interpreted according to the documented public contract and stored UTC.
+- set the password;
+- rotate remember_token;
+- consume/delete the setup token through Password Broker;
+- do not auto-login;
+- show the existing password success state or redirect to login with a clear success notice.
 
-Use the same technical bounds as existing admin questionnaire validation.
+The consumed link must not work again.
 
-#### Education type
+### 7. Setup rate limiting
 
-External contract uses `education_type_code`, not an internal DB ID.
+Add a dedicated setup limiter.
 
-Resolve only against dictionary `education_type`.
+Protect both GET validation and POST submission from brute-force token attempts.
 
-For a new user:
-- supplied code must be active.
+Recommended technical default:
 
-For repeat pending/rejected submission:
-- active codes accepted;
-- the currently selected inactive item may remain valid if the same code is re-submitted, matching existing cabinet behavior.
+- 10 requests/minute per source IP for the setup routes.
 
-Unknown/wrong-dictionary code -> 422.
+POST may additionally include a non-sensitive hash of normalized email in the limiter key.
 
-Store the resolved internal `education_type_id`; never expose that requirement to the public site.
+Do not use the raw token as a rate-limit key or log value.
 
-### 5. Questionnaire full-submission semantics
+Keep existing login throttling unchanged.
 
-Treat the POST as one full questionnaire submission, not a PATCH.
+### 8. Approval-triggered invitation
 
-Build an explicit whitelist map of all questionnaire fields.
+When admin successfully performs:
 
-- fields omitted from the nullable questionnaire contract may become null;
-- booleans use explicit validated values;
-- internal lifecycle/access/tariff fields are never copied from request input.
+`pending -> approved`
 
-Document these semantics so the public site sends the complete current questionnaire on retry/resubmission.
+and the psychologist has no password:
 
-### 6. New psychologist behavior
+- approval/business audit commits first;
+- issue a fresh setup token;
+- queue the setup email.
 
-If no active or soft-deleted conflict exists for email:
+Do not make SMTP part of the approval transaction.
 
-create one `gp_users` row:
+No mail should be queued if the approval transition rolls back.
 
-- status=pending;
-- admin=false;
-- disabled=false;
-- free=false (DB/business default; tariff remains an admin decision);
-- password=null;
-- questionnaire + consent from request.
+A queue/SMTP infrastructure failure must not revert an already committed approval.
 
-Return HTTP 201.
+If invitation issue/queue dispatch fails after approval:
 
-No email is sent.
+- log a safe technical error without token/email/password;
+- leave the account approved;
+- admin resend remains the recovery path.
 
-No password token is created.
+Do not send an invitation for an account that already has a password.
 
-The user must immediately appear in the existing admin psychologist list/filter as pending.
+### 9. Admin resend action
 
-### 7. Repeat email matrix
+Add a real protected admin action, recommended:
 
-Implement SPEC §5 exactly.
+`POST /admin/psychologists/{psychologist}/password-setup`
 
-Resolve conflicts under transaction/row lock, including withTrashed lookup.
+Requirements:
 
-#### Existing pending
+- existing account + role:admin middleware;
+- policy authorization;
+- CSRF;
+- explicit Form Request;
+- only eligible approved/enabled/non-deleted/non-admin/password-null psychologist;
+- rate limit accidental repeated admin sends;
+- invalidate/delete any previous setup token first;
+- create a fresh token;
+- queue a fresh invitation.
 
-- update questionnaire fields;
-- keep status pending;
-- keep tariff/access/internal fields unchanged;
-- append newly uploaded documents;
-- HTTP 200.
+The previous link must become invalid immediately after successful resend.
 
-#### Existing rejected
+Use a concise secondary action in the current psychologist detail UI.
 
-- update questionnaire;
-- transition rejected -> pending through `UserStatusTransitionService` or existing domain transition boundary;
-- keep tariff/access/internal fields unchanged;
-- append new documents;
-- HTTP 200.
+Suggested wording:
 
-#### Existing approved
+`Отправить ссылку установки пароля`
 
-- no mutation;
-- no new documents;
-- HTTP 409 `psychologist_conflict`.
+Do not expose whether a token currently exists.
 
-#### Existing disabled=true
+Once password is set, hide/disable this action truthfully.
 
-- no mutation regardless of status;
-- HTTP 409.
+### 10. Stale queued invitation protection
 
-#### Soft-deleted matching email
+A resend may happen while an older invitation job is still queued.
 
-- do not restore;
-- do not create a new row automatically;
-- no document mutation;
-- HTTP 409.
+Do not allow the stale job to send an obsolete link later.
 
-Concurrent same-email submissions with different request IDs must still preserve the single-active-email invariant and return deterministic success/conflict rather than 500 duplicate-key leakage.
+The queued invitation job must re-check before sending:
 
-Do not allow repeat questionnaire to change `free`, `disabled`, `admin`, password, or approved status.
+- account still eligible;
+- the token carried by this job is still the current valid token.
 
-### 8. Multipart documents
+If the token has been invalidated by resend or the account became ineligible:
 
-Use the signed-manifest multipart contract from the authoritative architecture correction.
+- job exits successfully without sending;
+- no exception/retry is necessary.
 
-Multipart transport:
+If SMTP sending itself fails:
 
-- scalar field: `payload` (JSON string);
-- file fields: flat names such as `document_0`, `document_1`, each declared in `payload.documents`.
+- let the queue retry according to configured tries/backoff;
+- do not create a new token on each retry;
+- keep the same link/token for that job.
 
-Each signed descriptor contains:
+### 11. Password setup email
 
-- field;
-- type;
-- original_name;
-- size;
-- sha256.
+Use a queued job plus a dedicated Mailable (or equivalent Laravel queued-mail architecture).
 
-Allowed type values are the existing stable config keys:
+Email must include:
 
-- diploma;
-- certificate;
-- license;
-- registration.
+- psychologist-facing Russian subject/body;
+- one setup URL;
+- link expiration duration in human-readable hours;
+- clear statement that the user chooses their own password;
+- no password in email;
+- no questionnaire/document data.
 
-Validation must reuse the existing size/MIME policy:
+Generate URLs with Laravel route helpers so production uses:
 
-- PDF;
-- JPEG;
-- PNG;
-- max KB from config.
+`https://gruppa.info/cabinet/...`
 
-Integrity/security:
+when APP_URL is production.
 
-- signed descriptor hash and size must match actual uploaded bytes;
-- content MIME is detected server-side, not trusted from extension/manifest/multipart headers;
-- private local storage only;
-- random path;
-- original name comes from the signed descriptor and then passes existing safe-name sanitization;
-- never expose a public URL;
-- no binary/file content in logs/idempotency journal;
-- reject undeclared file parts and missing/duplicate descriptors.
+No external image/CDN dependency is needed.
 
-Behavior:
+### 12. Warning scheduler
 
-- zero documents is allowed unless SPEC/public form requires otherwise;
-- repeat pending/rejected submissions append new documents;
-- existing documents are never removed/replaced by this endpoint.
+Add an explicit command, recommended:
 
-Atomicity/file cleanup:
+`php artisan groups:queue-expiry-warnings`
 
-- if any DB/business/idempotency operation fails, no orphan private file from that request may remain;
-- if storing one of multiple files fails, clean up all files created by the failed API request and roll back DB changes;
-- duplicate idempotent replay must not write the same document twice.
+Schedule it:
 
-Reuse/extend `PsychologistDocuments` rather than creating a second incompatible storage policy.
+- hourly;
+- `withoutOverlapping`.
 
-### 9. Participant application endpoint
+Keep:
 
-Implement exactly:
+- `groups:expire` every minute unchanged;
+- `applications:cleanup` daily unchanged.
 
-`POST /api/v1/group-applications`
+The warning scheduler must read `expiry_warning_days` once per run.
 
-Prefer JSON request body for this endpoint.
+Candidate group:
 
-Accepted fields only:
+- non-deleted;
+- status=active;
+- expires_at not null;
+- expires_at > now;
+- expires_at <= now + current warning-days threshold;
+- expiry_warning_sent_at is null.
 
-- group_uuid;
-- last_name;
-- first_name;
-- phone.
+For email delivery, owner must still be:
 
-Explicitly reject/ignore as validation error attempts to provide:
+- non-admin psychologist;
+- approved;
+- enabled;
+- non-deleted.
 
-- psychologist_id;
-- owner_id;
+A disabled group may be excluded from email delivery, but this must not alter lifecycle expiration and must leave `expiry_warning_sent_at=null` so a later re-enable before expiry can still receive the warning.
+
+Do not query/send per row with N+1 owner lookups.
+
+Process candidates in bounded chunks.
+
+Command output/logging:
+
+- aggregate queued count only;
+- no group title;
+- no email;
+- no owner identity.
+
+### 13. Expiry warning unique period key
+
+Use Laravel queue uniqueness/locking so at most one queued/running warning job exists for one placement period.
+
+The idempotency/unique key must bind at minimum:
+
 - group_id;
-- processed_at;
-- any internal application id/status field.
+- exact current expires_at value.
 
-### 10. Application validation / group lookup
+Recommended:
 
-Validation:
+`group-expiry-warning:{group_id}:{expires_at_utc}`
 
-- group_uuid required UUID;
-- last_name required string with reasonable existing DB max;
-- first_name required string;
-- phone required and accepted by existing `PhoneNormalizer`.
+Use `ShouldBeUnique` (not `ShouldBeUniqueUntilProcessing`) or an equally strong mechanism that retains the uniqueness lock while the job is queued and running.
 
-Lookup:
+If the deployment can run multiple app/worker instances, document that the configured cache lock store must be shared.
 
-- query by `gp_groups.public_uuid = group_uuid`;
-- do not query by internal group id;
-- soft-deleted group behaves as unknown -> 404;
-- unknown UUID -> 404 `group_not_found`;
-- found but status != active -> 422 `group_not_accepting_applications`;
-- found but disabled=true -> 422 same stable business code.
+Do not create a new warning-history DB table unless the queue uniqueness contract cannot be implemented safely with Laravel's lock semantics.
 
-Do not accept psychologist ID from the caller.
+### 14. Warning job re-check
 
-The owner is always derived internally via `group.owner_id`.
+The queued job carries:
 
-### 11. Application creation
+- group ID;
+- expected expires_at/period identity.
 
-On a valid active/enabled group:
+Immediately before sending, re-read current DB state.
 
-- create `gp_group_applications.group_id` from the matched internal group;
-- store last_name/first_name;
-- store original display phone as appropriate;
-- store `phone_normalized` using existing `PhoneNormalizer`;
-- processed_at=null.
+Send only if:
 
-Return HTTP 201.
+- group still exists;
+- status still active;
+- group is not disabled;
+- expires_at exactly matches expected period;
+- expires_at is still in the future;
+- group is currently inside the current `expiry_warning_days` threshold;
+- expiry_warning_sent_at is still null;
+- owner is approved/enabled/non-deleted/non-admin.
 
-No email/job/payment/group transition.
+If any check fails:
 
-Immediately prove:
+- exit successfully;
+- do not send;
+- do not change marker.
 
-- psychologist owner sees the new application in Stage 10 list/detail;
-- owner group counters increase;
-- admin application list sees it;
-- a different psychologist cannot access it.
+This protects queued stale jobs after extension/republication/account changes.
 
-### 12. Idempotent application behavior
+### 15. Warning email content
 
-Repeated same `X-Request-Id` + same semantic request returns the original 201 JSON and creates exactly one application.
+Send to the group's current owner.
 
-Concurrent duplicates create exactly one application.
+Email contains only necessary information:
 
-Different `X-Request-Id` values are distinct submissions even if participant fields happen to match; Stage 11 does not invent participant de-duplication business rules beyond request idempotency.
+- group title;
+- expiration date/time in Europe/Minsk;
+- current remaining/warning context;
+- protected cabinet link to the group.
 
-### 13. Unified API validation
+Do not include participant data, questionnaire data, documents or payment information.
 
-Use dedicated Form Requests / DTO-like normalized request classes.
+### 16. Warning marker semantics
 
-Do not reuse admin HTML FormRequest responses directly.
+`expiry_warning_sent_at` is set only after the mail transport reports successful send.
 
-API validation must produce the unified JSON envelope and stable field errors.
+Required ordering:
 
-Do not expose internal dictionary IDs or database implementation in validation messages.
+1. re-check eligibility;
+2. send mail;
+3. only after successful send, update marker for the same expected placement period.
 
-### 14. API exception safety
+If mail throws/fails:
 
-For `/api/v1/*`:
+- marker remains null;
+- queue retry handles the retry;
+- group status/dates are unchanged;
+- expiration scheduler remains independent.
 
-- no HTML 404/419/500;
-- no login redirect;
-- unexpected exceptions -> safe JSON internal_error;
-- in testing/logs the actual exception remains diagnosable server-side without exposing it to caller.
+Before writing the marker, lock/re-read the group and verify:
 
-Web error handling must remain unchanged.
+- same expected expires_at;
+- status active;
+- marker still null.
 
-### 15. Security headers / transport assumptions
+Do not mark a new/extended placement because an old-period email finished late.
 
-Document:
+### 17. Warning duplicate behavior
 
-- production calls must use HTTPS;
-- secret is server-only;
-- never put secret/signature generation in browser JS;
-- same-host does not mean browser-to-cabinet API;
-- source is the backend of the public site.
+Tests must prove:
 
-Do not attempt to implement TLS in Laravel.
+- scheduler repeated while job is queued -> no duplicate job;
+- scheduler repeated while job is running -> no duplicate job;
+- successful mail -> marker set once;
+- scheduler after successful marker -> no new job;
+- SMTP failure -> marker remains null;
+- queue retry can send successfully later;
+- active extension changes expires_at and resets marker -> new period has a new unique key and can warn again;
+- reactivation/republication resets marker -> new period can warn;
+- an old queued job from previous expiry cannot set marker/send for the new period;
+- if activation puts a group already inside threshold, first applicable scheduler run queues exactly one warning.
 
-### 16. Integration documentation
+### 18. Lifecycle independence
 
-Create `docs/integration.md`.
+Stage 12 warning delivery must not be required for:
 
-It must be usable by the developer of the existing public site without reading cabinet source code.
+- active -> expired;
+- free extension;
+- re-publication activation.
 
-Include:
+Explicitly test:
 
-- architecture/server-to-server flow;
-- production base URL;
-- local development base URL;
-- unknown staging URL marked configurable/not invented;
-- required headers;
-- timestamp window;
-- exact HMAC algorithm;
-- exact request-id behavior;
-- JSON error envelope;
-- endpoint 1 psychologist multipart contract;
-- questionnaire field names/types;
-- `education_type_code` mapping;
-- document multipart naming and allowed types/MIME/size;
-- repeat-email matrix;
-- endpoint 2 group application JSON contract;
-- group_uuid and public-site `cabinet_group_uuid` responsibility;
-- explicit statement: never send psychologist_id/owner_id;
-- response/status examples;
-- error code table;
-- idempotent retry instructions;
-- multipart signing instructions for the signed `payload` manifest and per-file SHA-256 descriptors; explicitly state that the MIME boundary/raw multipart body is not signed;
-- example signing code/pseudocode;
-- curl/test examples that do not contain real secrets or personal data;
-- operational notes for rate limit/IP allowlist.
+- SMTP failure does not stop `groups:expire`;
+- failed warning job cannot keep an expired group active;
+- expiration command does not wait for queue worker/mail.
 
-### 17. Environment/development documentation
+### 19. Email / queue retry configuration
 
-Update `docs/development.md` and `.env.example` for integration config.
+Use database queue.
 
-Use placeholders only.
+Jobs should have explicit practical:
 
-Document a local synthetic secret for manual testing as a user-supplied shell env example, not a committed credential.
+- tries;
+- backoff;
+- timeout where appropriate.
 
-### 18. Project/UI documentation
+Avoid infinite retry loops.
 
-Update:
+Do not put password setup tokens, email bodies or sensitive data in logs.
 
-- `docs/project-status.md` — Stage 11 implemented, Stage 12+ pending;
-- `docs/ui-pages.md` only if needed to state that no new UI page was introduced and incoming data feeds existing Stage 5/10 screens;
-- `docs/architecture.md` — integration middleware/idempotency/service boundaries and safe logging.
+Laravel database queue payload may necessarily serialize the one-time token for the invitation job; treat the queue database as sensitive application infrastructure and never expose/log its payload.
 
-Preserve the current redesigned UI. Do not perform visual refactoring in this backend milestone.
+### 20. Local SMTP development verification
+
+Add a local SMTP capture service to Docker, preferably Mailpit or an equivalent lightweight test SMTP server.
+
+Requirements:
+
+- Docker only; no application runtime dependency;
+- pin a concrete image tag, not `latest`;
+- SMTP port accessible to PHP container;
+- optional web UI exposed only for local development;
+- no real SMTP credentials;
+- no production dependency on this container.
+
+Configure local Docker PHP/worker environment to use the capture SMTP service.
+
+### 21. Local queue worker
+
+Add a dedicated local queue-worker Compose service or an equally reproducible documented one-command local worker.
+
+Preferred:
+
+- same application image;
+- `php artisan queue:work`;
+- database queue;
+- finite sensible retry/timeout config;
+- same mounted application/storage;
+- depends on MySQL and local SMTP capture.
+
+Production supervisor/cron configuration remains deployment work.
+
+Do not place Docker files inside `application/`.
+
+### 22. SMTP / queue runtime smoke
+
+Using only synthetic local addresses:
+
+Verify through real Docker services:
+
+#### Password setup
+
+1. Create/identify pending password-null synthetic psychologist.
+2. Approve through real admin POST.
+3. Confirm one database queue job.
+4. Worker processes job.
+5. Confirm message appears in SMTP capture.
+6. Open actual setup URL from message.
+7. Set password.
+8. Confirm consumed link fails on reuse.
+9. Confirm real login works.
+
+#### Resend
+
+1. Issue initial link.
+2. Trigger admin resend.
+3. Old link invalid immediately.
+4. Old queued job, if still pending, sends nothing.
+5. New queued message/link works.
+
+#### Expiry warning
+
+1. Create active group outside threshold -> scheduler queues zero.
+2. Move/freeze time inside threshold -> queues one.
+3. Re-run scheduler before worker -> still one effective queued job.
+4. Worker sends captured warning.
+5. Marker set after send.
+6. Re-run scheduler -> zero.
+7. Simulate SMTP failure -> marker stays null and group expiration still succeeds.
+
+Clean synthetic smoke records/messages/jobs where practical.
+
+### 23. No setup token leakage
+
+Inspect:
+
+- application logs;
+- audit metadata;
+- failed validation output;
+- exception pages;
+- flash/session messages.
+
+No raw setup token may appear there.
+
+Do not assert that database queue payload itself contains no token, because a queued invitation job may legitimately need it; instead ensure queue storage is not exposed and token never appears in logs/UI/audit.
+
+### 24. Audit behavior
+
+Keep existing approval audit.
+
+Add a minimal audit event for explicit admin resend, e.g.:
+
+`user.password_setup_resent`
+
+Requirements:
+
+- actor admin;
+- entity user ID;
+- no email;
+- no token;
+- no password;
+- no link URL.
+
+Update admin history wording for this action.
+
+Automatic approval-triggered invitation does not need a second redundant audit row.
+
+### 25. UI integration
+
+Reuse the current redesigned UI baseline.
+
+Connect the existing real Blade view:
+
+`auth/password.blade.php`
+
+to production routes/data.
+
+Minor changes are allowed only to support real mode:
+
+- CSRF/form action;
+- real validation;
+- success/expired states;
+- current breadcrumbs/return conventions where applicable.
+
+On admin psychologist detail:
+
+- connect the resend action;
+- show it only when eligible;
+- keep current action hierarchy/icons.
+
+Do not redesign the cabinet again.
+
+All 31/249 prototype variants remain functional.
+
+### 26. Mail templates
+
+Add dedicated reusable mail Blade/text templates.
+
+Keep them:
+
+- simple;
+- accessible;
+- Russian;
+- compatible with common mail clients;
+- no frontend app CSS dependency;
+- no external assets.
+
+### 27. Documentation
+
+Create/update:
+
+- `docs/email.md` — setup-link flow, resend, TTL, warning scheduler/job, SMTP/queue deployment requirements;
+- `docs/development.md` — local SMTP capture + worker commands/ports and smoke instructions;
+- `docs/architecture.md` — broker/queue/uniqueness boundaries;
+- `docs/project-status.md` — Stage 12 complete; Stage 13 WEBPAY pending;
+- `docs/ui-pages.md` — password prototype now wired to real setup flow, admin resend action;
+- `.env.example` — SMTP/queue variables only as placeholders/defaults.
+
+Document production needs:
+
+- real SMTP configuration;
+- queue worker via supervisor/systemd/cron strategy;
+- scheduler cron;
+- shared cache/lock store if multiple app/worker instances;
+- correct `APP_URL=https://gruppa.info/cabinet`.
+
+No real SMTP credentials in Git.
 
 ## Out Of Scope
 
 Do NOT implement:
 
-- changes to the separate public-site repository/code;
-- browser-to-cabinet API calls;
-- CORS-based public browser integration;
-- password setup emails;
-- password reset/setup tokens;
-- admin resend setup email;
-- expiry warning email/jobs;
-- SMTP;
-- Stage 12;
+- forgot-password/self-service reset request;
+- changing password for an already configured account;
+- email verification;
+- participant emails;
+- application intake email;
+- admin notifications unrelated to password setup;
 - WEBPAY;
-- placement payment;
+- payment placement;
 - paid extension;
-- refund behavior;
-- new application UI;
-- new psychologist UI;
+- refunds;
+- public-site code changes;
+- production deployment;
 - UI redesign;
-- production deployment.
-
-Do not send an email when an admin later approves an API-created psychologist; Stage 12 owns that behavior.
+- automatic public-site publication/unpublication.
 
 ## Constraints
 
 - Follow WORKFLOW.md and AGENTS.md.
-- Work from current HEAD `ccd546b0a484e085345aa8ddd30bc00123d05288`.
-- Keep current Stage 10 design/UI baseline.
-- HMAC verification follows the canonical envelope above: raw-body SHA-256 for JSON, signed-manifest SHA-256 + verified file hashes for multipart, and `hash_equals` for the final HMAC.
-- Keep production `enable_post_data_reading=1`; no custom multipart parser or special FPM/Nginx body handling.
-- Timestamp tolerance defaults to 300 seconds.
-- Durable idempotency is MySQL-backed.
-- Do not store raw integration payloads in the idempotency journal.
-- Do not log PII/files/secrets/signatures.
-- Integration secret exists only in env/config.
-- Internal IDs are not part of the public group-application contract.
-- Public group association is only through immutable `public_uuid`.
-- Questionnaire education dictionary is addressed by stable code, not ID.
-- Files remain private.
-- Money/payment code is untouched.
-- Tests use MySQL only.
-- No npm/Vite/frontend framework.
-- No real participant/psychologist data or real secret in fixtures/docs.
+- Base is `7bb1c7410e9e6db2d3225c5b8637681a7459ee8f`.
+- Use Laravel Password Broker/token repository; no custom token crypto.
+- Current typed TTL setting is authoritative.
+- Password is never emailed.
+- Setup link is one-time.
+- Resend invalidates previous token.
+- Email is queued.
+- SMTP is never called inside the approval transaction.
+- Warning marker is written only after successful send.
+- Warning unique key binds group + exact expiry period.
+- Email failure cannot break lifecycle expiration.
+- Use database queue.
+- Tests remain MySQL-only.
+- Preserve current Stage 11 API behavior.
+- Preserve current UI design baseline.
+- No Node/npm/Vite.
+- No real email addresses/credentials/secrets.
 - Do not alter `.ai/task.md`.
+- Do not modify SPEC/WORKFLOW/AGENTS.
 
 ## Tests
 
-All integration tests run on the project MySQL testing database.
+Run on MySQL.
 
 Cover at minimum:
 
-### Protocol/authentication
+### Password broker foundation
 
-- valid canonical signature accepted for JSON;
-- valid canonical signature accepted for multipart manifest;
-- missing signature;
-- invalid signature;
-- signature for a different endpoint/timestamp/request-id/payload digest rejected;
-- changing multipart file bytes while keeping signed manifest rejected;
-- changing signed document type/name/size/hash rejected;
-- missing timestamp;
-- malformed timestamp;
-- timestamp exactly -300/+300 seconds accepted;
-- ±301 rejected;
-- missing request ID;
-- invalid/too-long request ID;
-- secret missing fails closed;
-- optional allowlist behavior;
-- rate limit returns unified 429;
-- all rejections JSON, not HTML/redirect;
-- safe log context and explicit absence of body/PII/secret/full signature.
+- standard password-reset token table exists;
+- framework PasswordBroker/DatabaseTokenRepository is used;
+- token is hashed at rest, not plaintext;
+- typed TTL controls validity;
+- valid just-before-expiry token works;
+- exact/after expiry boundary is deterministic;
+- changing TTL setting affects validity as documented;
+- token deletion/invalidation works.
 
-### Idempotency
+### Approval invitation
 
-- first request stores completed response;
-- exact duplicate returns same status/body;
-- duplicate does not rerun business logic;
-- same ID different endpoint -> 409;
-- same ID different semantic body -> 409;
-- multipart duplicate with a different MIME boundary but semantically identical signed payload/files replays successfully;
-- concurrent duplicate application creates one row;
-- concurrent duplicate psychologist creates/updates once;
-- failed business transaction does not leave a completed poisoned idempotency result;
-- journal contains no raw payload or file bytes.
+- pending password-null -> approve commits;
+- exactly one invitation queued;
+- approval rollback -> no invitation;
+- approved user with existing password -> no setup invitation;
+- queue dispatch failure does not revert approved status;
+- invitation job sees ineligible account -> no mail.
 
-### Psychologist intake
+### Resend
 
-- valid new signed multipart -> 201 pending;
-- visible in admin pending list;
-- internal fields cannot be supplied;
-- email trim/lower normalization;
-- consent required;
-- education_type_code maps correct dictionary;
-- wrong/unknown/inactive code rejected;
-- same existing inactive education code accepted on repeat;
-- valid document types/MIME/size;
-- content MIME spoof rejected;
-- files private with random paths;
-- no public URL;
-- zero-doc request works;
-- multiple docs work;
-- failure cleans newly stored files.
+- admin-only;
+- CSRF;
+- foreign/non-admin role denied;
+- approved+enabled+password-null accepted;
+- pending/rejected/disabled/deleted/admin/password-set rejected;
+- previous token immediately invalid;
+- fresh token valid;
+- previous queued job does not send after resend;
+- resend audit contains actor/action only, no sensitive values;
+- resend throttling works.
 
-Repeat matrix:
-- pending -> update + append docs + 200;
-- rejected -> update + domain transition to pending + append docs + 200;
-- approved -> 409/no mutation;
-- disabled -> 409/no mutation;
-- soft-deleted -> 409/no restore/new row;
-- repeat never changes free/admin/disabled/password except rejected->pending status rule;
-- concurrent same-email submissions do not expose duplicate-key 500.
+### Setup form
 
-### Group application intake
+- GET valid link renders real form;
+- invalid token generic invalid/expired state;
+- expired token generic invalid/expired state;
+- disabled/rejected/deleted/pending user cannot use a formerly valid token;
+- password-set user cannot reuse setup flow;
+- POST requires token/email/password/confirmation;
+- minimum 8;
+- mismatch rejected;
+- rate limit works;
+- successful setup hashes password;
+- remember token rotates;
+- broker token consumed;
+- second POST/reuse fails;
+- no auto login;
+- normal login succeeds afterward.
 
-- valid active/enabled public_uuid -> 201;
-- exact gp_group_applications.group_id is matched group internal id;
-- owner derives only from group relationship;
-- psychologist_id/owner_id/group_id input rejected;
-- phone normalized using existing service;
-- unknown UUID -> 404 JSON;
-- soft-deleted group -> 404;
-- draft/moderation/revision/rejected/approved/expired -> 422;
-- disabled active -> 422;
-- duplicate request ID creates one application;
-- different request IDs can create separate applications;
-- Stage 10 owner/admin UI and counters see the created application;
-- foreign owner still gets 404/denied through existing cabinet routes.
+### Setup email
 
-### Side effects/regression
+- queued, not synchronously sent during approval;
+- correct recipient;
+- correct base-path-safe setup URL;
+- no plaintext password;
+- TTL hours displayed;
+- stale token job no-op;
+- SMTP failure retries with same token, not new token.
 
-- no email sent/queued;
-- no password tokens created;
-- no payment rows;
-- no group status transition;
-- Stage 4–10 full regression green;
-- scheduler definitions unchanged;
-- current UI/prototype suite remains green;
-- API routes exist in production;
-- prototype routes remain production-isolated.
+### Warning scheduler
 
-## Runtime / Manual Verification
+- outside threshold no job;
+- exact threshold eligible;
+- inside threshold eligible;
+- due/past no job;
+- non-active no job;
+- already-marked no job;
+- ineligible owner no job;
+- disabled group behavior matches documented choice and leaves marker null;
+- bounded/no-N+1 candidate processing;
+- command aggregate output contains no PII.
 
-Using Docker and only synthetic data:
+### Warning uniqueness
 
-1. Set a temporary local `INTEGRATION_SECRET` through runtime env/config; do not commit it.
-2. Create/ensure an active dictionary education_type item.
-3. Send a correctly signed manifest-based multipart `POST /cabinet/api/v1/psychologists` using standard PHP/FPM multipart parsing.
-4. Verify pending psychologist appears in real admin UI and private documents open through existing protected admin route.
-5. Retry same logical multipart with the same request ID and confirm no duplicate user/document.
-6. Exercise pending/rejected repeat behavior.
-7. Verify approved/disabled/deleted conflict responses.
-8. Identify/create a synthetic active group and copy its real public_uuid.
-9. Send signed JSON group application using that UUID.
-10. Verify it appears in real owner group application list/counter and admin application list.
-11. Retry same request ID -> no duplicate.
-12. Send unknown/inactive/disabled group cases.
-13. Send bad signature/stale timestamp/missing request-id/rate-limit cases.
-14. Inspect application logs and journal rows for absence of PII/raw payload/secrets.
-15. Confirm no mail/jobs/payments/unrelated lifecycle effects.
+- repeated scheduler before processing creates one effective unique job;
+- uniqueness remains while job running;
+- unique ID includes expected expires_at;
+- changed expiry creates a different period key;
+- completed marker blocks future dispatch for same period.
 
-Do not modify the separate public site as part of this repository task.
+### Warning job
+
+- stale changed status -> no mail/no marker;
+- stale changed expires_at -> no mail/no marker;
+- stale already marker -> no mail;
+- successful send -> marker set;
+- marker timestamp only after Mail send succeeds;
+- failure -> marker remains null;
+- retry success -> marker set once;
+- extension/new period -> warning can send again;
+- republish/new period -> warning can send again.
+
+### Lifecycle isolation
+
+- SMTP failure does not break groups:expire;
+- active due group expires even with failed warning job;
+- warning send never changes status/expires_at/placement_days;
+- no payment rows/effects.
+
+### Regression
+
+- Stage 4–11 suites green;
+- Stage 11 API signatures/idempotency unaffected;
+- current routes/role boundaries remain;
+- full prototype suite 31/249 green;
+- production prototype isolation green.
+
+## Required Runtime / Manual Verification
+
+Use Docker and synthetic addresses only.
+
+1. Start local SMTP capture.
+2. Start/confirm database queue worker.
+3. Confirm scheduler list includes:
+   - groups:expire every minute;
+   - applications:cleanup daily;
+   - groups:queue-expiry-warnings hourly.
+4. Approve synthetic pending psychologist through real admin UI.
+5. Observe queued job and captured setup email.
+6. Use captured real link to set password.
+7. Log in with that password.
+8. Verify link reuse blocked.
+9. Exercise resend and old-link invalidation.
+10. Create synthetic near-expiry group and queue warning.
+11. Confirm captured warning and marker.
+12. Force SMTP failure and verify marker remains null.
+13. Run groups:expire while SMTP is unavailable and confirm expiration still works.
+14. Inspect logs/audit for token/password absence.
+15. Clean smoke-only records/messages/jobs as practical.
 
 ## Required Checks
 
-Run and report exact results:
+Report exact results:
 
 1. `docker compose ps`
 2. non-destructive migrate/seed
-3. focused Stage 11 integration tests
-4. concurrency/idempotency tests on MySQL
-5. route inspection for API/web/prototype boundaries
-6. manual signed test-client/curl flow
-7. storage/private document inspection
-8. log redaction inspection
+3. scheduler list
+4. queue/failed-job inspection
+5. focused password-setup tests
+6. focused expiry-warning tests
+7. real SMTP capture smoke
+8. real queue-worker smoke
 9. `docker compose exec -T php php artisan test`
 10. `docker compose exec -T php ./vendor/bin/pint --test`
 11. `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
 12. `docker compose exec -T php composer check-platform-reqs`
 13. `docker compose exec -T php php artisan view:cache`
-14. `git diff --check`
-15. inspect final diff/staged files
-16. confirm no real secret, PII, uploaded files, logs, screenshots or browser artifacts are staged
+14. route inspection in local and production env
+15. `git diff --check`
+16. inspect final diff/staged files
+17. confirm no credentials, tokens, captured messages, test mailbox data, screenshots or runtime artifacts are staged
 
 ## Required .ai/report.md
 
 Include:
 
 - Status;
-- exact API routes;
-- HMAC/timestamp contract;
-- limiter/IP allowlist behavior;
-- idempotency table/schema and replay/conflict behavior;
-- unified response/error format;
-- psychologist create/repeat matrix;
-- document storage/rollback behavior;
-- group application lookup/owner derivation;
-- safe logging evidence;
-- no-email/no-WEBPAY evidence;
-- migrations/config/docs added;
-- exact test/check results;
-- manual signed request evidence;
-- Facts / Assumptions / Unknowns;
-- remaining external work for the public-site developer.
+- password-broker architecture and how current typed TTL is applied;
+- migration/table used;
+- setup routes and limiter;
+- approval-triggered queue behavior;
+- resend/invalidation behavior;
+- queued-job stale-token guard;
+- SMTP/queue architecture;
+- warning command/schedule;
+- warning unique key/lock mechanism;
+- successful-send marker ordering;
+- lifecycle isolation evidence;
+- Mailpit/local SMTP details;
+- production SMTP/worker/scheduler prerequisites;
+- tests/checks/runtime smoke;
+- facts/assumptions/unknowns;
+- remaining Stage 13 prerequisites.
 
-Do not include the integration secret or real payloads in the report.
+Never include:
+
+- raw setup token;
+- password;
+- SMTP password;
+- captured message body containing a live token.
 
 ## Acceptance Criteria
 
-1. `POST /cabinet/api/v1/psychologists` exists in production.
-2. `POST /cabinet/api/v1/group-applications` exists in production.
-3. API routes are stateless and do not use web session/CSRF auth.
-3a. Standard PHP 8.2 FPM multipart parsing remains enabled (`enable_post_data_reading=1`); no custom raw multipart parser/proxy module is required in production.
-4. Valid canonical HMAC-SHA256 signature is required: raw JSON body digest for group applications; signed JSON manifest plus verified file hashes for psychologist multipart.
-5. Signature comparison uses `hash_equals`.
-6. Timestamp ±300s boundary behavior is correct.
-7. Required `X-Request-Id` is validated.
-8. Dedicated configurable rate limiter works.
-9. Optional configured IP allowlist works without hardcoded production IPs.
-10. All API failures use the unified JSON envelope.
-11. API unexpected exceptions never expose internals.
-12. Technical integration logs contain no questionnaire/application payload, PII, files, secrets or full signatures.
-13. Durable MySQL idempotency journal exists and stores no raw payload.
-14. Duplicate same request ID/request returns original response.
-15. Duplicate ID with different semantic request returns 409.
-16. Concurrent duplicate requests produce exactly one business effect.
-17. New questionnaire creates exactly one pending non-admin enabled paid-default user and sends no email.
-18. Public request cannot set lifecycle/access/tariff/password/internal fields.
-19. education_type is addressed by stable external code and correctly resolves internally.
-20. Valid multipart documents are stored privately using existing policy.
-21. Failed multipart transaction leaves no orphan newly uploaded files.
-22. Pending repeat updates questionnaire and appends documents.
-23. Rejected repeat returns user to pending through the domain transition boundary.
-24. Approved repeat is 409 without mutation.
-25. Disabled repeat is 409 without mutation.
-26. Soft-deleted email is 409 without restore/new user.
-27. Repeat submission never changes free/admin/access/password fields.
-28. Valid group application uses only group_uuid/public_uuid lookup.
-29. Caller cannot choose psychologist/owner/internal group id.
-30. Unknown or soft-deleted group UUID returns 404.
-31. Non-active or disabled group returns 422.
-32. Phone normalization reuses Stage 10 PhoneNormalizer.
-33. Valid application appears immediately in existing Stage 10 owner/admin UI and counters.
-34. Idempotent application replay creates no duplicate.
-35. No Stage 11 flow sends email/queues onboarding mail.
-36. No Stage 11 flow creates payment or changes group lifecycle.
-37. `docs/integration.md` is sufficient for the public-site developer and includes full production URLs, the canonical HMAC envelope, JSON raw-body digest, manifest-based multipart signing/file hashes, request-id retry, `cabinet_group_uuid`, and no psychologist_id rule.
-38. Current redesigned Stage 10 UI is preserved.
-39. Stage 4–10 regression remains green.
-40. Full MySQL suite passes.
-41. Pint passes.
-42. Larastan passes.
-43. Composer platform check passes.
-44. Blade compilation passes.
-45. Prototype production isolation remains correct.
-46. Final diff is limited to Stage 11 API/security/idempotency/intake/storage/config/tests/docs/report.
-47. No secret, real PII or unrelated artifact is committed.
+1. Standard Laravel password-reset token storage exists.
+2. Laravel Password Broker/token repository performs token crypto/verification.
+3. Typed `password_setup_link_ttl_hours` is authoritative.
+4. Pending password-null approval queues one setup invitation after commit.
+5. Approval is not rolled back by mail/queue failure.
+6. Invitation contains one-time setup link, never a password.
+7. Setup link works only for approved/enabled/non-deleted/non-admin/password-null user.
+8. Setup password is hashed and login works.
+9. Consumed setup link cannot be reused.
+10. Expired token cannot be used.
+11. Admin can resend only for eligible psychologist.
+12. Resend immediately invalidates previous link.
+13. Stale old invitation job sends nothing after resend.
+14. Admin resend is audited without token/email/password.
+15. Setup routes are rate limited.
+16. Existing login rate limit remains.
+17. No public forgot-password request endpoint exists.
+18. Local SMTP capture receives real queued setup email.
+19. Database queue worker processes mail asynchronously.
+20. `groups:queue-expiry-warnings` exists.
+21. Warning command is scheduled hourly with overlap protection.
+22. Warning threshold uses current `expiry_warning_days`.
+23. Only future active eligible periods are queued.
+24. Warning queued/running duplicate protection binds group + exact expires_at.
+25. Repeated scheduler cannot create duplicate effective job for same period.
+26. Warning job rechecks current group/owner/period before sending.
+27. Successful warning email sets `expiry_warning_sent_at`.
+28. Marker is never set before successful send.
+29. SMTP failure leaves marker null.
+30. Queue retry can subsequently send and mark.
+31. After active extension/new period, a fresh warning can be sent.
+32. After republish/new period, a fresh warning can be sent.
+33. Old-period job cannot mark the new period.
+34. SMTP/queue failure does not prevent active -> expired lifecycle.
+35. Warning flow never mutates group status/expires_at/placement_days.
+36. Stage 12 creates no payment effects.
+37. Current Stage 11 incoming API remains green.
+38. Current redesigned UI remains baseline; only required password/admin integration changes.
+39. Full MySQL suite passes.
+40. Pint passes.
+41. Larastan passes.
+42. Composer platform check passes.
+43. Blade compilation passes.
+44. All 31/249 prototype variants remain green.
+45. Production prototype isolation remains.
+46. Documentation describes production SMTP, queue worker, scheduler and shared lock prerequisites.
+47. Final diff is limited to Stage 12 auth/mail/jobs/scheduler/local Docker/UI wiring/tests/docs/report.
+48. No credentials, password, raw token or unrelated artifacts are committed.
 
 ## Hard Workflow Gate
 
@@ -1063,43 +926,44 @@ Before changing files:
 - read WORKFLOW.md;
 - read AGENTS.md;
 - read this `.ai/task.md`;
-- read SPEC only around §4.10, §5–6, §17–18 and Stage 11;
+- read SPEC only around password setup, §15, Stage 12 and queue duplicate rules;
 - read current `docs/project-status.md`;
-- inspect current `bootstrap/app.php`, models, `PhoneNormalizer`, `PsychologistDocuments`, dictionary conventions and current Stage 10 application flow;
+- inspect current auth config, User model, PsychologistActions, SettingService, group lifecycle, scheduler, queue/mail config and password Blade view;
+- inspect installed Laravel 12 PasswordBroker/DatabaseTokenRepository source before choosing dynamic-TTL construction;
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm base `ccd546b0a484e085345aa8ddd30bc00123d05288`;
+- confirm base `7bb1c7410e9e6db2d3225c5b8637681a7459ee8f`;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- stay strictly in Stage 11;
-- do not implement Stage 12 email/password setup;
+- stay strictly in Stage 12;
 - do not implement WEBPAY;
+- do not add forgot-password self service;
 - do not redesign UI;
-- keep incoming API stateless;
-- keep public contract independent from internal database IDs;
-- do not log sensitive request data;
+- keep Stage 11 API unchanged;
+- keep lifecycle expiration independent of mail;
+- never log tokens/passwords;
 - do not edit `.ai/task.md`;
 - do not edit SPEC/WORKFLOW/AGENTS.
 
 Before commit:
 
 - run all required automated checks;
-- execute real signed synthetic requests;
-- inspect idempotency rows/logs/private storage;
+- perform real local SMTP/queue smoke;
+- inspect logs/audit for sensitive values;
 - inspect complete diff and staged files;
-- remove temporary secrets, uploaded smoke files and artifacts;
+- remove test mailbox/runtime artifacts;
 - update `.ai/report.md`;
-- stage only Stage 11 files + report.
+- stage only Stage 12 files + report.
 
 Completion:
 
-- use Status: done only if every acceptance criterion is satisfied;
+- use Status: done only if acceptance criteria are satisfied;
 - otherwise partial / blocked / failed.
 
 If complete, commit with:
 
-`codex: TASK-2026-09-21-10 implement signed incoming integrations`
+`codex: TASK-2026-09-21-11 implement email password setup warnings`
 
 Do not create an accept commit.
