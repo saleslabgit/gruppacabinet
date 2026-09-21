@@ -252,8 +252,8 @@ admin lifecycle actions require `confirmed` via `GroupActionRequest`. Modal
 comment controls are associated with CSRF-protected confirmation forms through
 the standard HTML `form` attribute.
 
-Real Stage 7 views expose neither payment/extension actions nor application
-links/counters. Applications are explicitly unavailable. There are no payment
+Real views expose no payment actions or application links/counters; Stage 9
+connects free extension to the accepted pages. Applications are explicitly unavailable. There are no payment
 writes or transitions to awaiting_payment. Prototype fixtures and their no-op
 variants remain available only in local/testing using the same Blade files.
 
@@ -313,3 +313,49 @@ The real Payments view is an informational pre-WEBPAY surface, with no filters,
 synthetic rows, detail/refund links or mutations. Rendering does not query payment
 or notification tables. Settings changes do not create or modify payments/groups,
 and the temporary Stage 7 no-payment path for both tariffs remains unchanged.
+
+## Stage 9 placement lifecycle and free extension
+
+`groups:expire` runs every minute with a scheduler `withoutOverlapping` guard.
+`GroupLifecycleService` selects due, non-deleted active IDs using the existing
+status/expiry index in chunks of 200. Each candidate is re-read under a row lock
+inside its own transaction. Only a still-active row with `expires_at <= now UTC`
+transitions through `GroupStatusTransitionService` to expired. The history has
+system actor, null actor ID and null comment. Disabled groups also expire;
+null expiry, other statuses and soft-deleted groups are ignored. Correctness
+comes from the lock/re-check, independently of the scheduler cache lock.
+
+Presentation computes `max(0, ceil((expires_at - now) / 86400))` remaining days.
+Warning applies to future expiry within the current `expiry_warning_days`.
+Overdue active rows explicitly show that expiry has passed and status is awaiting
+update. Page rendering and expiration never write `expiry_warning_sent_at`, send
+mail, or queue jobs. Lists read the two lifecycle settings once per calculation
+and use loaded owners (the authenticated current owner for the owner list).
+The admin `quick=expired` filter remains paginated/sortable and reminds the admin
+to unpublish on gruppa.info manually; no separate unpublication state is stored.
+
+Owner-scoped GET/POST `/groups/{group}/extension` use account/psychologist
+middleware and `GroupPolicy::extend`. Confirmation and CSRF protect the POST.
+The service locks/re-reads the current owner, then the owned group, and checks
+policy again. Only current `gp_users.free=true` can extend; `gp_groups.free`
+remains the immutable historical tariff snapshot. Paid owners see information
+about unavailable paid extension; direct POST is rejected without date/status
+changes, payments, provider calls or payment routes.
+
+Active extension adds the stored `placement_days` to the future expiry, keeps
+status/published_at/duration and clears the warning marker. Missing/invalid dates
+or duration and overflow beyond the MySQL TIMESTAMP ceiling are validation
+errors. One application call performs one update; separate confirmed requests
+are separate extensions. An overdue active row is deliberately rejected with a
+refresh/wait message until the expiration command updates its status. It cannot
+be extended from an already elapsed expiry as an active placement.
+
+Expired extension evaluates the current `expired_extension_window_days` at
+read/action time. The exact `expires_at + window` boundary is allowed. Later
+requests are rejected and the UI offers creation of a new group. There is no
+persisted deadline. Eligible extension transitions expired → approved with a
+system actor, keeping old placement dates and all content/UUID/tariff fields.
+Admin detail identifies re-publication from the latest real status history.
+Existing manual activation then sets new UTC dates and snapshots the current
+placement duration; moderation is not repeated. No Stage 9 path creates a
+payment, email or queued warning job.

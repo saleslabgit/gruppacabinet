@@ -15,7 +15,22 @@
 <p>{{ $group['rejection_reason'] }}</p>
 </x-alert>
 @endif
+@if($realGroups ?? false)
+@if($group['expiry_due'])
+<x-alert tone="warning">Срок размещения истёк. Ожидается обновление статуса.</x-alert>
+@elseif($group['remaining_days'] !== null)
 @if($group['warning'])
+<x-alert tone="warning">До окончания размещения: {{ $group['remaining_days'] }} дн.</x-alert>
+@else
+<p class="meta">До окончания размещения: {{ $group['remaining_days'] }} дн.</p>
+@endif
+@endif
+@if($group['status'] === 'expired' && ($admin ?? false))
+<x-alert tone="warning">Снимите группу с публикации на gruppa.info вручную.</x-alert>
+@elseif($group['status'] === 'expired' && !$group['outside_window'] && $group['extension_deadline'])
+<p>Продление доступно до: <x-date :value="$group['extension_deadline']" /></p>
+@endif
+@elseif($group['warning'])
 <x-alert tone="warning">До окончания размещения 3 дня</x-alert>
 @endif
 @if($group['outside_window'])

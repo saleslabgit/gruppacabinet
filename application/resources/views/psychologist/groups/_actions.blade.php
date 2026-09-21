@@ -3,6 +3,13 @@
 @if(!$group['disabled'] && in_array($group['status'], ['draft', 'revision']))
 <x-button :href="route('psychologist.groups.edit', $group['id'])">{{ $group['status'] === 'revision' ? 'Исправить и отправить' : 'Заполнить группу' }}</x-button>
 @endif
+@if(!$group['disabled'] && in_array($group['status'], ['active', 'expired']))
+@if($group['outside_window'])
+<form method="POST" action="{{ route('psychologist.groups.store') }}">@csrf<x-button type="submit">Создать новую группу</x-button></form>
+@else
+<x-button :href="route('psychologist.groups.extension', $group['id'])">Продлить размещение</x-button>
+@endif
+@endif
 <x-button kind="ghost" :href="route('psychologist.groups.show', $group['id'])">Подробнее</x-button>
 @if($canDelete ?? false)
 <x-button kind="danger" data-bs-toggle="modal" data-bs-target="#delete-group">Удалить</x-button>

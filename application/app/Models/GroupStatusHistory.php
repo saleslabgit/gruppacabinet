@@ -6,6 +6,10 @@ use App\Enums\GroupStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property GroupStatus|null $from_status
+ * @property GroupStatus $to_status
+ */
 class GroupStatusHistory extends Model
 {
     public const UPDATED_AT = null;

@@ -44,6 +44,10 @@ class GroupWorkflowTest extends TestCase
             'participant_capacity' => '10', 'meeting_price' => '35,01'];
         Setting::query()->create(['key' => SettingService::PLACEMENT_DURATION_DAYS, 'type' => 'integer', 'value' => '37']);
         app(SettingService::class)->invalidate(SettingService::PLACEMENT_DURATION_DAYS);
+        foreach ([SettingService::EXPIRY_WARNING_DAYS => '3', SettingService::EXPIRED_EXTENSION_WINDOW_DAYS => '30'] as $key => $value) {
+            Setting::query()->create(['key' => $key, 'type' => 'integer', 'value' => $value]);
+            app(SettingService::class)->invalidate($key);
+        }
     }
 
     private function draft(): Group
@@ -108,7 +112,7 @@ class GroupWorkflowTest extends TestCase
         $this->assertSame($before, $group->fresh()->getAttributes());
         $this->assertSame($historyCount, $group->statusHistory()->count());
         $this->assertDatabaseCount('gp_payments', 0);
-        $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY')->assertDontSee('Продлить')->assertSee('Заявки пока недоступны');
+        $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY')->assertSee('Продлить размещение')->assertSee('Заявки пока недоступны');
     }
 
     public function test_validation_and_protected_fields_for_both_roles(): void

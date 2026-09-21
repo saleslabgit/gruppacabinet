@@ -16,7 +16,12 @@ class GroupActionRequest extends FormRequest
 
     public function authorize(): bool
     {
-        $ability = $this->routeIs('*.destroy') ? 'delete' : ($this->routeIs('*.activate') ? 'activate' : 'moderate');
+        $ability = match (true) {
+            $this->routeIs('*.extend') => 'extend',
+            $this->routeIs('*.destroy') => 'delete',
+            $this->routeIs('*.activate') => 'activate',
+            default => 'moderate',
+        };
 
         return $this->user()->can($ability, $this->group());
     }

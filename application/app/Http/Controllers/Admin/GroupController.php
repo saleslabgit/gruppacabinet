@@ -44,13 +44,16 @@ class GroupController extends Controller
         if (($filters['quick'] ?? null) === 'approved') {
             $query->where('status', GroupStatus::Approved);
         }
+        if (($filters['quick'] ?? null) === 'expired') {
+            $query->where('status', GroupStatus::Expired);
+        }
         if (($filters['quick'] ?? null) === 'abandoned') {
             $query->where('status', GroupStatus::Draft)->where('created_at', '<=', now()->subDays(config('groups.abandoned_draft_days')));
         }
         $paginator = $query->orderByDesc($filters['sort'] ?? 'created_at')->orderByDesc('id')->paginate(20)->withQueryString();
 
         return view('admin.groups.index', array_merge(GroupPages::layout('Группы', true), [
-            'filters' => $filters, 'groups' => $paginator->getCollection()->map(fn (Group $group) => GroupPages::data($group)),
+            'filters' => $filters, 'groups' => GroupPages::listing($paginator->getCollection()),
             'empty' => $paginator->isEmpty(),
             'pages' => $paginator->getUrlRange(max(1, $paginator->currentPage() - 2), min($paginator->lastPage(), $paginator->currentPage() + 2)),
             'currentPage' => $paginator->currentPage(),

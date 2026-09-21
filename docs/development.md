@@ -270,5 +270,50 @@ together; no payment is created. Changing placement duration affects later
 activations and leaves existing group dates intact.
 
 **Платежи** displays only “Платежи ещё не подключены”. There is no provider setup,
-payment detail, refund or payment mutation at this stage. Applications, lifecycle
-automation and WEBPAY remain later milestones.
+payment detail, refund or payment mutation at this stage. Applications and
+WEBPAY remain later milestones; Stage 9 provides lifecycle automation below.
+
+## Stage 9 expiration and free extension
+
+After normal non-destructive migration/seeding, inspect and run the lifecycle:
+
+```bash
+docker compose exec -T php php artisan schedule:list
+docker compose exec -T php php artisan groups:expire
+docker compose exec -T php php artisan schedule:run
+```
+
+The command reports only the aggregate expired count. It runs every minute with
+an overlap guard; row locks and state re-checks protect direct/concurrent runs.
+The local stack does not start a persistent scheduler automatically. Production
+needs the normal once-per-minute `schedule:run` cron from the private application
+directory, using the hosting PHP executable. Configuring that cron/deployment
+is outside this stage.
+
+Use synthetic local accounts/groups to check the full flow:
+
+1. Set an approved psychologist's current tariff to free, create/moderate and
+   manually activate a group. Check the exact expiry and remaining days.
+2. Prepare a future expiry inside the current warning threshold. Rendering a
+   warning must leave the warning marker unchanged and create no mail/job.
+3. Run `groups:expire` before expiry (unchanged), then at/after expiry (expired).
+   Repeat: the expiration history must remain one system transition.
+4. Open admin Groups → «Снять с публикации» and check the manual-unpublish reminder.
+5. Extend another active group through its confirmation. It adds its stored
+   placement duration, even when the current global setting differs.
+6. Extend an expired group within its window. It becomes approved with old dates;
+   admin detail shows «Продление» and manual re-publication instructions. Activate
+   again: a new period uses the current placement-duration setting.
+7. Change the current owner tariff after group creation. A historically paid
+   group can extend free with a currently free owner; a historically free group
+   cannot extend with a currently paid owner. Historical group tariff is preserved.
+8. Outside the extension window, check create-new behavior and direct POST denial.
+   An overdue active row also rejects extension until the scheduler expires it.
+9. Verify payment/job counts unchanged and check list/detail/extension/confirmation
+   pages at 1440, 1024 and 390 px.
+
+Run focused MySQL tests with `php artisan test --filter=GroupLifecycle` inside
+Docker. The concurrency tests use committed disposable test fixtures and two
+independent PHP processes against MySQL, including a candidate whose expiry
+changes while workers wait for its row lock. Browser verification uses external
+tools; keep scripts/screenshots outside the repository.

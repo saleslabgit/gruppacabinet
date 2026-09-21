@@ -1,6 +1,9 @@
 @extends('layouts.admin')
 @section('content')
 @if($realGroups ?? false)<x-validation-summary :errors="$errors" />@endif
+@if($republication ?? false)
+<x-alert>Продление: группа ожидает ручной повторной публикации. После публикации отметьте её активной — начнётся новый срок размещения.</x-alert>
+@endif
 <x-panel title="Интеграция с gruppa.info">
 <p class="meta">ID группы для gruppa.info</p>
 <div class="integration-id">

@@ -103,14 +103,14 @@ copy/reminder is available before activation. Owner draft/rejected deletion and
 admin abandoned-draft deletion are soft deletes with historical payment safety.
 Lists use eager loading, filters/search, deterministic sorting and pagination;
 payment/application queries are excluded from normal listing. Applications are
-unavailable; payment operations and extensions have no real routes or links.
+unavailable; payment operations have no real routes or links. Stage 9 connects free extension.
 Stage 8 adds only an informational admin payment-list route.
 
 MySQL coverage includes both tariffs, history/atomicity, IDOR, immutability,
 validation/dictionaries/integer money, activation, deletion and query counts.
 Stage 8 adds dictionary/settings administration and an informational payment page.
-Stages 9+ (lifecycle automation, applications, external integration, mail and
-payments) remain pending.
+Stage 9 adds lifecycle automation/free extension. Stages 10+ (applications,
+external integration, mail and payments) remain pending.
 
 ## Stage 8 dictionaries, settings and payment information
 
@@ -127,10 +127,24 @@ minor units; nullable values round-trip. Placement duration affects later
 activations only. The real Payments route is informational and performs no
 payment table query, provider call or mutation. All 249 prototype variants remain.
 
+## Stage 9 placement lifecycle and free extension
+
+The every-minute `groups:expire` scheduler expires active placements under row
+locks with an idempotent system history transition, including disabled groups.
+Real owner/admin views show remaining days, configured warnings and extension
+windows; the admin expired filter reminds about manual public-site unpublication.
+
+Confirmed owner-only extension uses the current owner tariff. Free active
+extension adds the stored duration and clears the warning marker; free expired
+extension returns to approved within the current window without moderation.
+Manual re-publication starts a new period using the current duration setting.
+Paid owners receive an informational unavailable state and cannot extend by POST.
+No payments, mail or jobs are created. Approved Blade/prototype structure remains.
+
 ## Intentionally not implemented
 
 No psychologist profile editing or document mutations, payment CRUD,
-public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
+public API, mail/warning jobs, application retention scheduling, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 
 ## External prerequisites and unknowns

@@ -34,6 +34,12 @@ class GroupPolicy
         return ! $actor->admin && $this->update($actor, $group);
     }
 
+    public function extend(User $actor, Group $group): bool
+    {
+        return ! $actor->admin && $this->view($actor, $group) && ! $group->disabled
+            && in_array($group->status, [GroupStatus::Active, GroupStatus::Expired], true);
+    }
+
     public function moderate(User $actor, Group $group): bool
     {
         return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Moderation;

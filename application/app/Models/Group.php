@@ -9,9 +9,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
-/** @property GroupStatus $status */
+/**
+ * @property GroupStatus $status
+ * @property Carbon|null $expires_at
+ */
 class Group extends Model
 {
     use SoftDeletes;

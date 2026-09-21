@@ -36,7 +36,7 @@
 @endif
 </form>
 <div class="actions small mt-3">
-@foreach((($realGroups ?? false) ? ['approved'=>'Ожидают публикации','abandoned'=>'Брошенные черновики'] : ['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные черновики']) as $state=>$label)
+@foreach(['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные черновики'] as $state=>$label)
 <a href="{{ ($realGroups ?? false) ? route('admin.groups.index',['quick'=>$state]) : route('prototype.admin-groups',['variant'=>$state]) }}">{{ $label }}</a>
 @endforeach
 </div>

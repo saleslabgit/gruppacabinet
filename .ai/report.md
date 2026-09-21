@@ -1,177 +1,131 @@
-# Report: TASK-2026-09-21-06
+# Report: TASK-2026-09-21-07
 
 Status: done
 
 ## Summary
 
-Реализован Stage 8: административное управление справочниками/элементами,
-семью бизнес-настройками и информационная страница платежей до WEBPAY.
-Использованы существующие утверждённые Blade views и CSS; параллельных страниц,
-миграций, зависимостей и frontend build tools не добавлено.
-
-- 15 реальных маршрутов под account + role:admin: контейнеры и вложенные items,
-  GET/PUT settings, только GET payments. Навигация содержит Главная, Психологи,
-  Группы, Платежи, Справочники, Настройки, Выход; заявок нет.
-- Стабильные коды create-only, Form Requests, явные allowlists полей, scoped
-  binding с 404 для несовпадающих dictionary/item. Страницы имеют 20 строк,
-  детерминированный порядок, aggregate counts/usage без N+1.
-- DictionaryManagement блокирует родитель/элемент в транзакции; DictionaryUsage
-  учитывает education_type/users и format/gender/groups, включая soft-deleted
-  записи. Системные контейнеры и используемые элементы нельзя удалить.
-  Удаление допустимых записей и деактивация подтверждаются; реактивация идемпотентна.
-- SettingService::update принимает ровно семь известных ключей и int/null,
-  блокирует существующие строки, сохраняет настройки и AuditService entries
-  одной транзакцией. Минимальный setting.updated содержит actor и key/old/new;
-  неизменённые значения не аудируются. DB::afterCommit сбрасывает кеш;
-  чтения внутри транзакций не используют/не заполняют общий кеш.
-- BynAmount переводит decimal string в minor units без float и отвергает overflow.
-  Nullable цены, положительные целые и warning < placement валидируются сервером.
-  Технические пределы: PHP_INT_MAX для целых/копеек, unsigned INT для sort_order,
-  placement days — число полных дней до предела MySQL TIMESTAMP в 2038 году.
-- Общий confirmation получил необязательный ID существующей формы: кнопка
-  отправляет её поля, CSRF, method override и confirmed=1. Прежние URL-based
-  confirmations и prototype no-op сохранены.
-- Платежи отображают только «Платежи ещё не подключены»: нет строк, фильтров,
-  detail/refund/mutation routes, запросов платёжных таблиц или provider actions.
+Implemented Stage 9 placement expiration, remaining/warning presentation, admin
+expired filter and confirmed owner-only free extension using the current owner
+tariff. Existing Blade pages and all prototype branches are preserved. All required checks, concurrent MySQL verification and real browser scenarios
+have passed.
 
 ## Changed Files
 
-Production PHP:
-
-- `application/routes/web.php` и `app/Support/PsychologistPages.php` — маршруты/навигация.
-- `app/Http/Controllers/Admin/{DictionaryController,DictionaryItemController,SettingController}.php`.
-- `app/Http/Requests/{DictionaryRequest,DictionaryItemRequest,DictionaryActionRequest,SettingRequest}.php`.
-- `app/Policies/{DictionaryPolicy,SettingPolicy}.php`.
-- `app/Services/{DictionaryManagement,DictionaryUsage,SettingService}.php`.
-- `app/Support/BynAmount.php`, `app/Models/Dictionary.php` (типизация отношения).
-
-Все пути app/ выше относительно `application/`.
-
-Blade:
-
-- `application/resources/views/admin/dictionaries/{index,items}.blade.php`.
-- `application/resources/views/admin/settings/index.blade.php`.
-- `application/resources/views/admin/payments/index.blade.php`.
-- `application/resources/views/components/confirmation.blade.php`.
-
-Tests/docs:
-
-- `application/tests/Feature/{DictionaryAdminTest,SettingsAdminTest}.php`.
-- `application/tests/Feature/Domain/SettingsAndSeedTest.php`: существующий тест
-  кеширования перенесён без потери проверок в SettingsAdminTest с настоящими
-  commit, поскольку RefreshDatabase оборачивает тест в незавершённую транзакцию.
-- `docs/{architecture,development,project-status,ui-pages}.md`, `.ai/report.md`.
-
-`.ai/task.md`, SPEC.md, WORKFLOW.md, AGENTS.md не изменены.
+- `application/app/Services/GroupLifecycleService.php`: chunked due selection,
+  transactional expiration re-check, current-owner locking, extension and
+  presentation calculations.
+- `application/app/Console/Commands/ExpireGroups.php`, `application/routes/console.php`:
+  aggregate-only `groups:expire` command and every-minute overlap-protected schedule.
+- Owner/admin GroupControllers, GroupActionRequest, GroupIndexRequest, GroupPolicy,
+  GroupPages and `application/routes/web.php`: owner-scoped extension endpoints,
+  confirmation/authorization, expired filtering, loaded list data and history-based
+  re-publication presentation.
+- Group/GroupStatusHistory model annotations describe their existing casts for
+  static analysis; schema and cast behavior are unchanged.
+- Existing psychologist extension/actions, shared group-summary and admin group
+  index/show Blade files: real extension/warning/expired states and reminders.
+- GroupLifecycleTest and GroupLifecycleConcurrencyTest: MySQL lifecycle/access/
+  tariff/window/query/side-effect coverage and independent-process row-lock tests.
+  GroupWorkflowTest adds lifecycle settings fixtures and expects the new action.
+- `docs/architecture.md`, `docs/development.md`, `docs/project-status.md`,
+  `docs/ui-pages.md`: implemented Stage 9 behavior and verification instructions.
+- `.ai/report.md`: this report. Task/spec/governance files are unchanged.
 
 ## Checks
 
-### Автоматические проверки
-
-- Исходное состояние чистое; HEAD `27b9878` — актуальный planner этой задачи.
-  Его родитель подтверждён: `1f5182039fadcfe53bb737c30748104c2535308c`.
-- `docker compose ps`: mysql/php healthy, web Up.
-- `docker compose exec -T php php artisan migrate --seed --force`: Nothing to
-  migrate; idempotent seed успешно. Локальная БД не сбрасывалась.
-- Точечные MySQL-проверки словарей прошли; повторный прогон
-  `php artisan test --filter='SettingsAdminTest|SettingsAndSeedTest'`:
-  19 passed, 158 assertions, 83.14 s.
-- Первый прогон обнаружил неправильное ожидание порядка JSON-ключей в тесте
-  и отсутствие bail перед проверкой суммы при array-вводе. Оба исправлены.
-- `docker compose exec -T php php artisan test`: **268 passed, 2811 assertions,
-  250.70 s**. Stage 4–7 regression и все 31 группы / 249 prototype variants прошли.
-- `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 104 files.
-  `pint --dirty` не поддерживается без .git внутри контейнера; форматирование
-  выполнялось явным списком только изменённых PHP-файлов.
+- Initial `git status --short`: clean. Planner HEAD `7dbacb8`; its parent matches
+  `28aabaab3bcc84622959f9e81088d0844c90fc5f` exactly.
+- `docker compose ps`: php/mysql healthy, web running.
+- `docker compose exec -T php php artisan migrate --seed`: nothing to migrate;
+  idempotent seed completed, no destructive reset of the development database.
+- `docker compose exec -T php php artisan schedule:list`: `groups:expire` has
+  `* * * * *` cadence. The schedule test verifies `withoutOverlapping` as well.
 - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
-  [OK] No errors после уточнения типа Dictionary::items и PHPDoc.
-- `docker compose exec -T php composer check-platform-reqs`: все требования
-  success, PHP 8.2.32.
-- `docker compose exec -T php php artisan view:cache`: успешно.
-- `docker compose exec -T php php artisan route:list --json`: 92 routes,
-  из них 15 Stage 8. `docker compose exec -T -e APP_ENV=production -e APP_DEBUG=false
-  php php artisan route:list --json`: 58 routes, 0 prototype/foundation/redirect-check,
-  те же 15 Stage 8. У payments только GET|HEAD index.
+  no errors.
+- `docker compose exec -T php ./vendor/bin/pint --test`: final run passed,
+  108 files.
+- `docker compose exec -T php composer check-platform-reqs`: all requirements
+  pass on PHP 8.2.32.
+- `docker compose exec -T php php artisan view:cache`: success.
+- `docker compose exec -T php php artisan route:list --json`: 94 routes,
+  including the owner extension GET/POST with web/account/psychologist middleware.
+- `docker compose exec -T -e APP_ENV=production php php artisan route:list --json`:
+  60 routes; no prototype/foundation routes. Extension routes remain protected.
+- `docker compose exec -T php php artisan test --filter=GroupLifecycle`: 21 passed
+  (895 assertions), 35.29 seconds, including both independent-process races.
+- Full `docker compose exec -T php php artisan test`: **289 passed, 3695 assertions,
+  249.41 seconds**. This includes Stage 4–8 regression, all 31 page groups / 249
+  prototype variants and production route isolation.
+  The previous run had 287 passed / 2 failed due to a synchronization bug in the
+  new test harness (a ready signal already in the output buffer was missed). That
+  harness is corrected and both concurrency cases now pass. Initial focused test
+  issues in stale Stage 7 expectations/model comparison were also corrected.
+- `git diff --check`: passed. Full implementation/test/doc diff reviewed; only
+  Stage 9 files and this report are selected for staging. No secrets, local data,
+  browser artifacts or unrelated changes are included.
 
-- `git diff --check` и `git diff --cached --check`: успешно. Просмотрены diff и
-  staged-состав: 29 файлов только Stage 8, тесты, документация и отчёт. Секретов,
-  локальных конфигураций, реальных персональных/платёжных данных, screenshots,
-  логов и browser artifacts в индексе нет.
+### Real Docker HTTP/browser verification
 
-### SQL и транзакционные проверки
+External Chromium/Playwright scripts and screenshots are only in `/tmp`, not
+repository files or dependencies. The installed browser was used directly because
+both browser MCP configurations point to missing Chromium builds.
 
-Реальный HTTP kernel с array-session, без изменения бизнес-данных:
-
-- dictionaries: 3 SQL (account + count + list с counts);
-- dictionary items: 4 SQL (account + parent + count + list с usage subquery);
-- payments: 1 SQL (account), 0 запросов gp_payments/gp_payment_notifications.
-
-MySQL-тест сравнивает query count при увеличении количества строк и проверяет
-пагинацию 20, порядок, scoped uniqueness, все item IDOR actions, core/non-empty
-protection, soft-deleted usage. Проверены реальные mutations → новые формы →
-неактивные текущие selections → сохранение существующих записей → reactivation.
-
-Настройки проверяются с реальными commit: nullable/decimal/максимальная сумма,
-отрицательные/экспонента/лишние знаки/массив/overflow, integer/cross-field validation,
-unknown keys/missing rows/types, unchanged audit, actor/minimal metadata,
-audit failure rollback, outer rollback, сброс кеша после commit, snapshot
-старой группы и новый duration следующей активации, отсутствие payment effects.
-
-### Реальный браузер через Docker/Nginx
-
-`node /tmp/stage8-smoke.cjs`: PASS через уже установленный Chromium 1243 и
-Playwright, URL `http://localhost:8080/cabinet`. MCP браузеры не запускались
-из-за отсутствующих настроенных executable paths; установки зависимостей
-проекта не потребовалось. Скрипты/логи/screenshots только в `/tmp`.
-
-Проверены вход администратора, создание/редактирование/подтверждённое удаление
-custom container, добавление значений в три core dictionaries, item edit/sort,
-удаление unused item, деактивация used item и реактивация. После каждого
-изменения проверены реальные psychologist/group формы, отсутствие значения
-в новых и сохранение текущего inactive option в существующих записях.
-
-Все семь настроек сохранены через реальную модальную форму. SQL подтвердил
-5000/2550 minor units и семь actor=admin setting.updated entries с минимальной
-metadata. В UI обратно показаны 50,00/25,50. Новая группа получила 41 день;
-прежняя сохранила 30 дней и исходные published_at/expires_at. До и после —
-0 платежей. После сценария исходные локальные настройки восстановлены через UI.
-Синтетические локальные элементы/психолог/группы оставлены для ручной проверки;
-это не утверждённое production-содержимое справочников.
-
-Для dictionaries/items/settings/payments выполнены геометрическая проверка и
-просмотр снимков 1440/1024/390: нет горизонтального выхода за viewport,
-сохранены таблицы/мобильные карточки, поля и действия. Психолог в отдельной
-browser session получает 403 на всех четырёх разделах.
-
-`node /tmp/stage8-extra.cjs`: PASS — серверная ошибка суммы с сохранением
-старого ввода, мобильное подтверждение, деактивация через checkbox в edit-форме
-и последующая реактивация. Проверены итоговый required sort_order и desktop
-Payments. Первое выполнение этого дополнительного скрипта остановилось на
-неверном ожидании строкового значения boolean HTML-атрибута required; исправлен
-только временный проверочный скрипт, product-код не менялся.
+- Created a separate synthetic approved psychologist and two groups using domain
+  creation/moderation; activated the first through real admin HTTP confirmation.
+- Checked active dates/remaining display and a near-expiry warning.
+- Ran real `groups:expire`: before expiry `Expired groups: 0`; after preparing a
+  due record `Expired groups: 1`; repeated run `Expired groups: 0`.
+- Checked real admin expired filter and manual-unpublish reminder.
+- Free active HTTP extension added exactly 17 stored days, preserved published_at,
+  and reset expiry_warning_sent_at.
+- Free expired HTTP extension changed expired → approved with system history;
+  old dates/duration remained. The approved admin filter included the group and
+  detail identified re-publication. Real activation then used the current 30 days
+  instead of the previous 17, preserving public_uuid and historical free=false.
+- A current-free owner extended a historically paid group. After switching the
+  current tariff to paid, a historically free group showed unavailable paid
+  extension; a direct confirmed POST returned HTTP 422 with no changes.
+- Final payment and database-job counts remained 0 → 0. Mail/Queue fakes in the
+  focused MySQL tests also assert no sent/queued work.
+- Verified active, warning, expired, free-active/free-expired extension,
+  re-publication admin detail, expired admin list, paid and outside-window states
+  at 1440/1024/390, with no horizontal overflow. Owner list checked at all three
+  sizes; confirmation modal checked inside the 390px viewport.
+- Real POST without CSRF returned 419; with CSRF but without confirmation returned
+  422. Browser scripts completed successfully with no page errors.
 
 ## Facts
 
-- Новые данные справочников доступны Stage 5/7 без изменения исходников или seed.
-- Существующие active placement snapshots не меняются от settings update.
-- Новых migrations, packages, CSS/JS, WEBPAY credentials/config/provider code нет.
-- Prototype catalogue и production isolation сохранены.
-- Все изменения относятся к Stage 8 и его проверкам/документации.
+- Expiration uses bounded chunks and locks/re-reads each candidate before a system
+  domain transition; disabled active rows expire. No date/marker is changed.
+- Extension locks the current owner then the owned group and repeats policy
+  checks. Historical group.free never selects eligibility or changes.
+- Active extension uses stored placement_days, not the current global duration.
+  Independent confirmed requests are separate actions; one service call updates once.
+- Chosen overdue-active behavior: reject with a clear wait/refresh validation
+  message until the scheduler marks expired; never extend an elapsed active period.
+- Expired extension allows the exact current-window deadline; later attempts fail.
+  It creates only expired → approved system history, retaining old period dates.
+- Re-publication uses the existing admin activation and current duration setting.
+- Remaining days use non-negative ceiling; warning/window settings are read once
+  per list calculation. Queries do not grow per row or touch payments/applications.
+- No email/job classes, payment integration, migrations, new flags/deadline columns,
+  dependencies, CSS redesign, or Stage 10+ functionality were added.
 
 ## Assumptions
 
-- Локальные marker-значения предназначены исключительно для проверки интерфейса.
-- Для custom dictionaries текущая схема не содержит application references;
-  при появлении новых связей DictionaryUsage потребуется расширить явно.
+- Normal deployment will run the Laravel scheduler every minute; cron setup is
+  documented and intentionally outside this task.
+- Public-site unpublication/re-publication remains a manual administrator action.
 
 ## Unknowns
 
-- Production dictionary content и реальные бизнес-цены не определялись задачей.
-- Production deployment, Stage 9+ и WEBPAY не выполнялись и не проверялись.
+- No unresolved Stage 9 implementation or verification blockers. Production
+  scheduler operation and actual public-site actions are outside the local scope.
 
 ## Risks / Next Step
 
-Все обязательные проверки пройдены. Результат готов к приёмке Stage 8.
-Следующий продуктовый этап — Stage 9; он в эту реализацию не входит.
-Локальные синтетические данные не являются production-справочниками; исходные
-локальные бизнес-настройки восстановлены после browser smoke.
+Ready for review in the required `codex:` commit. Synthetic development records
+remain local only; no screenshots, scripts, credentials or database records are
+included. Normal production scheduler cron must be configured at deployment;
+email warning jobs and paid extension remain later-stage work.

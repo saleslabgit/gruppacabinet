@@ -2,9 +2,12 @@
 
 namespace App\Support;
 
+use App\Enums\GroupStatus;
 use App\Models\DictionaryItem;
 use App\Models\Group;
 use App\Models\User;
+use App\Services\GroupLifecycleService;
+use Illuminate\Support\Collection;
 
 class GroupPages
 {
@@ -18,15 +21,23 @@ class GroupPages
         ]);
     }
 
-    public static function data(Group $group): array
+    public static function listing(Collection $groups): Collection
+    {
+        $context = $groups->contains(fn (Group $group) => in_array($group->status, [GroupStatus::Active, GroupStatus::Expired], true))
+            ? app(GroupLifecycleService::class)->presentationContext() : null;
+
+        return $groups->map(fn (Group $group) => self::data($group, $context));
+    }
+
+    public static function data(Group $group, ?array $context = null): array
     {
         return $group->only(['id', 'public_uuid', 'owner_id', 'disabled', 'free', 'description', 'schedule', 'format_id', 'gender_id',
-            'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at']) + [
+            'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at', 'placement_days']) + [
                 'title' => $group->title ?: 'Новая группа', 'status' => $group->status->value,
                 'format' => $group->format->name ?? 'Не указан', 'gender' => $group->gender->name ?? 'Не указан',
-                'warning' => false, 'outside_window' => false, 'all_count' => 0,
+                'all_count' => 0,
                 'owner' => $group->relationLoaded('owner') && $group->owner ? PsychologistPages::profile($group->owner) : null,
-            ];
+            ] + app(GroupLifecycleService::class)->presentation($group, $context);
     }
 
     public static function detail(Group $group, bool $admin, bool $checkDeletion = true): array
@@ -38,7 +49,11 @@ class GroupPages
             $data['links']['admin-user'] = route('admin.psychologists.show', $group->owner_id);
         }
 
+        $lastTransition = $group->statusHistory->last();
+
         return array_merge($data, ['group' => self::data($group), 'groupModel' => $group,
+            'republication' => $group->status === GroupStatus::Approved && $lastTransition?->from_status === GroupStatus::Expired
+                && $lastTransition->to_status === GroupStatus::Approved,
             'history' => $group->statusHistory, 'user' => $group->owner ? PsychologistPages::profile($group->owner) : null,
             'canDelete' => $checkDeletion && $group->exists && request()->user()->can('delete', $group)]);
     }

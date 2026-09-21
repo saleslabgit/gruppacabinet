@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\GroupActionRequest;
 use App\Http\Requests\GroupRequest;
 use App\Models\Group;
+use App\Services\GroupLifecycleService;
 use App\Services\GroupWorkflow;
 use App\Support\GroupPages;
 use Illuminate\Contracts\View\View;
@@ -19,9 +20,10 @@ class GroupController extends Controller
     {
         $paginator = Group::query()->where('owner_id', $request->user()->id)->with(['format', 'gender'])
             ->orderByDesc('created_at')->orderByDesc('id')->paginate(20);
+        $paginator->getCollection()->each(fn (Group $group) => $group->setRelation('owner', $request->user()));
 
         return view('psychologist.groups.index', array_merge(GroupPages::layout('Мои группы', false), [
-            'groups' => $paginator->getCollection()->map(fn (Group $group) => GroupPages::data($group)),
+            'groups' => GroupPages::listing($paginator->getCollection()),
             'empty' => $paginator->isEmpty(), 'canCreateGroup' => true,
             'pages' => $paginator->getUrlRange(max(1, $paginator->currentPage() - 2), min($paginator->lastPage(), $paginator->currentPage() + 2)),
             'currentPage' => $paginator->currentPage(),
@@ -49,6 +51,21 @@ class GroupController extends Controller
         Gate::authorize('update', $model);
 
         return view('psychologist.groups.form', GroupPages::form($model, false));
+    }
+
+    public function extension(Request $request, string $group): View
+    {
+        $model = Group::query()->where('owner_id', $request->user()->id)->findOrFail($group);
+        Gate::authorize('extend', $model);
+
+        return view('psychologist.groups.extension', array_replace(GroupPages::detail($model, false, false), ['title' => 'Продление размещения']));
+    }
+
+    public function extend(GroupActionRequest $request, GroupLifecycleService $lifecycle): RedirectResponse
+    {
+        $group = $lifecycle->extend($request->group(), $request->user());
+
+        return redirect()->route('psychologist.groups.show', $group)->with('success', 'Продление выполнено.');
     }
 
     public function update(GroupRequest $request, GroupWorkflow $workflow): RedirectResponse

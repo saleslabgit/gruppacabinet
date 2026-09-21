@@ -53,6 +53,8 @@ Route::middleware(['account', 'role:psychologist'])->prefix('groups')->name('psy
     Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
     Route::put('/{group}', [$controller, 'update'])->name('update');
     Route::post('/{group}/submit', [$controller, 'update'])->name('submit');
+    Route::get('/{group}/extension', [$controller, 'extension'])->name('extension');
+    Route::post('/{group}/extension', [$controller, 'extend'])->name('extend');
     Route::delete('/{group}', [$controller, 'destroy'])->name('destroy');
 });
 

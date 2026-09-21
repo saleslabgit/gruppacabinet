@@ -21,7 +21,7 @@ class GroupIndexRequest extends FormRequest
             'status' => ['nullable', Rule::enum(GroupStatus::class)],
             'free' => ['nullable', 'in:free,paid'],
             'sort' => ['nullable', 'in:created_at,published_at,expires_at'],
-            'quick' => ['nullable', 'in:approved,abandoned'],
+            'quick' => ['nullable', 'in:approved,expired,abandoned'],
         ];
     }
 }
