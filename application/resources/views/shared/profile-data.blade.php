@@ -13,7 +13,7 @@
 @foreach(['documents_confirmed'=>'Достоверность документов','education_confirmed'=>'Соответствие образования','live_session_ready'=>'Готовность провести вебинар или эфир'] as $key=>$label)
 <div>
 <dt>{{ $label }}</dt>
-<dd>{{ $user[$key] ? 'Да' : 'Нет' }}</dd>
+<dd>{{ $user[$key] === null ? 'Не указано' : ($user[$key] ? 'Да' : 'Нет') }}</dd>
 </div>
 @endforeach
 <div>
@@ -24,7 +24,7 @@
 </div>
 <div>
 <dt>Версия согласия</dt>
-<dd>{{ $user['personal_data_consent_version'] }}</dd>
+<dd>{{ $user['personal_data_consent_version'] ?? 'Не указано' }}</dd>
 </div>
 </dl>
 </x-panel>

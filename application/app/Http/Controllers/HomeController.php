@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\PsychologistPages;
 use Illuminate\Contracts\View\View;
 
 class HomeController extends Controller
@@ -21,13 +22,8 @@ class HomeController extends Controller
 
     public function admin(): View
     {
-        return view('admin.home', [
-            'title' => 'Главная',
-            'prototype' => false,
+        return view('admin.home', array_merge(PsychologistPages::layout('Главная'), [
             'workQueueAvailable' => false,
-            'navigation' => [['label' => 'Главная', 'url' => route('admin.home'), 'current' => true]],
-            'logoutUrl' => route('logout'),
-            'homeUrl' => route('admin.home'),
-        ]);
+        ]));
     }
 }

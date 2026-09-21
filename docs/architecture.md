@@ -120,9 +120,58 @@ and regenerates its CSRF token. GET logout is not registered.
 Sessions use the existing database store. `SessionInvalidator::invalidate(User)`
 rotates the user's remember token and deletes all their session rows from the
 configured session connection/table, leaving other users and guests intact.
-It is available for later administrative actions; those actions are not yet
-implemented. No remember-me option is exposed.
+Stage 5 disable, reject and soft-delete actions call it within their database
+transaction. No remember-me option is exposed.
 
 The old database diagnostic is now `/_foundation`; it and `/redirect-check`
 are registered only in local/testing, like the unchanged prototype catalog.
 All real URLs are generated with Laravel helpers and retain `/cabinet`.
+
+
+## Stage 5 psychologist administration
+
+`admin.psychologists.*` routes under `/admin/psychologists` use the Stage 4
+`account` and `role:admin` middleware. UserPolicy permits only active approved
+administrators and non-admin, non-deleted targets. UserDocumentPolicy also
+compares the document's user ID with the route parent on every view, download
+and delete; changing either ID cannot bypass ownership.
+
+PsychologistController reuses `admin/users/index`, `show`, and `form`.
+PsychologistPages supplies explicit display fields (never credentials), real
+navigation and validation/flash state. The list uses two pagination queries
+plus request authentication, with no row-dependent queries; its ordering is
+`created_at DESC, id DESC`. Search includes individual and combined name parts,
+email and phone. Profile Form Requests whitelist questionnaire fields; only
+creation accepts an initial tariff. Active-email validation is backed by the
+existing generated-column unique index, with duplicate races translated into
+an email validation error. Education choices come from active `education_type`
+items; the target's existing inactive item remains selectable.
+
+PsychologistActions locks the target and coordinates lifecycle transitions,
+access/tariff updates, session revocation and minimal AuditService records in
+one transaction on the existing MySQL/session connection. Approve/reject use
+UserStatusTransitionService; invalid/repeated actions produce validation errors
+without audit/state changes. Soft deletion preserves related records. Tariff
+changes never rewrite group snapshots. Human-readable audit history includes
+actors (including soft-deleted actors), dates and relevant state changes.
+Create/approve do not set a password, send mail or dispatch jobs.
+
+PsychologistDocumentController and PsychologistDocuments use the private
+`local` disk at `storage/app/private`. Automatic local storage serving is
+disabled; only policy-authorized controllers serve files. Upload validation
+uses detected PDF/JPEG/PNG MIME, a configured size ceiling and an allowed
+business document type. Random paths are independent of original names.
+Original names are sanitized metadata; MIME and byte size are persisted.
+Responses use explicit Content-Type, nosniff, private/no-store and sandbox
+headers. No public or temporary storage URL is generated.
+
+Failed DB persistence compensates by removing the newly written file. Delete
+locks the document row, deletes the file then the row, and reports storage
+failure rather than claiming success; a missing file can still have its stale
+row removed on retry. Filesystem operations cannot share a MySQL transaction:
+a commit failure after physical deletion may leave a stale row, removable by
+retry. Restoring deleted documents is not part of this stage.
+
+Production and prototype modes share the original views/components. Confirmed
+real actions have CSRF-protected forms; prototype forms and buttons remain
+no-op. There are no real Stage 6/7+ links or resend-invitation action.

@@ -119,10 +119,53 @@ Open `http://localhost:8080/cabinet/login`. Use `psychologist@gruppa.test` /
 `password` to open `/cabinet/` (Мои группы), or `admin@gruppa.test` / `password`
 to open `/cabinet/admin`. The opposite role's home returns 403. Click «Выход»
 to submit the real CSRF-protected POST logout form and return to login.
-The psychologist creation action is disabled and the admin work queue is not
-yet available; real profile/group/admin CRUD belongs to later stages.
+Group creation in the psychologist cabinet remains disabled. Administrators
+can now open «Психологи»; other work-queue sections remain unavailable.
 
 Five failed login attempts per normalized email and client IP are allowed
 within 60 seconds. After that, wait 60 seconds from the first failed attempt.
 A successful login clears the failure counter. Unknown, pending, rejected,
 disabled and deleted accounts all receive the same generic failure message.
+
+
+## Stage 5 psychologist CRUD and private documents
+
+Log in as the development administrator, open «Психологи», create a synthetic
+psychologist, then open the profile to edit it or confirm moderation, tariff,
+access and deletion actions. New accounts are pending/enabled/non-admin and
+have no password. No mail is sent. Use a separate pending record for rejection;
+approved accounts are disabled rather than rejected. Education choices remain
+empty until approved items exist in the database.
+
+Open the profile's documents link to upload PDF, JPEG or PNG, view/download
+through protected endpoints, and confirm deletion. Files are stored under
+`application/storage/app/private/psychologists/{id}/` with random names and
+must never be copied to `public` or `storage/app/public`. Do not expose the
+private directory with a web-server alias or storage link.
+
+`application/.env.example` defines `PSYCHOLOGIST_DOCUMENT_MAX_KB=10240`.
+This is a configurable technical upload ceiling (10 MiB), not a product price
+or business setting. `config/psychologist_documents.php` defines the disk,
+document codes and allowed MIME types. PHP/web-server ceilings must also allow
+the chosen size plus multipart overhead. Local Docker mounts
+`docker/php/uploads.ini` (`upload_max_filesize=10M`, `post_max_size=12M`);
+nginx allows 12 MiB requests. After changing these files run
+`docker compose up -d --no-deps php web` and, for an nginx-only change,
+`docker compose exec -T web nginx -s reload`. Production PHP/web-server limits
+must be configured independently by hosting operations.
+
+Verification commands:
+
+```bash
+docker compose exec -T php php artisan test tests/Feature/PsychologistAdminTest.php tests/Feature/PsychologistDocumentTest.php
+docker compose exec -T php php artisan test
+docker compose exec -T php ./vendor/bin/pint --test
+docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M
+docker compose exec -T php composer check-platform-reqs
+docker compose exec -T php php artisan view:cache
+```
+
+The explicit analysis memory limit avoids exhausting the default PHP CLI
+128 MiB; it does not change production PHP configuration. Tests use only the
+disposable MySQL test database. Browser smoke data must be synthetic, and test
+uploads/browser artifacts must not be committed.

@@ -55,9 +55,29 @@ to local/testing-only `/_foundation`.
 Idempotent local/testing seeding includes approved admin and psychologist
 accounts. No new migrations or dependencies are required.
 
+## Stage 5 administrator psychologist management
+
+Active administrators manage psychologists at `/admin/psychologists` using the
+accepted list, detail, form and document Blade views. Search, lifecycle/tariff
+filters, 20-row pagination, nullable questionnaire fields and active education
+options use real data. Existing inactive education selections are preserved.
+Profile updates cannot write lifecycle/access/tariff/credential fields.
+
+Confirmed approve/reject, enable/disable, tariff and soft-delete actions use
+policies, row locks, the existing transition/audit/session services and database
+transactions. Historical group tariff snapshots remain unchanged. Documents
+are stored privately with random paths, content MIME validation and authorized
+nested-owner view/download/delete endpoints. Uploads have a configurable
+10 MiB technical ceiling. No email or password invitation is sent.
+
+The same Blade files retain all 31 prototype groups / 249 variants. Real admin
+navigation offers Home, Psychologists and Logout. New MySQL tests cover CRUD,
+protected fields, audit, session revocation, IDOR, file failures and constant
+list query counts. No migrations or dependencies were added.
+
 ## Intentionally not implemented
 
-No Stage 5+ CRUD controllers, uploads,
+No psychologist self-service, group/payment/dictionary/settings CRUD,
 public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 

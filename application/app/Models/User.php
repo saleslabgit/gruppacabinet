@@ -8,8 +8,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Support\Carbon;
 
-/** @property UserStatus $status */
+/**
+ * @property UserStatus $status
+ * @property Carbon|null $license_expires_at
+ * @property Carbon|null $personal_data_consent_at
+ * @property-read DictionaryItem|null $educationType
+ */
 class User extends Authenticatable
 {
     use SoftDeletes;
@@ -48,11 +54,13 @@ class User extends Authenticatable
         ];
     }
 
+    /** @return BelongsTo<DictionaryItem, $this> */
     public function educationType(): BelongsTo
     {
         return $this->belongsTo(DictionaryItem::class, 'education_type_id');
     }
 
+    /** @return HasMany<UserDocument, $this> */
     public function documents(): HasMany
     {
         return $this->hasMany(UserDocument::class);

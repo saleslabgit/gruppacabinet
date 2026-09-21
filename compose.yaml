@@ -52,6 +52,7 @@ services:
       start_period: 5m
     volumes:
       - ./application:/var/www/application
+      - ./docker/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
 
   web:
     image: nginx:1.28-alpine
