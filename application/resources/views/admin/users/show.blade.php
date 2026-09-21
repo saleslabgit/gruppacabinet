@@ -8,7 +8,7 @@
 <div class="actions mb-4">
 <x-status domain="user" :value="$user['status']" />
 <x-status domain="access" :value="$user['disabled'] ? 'disabled' : 'enabled'" />
-<span>{{ $user['free'] ? 'Бесплатный тариф' : 'Платный тариф' }}</span>
+<x-tariff :free="$user['free']" suffix="тариф" />
 </div>
 <div class="actions">
 @if($user['status'] === 'pending')
@@ -40,33 +40,43 @@
 </x-panel>
 <x-panel title="Группы психолога">
 @if($prototype)
-<p>1 группа · {{ $group['title'] }}</p>
-<a href="{{ $links['admin-group'] }}">Открыть группу</a>
+<div class="psychologist-group">
+<strong>{{ $group['title'] }}</strong>
+<div class="actions"><x-status :value="$group['status']" /><x-button kind="secondary" icon="arrow-up-right" :href="$links['admin-group']">Открыть группу</x-button></div>
+</div>
 @else
-<p>Групп: {{ $psychologist->groups_count }}</p>
+@forelse($psychologistGroups as $ownedGroup)
+<div class="psychologist-group">
+<strong>{{ $ownedGroup->title }}</strong>
+<div class="actions"><x-status :value="$ownedGroup->status->value" /><x-button kind="secondary" icon="arrow-up-right" :href="route('admin.groups.show', $ownedGroup)">Открыть группу</x-button></div>
+</div>
+@empty
+<p>Групп пока нет.</p>
+@endforelse
+<x-pagination :pages="$psychologistGroups->getUrlRange(max(1, $psychologistGroups->currentPage() - 2), min($psychologistGroups->lastPage(), $psychologistGroups->currentPage() + 2))" :current="$psychologistGroups->currentPage()" />
 @endif
 </x-panel>
 <x-panel class="panel-secondary" title="История действий">
-<p>
-<x-date :value="$user['created_at']" /> · Анкета получена</p>
+<ol class="timeline">
+<li><strong>Анкета получена</strong><p class="meta"><x-date :value="$user['created_at']" /></p></li>
 @if(!$prototype)
 @foreach($history as $entry)
-<p><x-date :value="$entry->created_at" /> ·
-{{ ['user.approved'=>'Анкета принята','user.rejected'=>'Анкета отклонена','user.enabled'=>'Доступ включён','user.disabled'=>'Доступ отключён','user.tariff_changed'=>'Тариф изменён','user.deleted'=>'Психолог удалён'][$entry->action] ?? 'Действие администратора' }} ·
-{{ $entry->actor?->email ?? 'Система' }}
+<li>
+<strong>{{ ['user.approved'=>'Анкета принята','user.rejected'=>'Анкета отклонена','user.enabled'=>'Доступ включён','user.disabled'=>'Доступ отключён','user.tariff_changed'=>'Тариф изменён','user.deleted'=>'Психолог удалён'][$entry->action] ?? 'Действие администратора' }}</strong>
 @if(isset($entry->metadata['old_free']))
-· {{ $entry->metadata['old_free'] ? 'Бесплатный' : 'Платный' }} → {{ $entry->metadata['new_free'] ? 'Бесплатный' : 'Платный' }}
+<p class="actions"><x-tariff :free="$entry->metadata['old_free']" /><span aria-label="изменён на">→</span><x-tariff :free="$entry->metadata['new_free']" /></p>
 @endif
 @if(isset($entry->metadata['old_status']))
-· <x-status domain="user" :value="$entry->metadata['old_status']" /> → <x-status domain="user" :value="$entry->metadata['new_status']" />
+<p class="actions"><x-status domain="user" :value="$entry->metadata['old_status']" /><span aria-label="изменён на">→</span><x-status domain="user" :value="$entry->metadata['new_status']" /></p>
 @endif
-</p>
+<p class="meta"><x-date :value="$entry->created_at" /> · {{ $entry->actor?->email ?? 'Система' }}</p>
+</li>
 @endforeach
 @endif
 @if($prototype && $user['status'] === 'approved')
-<p>
-<x-date :value="$date" /> · Администратор принял анкету</p>
+<li><strong>Администратор принял анкету</strong><p class="meta"><x-date :value="$date" /></p></li>
 @endif
+</ol>
 </x-panel>
 <x-confirmation :url="$prototype ? null : route('admin.psychologists.approve', $user['id'])" id="approve-user" title="Принять анкету?" action="Принять" kind="primary">
 <p class="confirmation-object">{{ $user['name'] }}</p>

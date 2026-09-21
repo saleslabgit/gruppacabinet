@@ -24,7 +24,7 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 @if($row->usage_count)<p>{{ $real ? 'Используется в данных. Можно деактивировать, но нельзя удалить.' : 'Используется в группах. Можно деактивировать, но нельзя удалить.' }}</p>@elseif($real)<p>Не используется.</p>@endif
 </x-cell>
 <x-cell label="Действия"><div class="actions">
-<a href="{{ $real ? route('admin.dictionaries.items.edit', [$dictionary, $row]) : route('prototype.admin-dictionary',['variant'=>'edit']) }}">Редактировать</a>
+<x-button kind="secondary" icon="pencil" :href="$real ? route('admin.dictionaries.items.edit', [$dictionary, $row]) : route('prototype.admin-dictionary',['variant'=>'edit'])">Редактировать</x-button>
 @if(!$row->active)
 @if($real)
 <form method="POST" action="{{ route('admin.dictionaries.items.activate', [$dictionary, $row]) }}">@csrf<x-button type="submit" kind="secondary">Активировать</x-button></form>

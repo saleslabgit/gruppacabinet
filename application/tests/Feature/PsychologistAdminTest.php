@@ -52,6 +52,26 @@ class PsychologistAdminTest extends TestCase
         $this->get('/_prototype/admin-user-form/create')->assertOk()->assertSee('data-prototype-form');
     }
 
+    public function test_detail_lists_only_owned_groups_with_status_links_and_pagination(): void
+    {
+        $person = $this->person();
+        $path = '/admin/psychologists/'.$person->id;
+        $this->get($path)->assertOk()->assertSee('Групп пока нет.');
+        $first = Group::query()->create(['owner_id' => $person->id, 'title' => 'Oldest owned group']);
+        for ($index = 1; $index <= 10; $index++) {
+            Group::query()->create(['owner_id' => $person->id, 'title' => 'Owned group '.$index]);
+        }
+        Group::query()->create(['owner_id' => $this->person()->id, 'title' => 'Other psychologist group']);
+        $deleted = Group::query()->create(['owner_id' => $person->id, 'title' => 'Deleted group']);
+        $deleted->delete();
+
+        $this->get($path)->assertOk()->assertSee('Owned group 10')->assertSee('data-status="group:draft"', false)
+            ->assertDontSee('Oldest owned group')->assertDontSee('Other psychologist group')->assertDontSee('Deleted group')
+            ->assertSee('?page=2', false);
+        $this->get($path.'?page=2')->assertOk()->assertSee('Oldest owned group')
+            ->assertSee(route('admin.groups.show', $first), false)->assertDontSee('Owned group 10');
+    }
+
     public function test_list_search_filters_pagination_exclusions_and_constant_queries(): void
     {
         $target = $this->person(['first_name' => 'UniqueFirst', 'last_name' => 'UniqueLast', 'middle_name' => 'UniqueMiddle', 'email' => 'needle@example.test', 'phone' => '37512345', 'status' => 'pending', 'free' => true]);

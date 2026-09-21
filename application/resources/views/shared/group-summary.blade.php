@@ -3,7 +3,7 @@
 @if($group['disabled'])
 <x-status domain="access" value="disabled" />
 @endif
-<span class="meta">{{ $group['free'] ? 'Бесплатное размещение' : 'Платное размещение' }}</span>
+<x-tariff :free="$group['free']" suffix="размещение" />
 </div>
 @yield('group-actions')
 @if($group['status'] === 'revision')
@@ -62,7 +62,7 @@
 </div>
 </dl>
 
-<p class="meta mt-3">{{ match($group['status']) {
+<p class="group-state-summary mt-3">{{ match($group['status']) {
     'awaiting_payment' => ($realGroups ?? false) ? 'Историческая запись. Действия пока недоступны.' : 'Заполнение анкеты станет доступно после подтверждения оплаты.',
     'draft' => 'Заполните анкету и отправьте группу на модерацию.',
     'moderation' => 'Администратор проверяет группу. Дождитесь решения.',

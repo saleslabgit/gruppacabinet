@@ -7,7 +7,7 @@
 ['Новые анкеты','admin-users','pending',3],['Группы на модерации','admin-groups','moderation',4],['Ожидают ручной публикации','admin-groups','approved',2],['Снять с публикации вручную','admin-groups','expired',1],['Платежи требуют проверки','admin-payments','manual-review',1]] as [$label,$target,$state,$count])
 <x-panel :title="$label" :compact="true" class="panel-compact">
 <p>{{ $empty ? 0 : $count }} · {{ $empty ? 'Нет задач' : 'Требуют внимания' }}</p>
-<a href="{{ route('prototype.'.$target, ['variant'=>$state]) }}">Открыть список</a>
+<x-button kind="secondary" icon="arrow-up-right" :href="route('prototype.'.$target, ['variant'=>$state])">Открыть список</x-button>
 </x-panel>
 @endforeach
 </div>
@@ -22,7 +22,7 @@
 ] as [$label, $description, $route, $icon])
 <x-panel :title="$label" :compact="true">
 <p>{{ $description }}</p>
-<a class="section-link" href="{{ route($route) }}"><x-icon :name="$icon" /> Открыть раздел</a>
+<x-button kind="secondary" :icon="$icon" :href="route($route)">Открыть раздел</x-button>
 </x-panel>
 @endforeach
 </div>

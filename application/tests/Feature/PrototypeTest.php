@@ -136,7 +136,7 @@ class PrototypeTest extends TestCase
         $data['group']['free'] = true;
         $data['group']['has_unrefunded_payment'] = true;
         $html = view('psychologist.groups._actions', $data)->render();
-        $this->assertMatchesRegularExpression('/<button[^>]*disabled[^>]*>(?:<i[^>]*><\/i>\s*)?Удалить<\/button>/', $html);
+        $this->assertMatchesRegularExpression('/<button[^>]*disabled[^>]*>(?:<i[^>]*><\/i>\s*)?<span class="control-label">Удалить<\/span><\/button>/', $html);
     }
 
     public function test_nested_pages_have_contextual_navigation(): void

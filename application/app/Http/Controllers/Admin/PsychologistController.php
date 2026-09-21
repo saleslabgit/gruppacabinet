@@ -73,13 +73,14 @@ class PsychologistController extends Controller
     public function show(User $psychologist): View
     {
         Gate::authorize('manage', $psychologist);
-        $psychologist->load('educationType')->loadCount(['documents', 'groups']);
+        $psychologist->load('educationType')->loadCount('documents');
+        $groups = $psychologist->groups()->orderByDesc('created_at')->orderByDesc('id')->paginate(10);
         $history = AuditLog::query()->where('entity_type', 'user')->where('entity_id', $psychologist->id)
             ->with(['actor' => fn ($query) => $query->withTrashed()])->orderBy('created_at')->orderBy('id')->get();
 
         return view('admin.users.show', array_merge(PsychologistPages::layout('Психолог'), [
             'user' => PsychologistPages::profile($psychologist), 'psychologist' => $psychologist,
-            'history' => $history,
+            'history' => $history, 'psychologistGroups' => $groups,
         ]));
     }
 

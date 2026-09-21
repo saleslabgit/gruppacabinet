@@ -22,8 +22,8 @@ $rows = $real ? $dictionaries : ($empty ? [] : collect(['education_type'=>'Ти�
 <x-cell label="Название">{{ $row->name }}</x-cell>
 <x-cell label="Элементы">{{ $real ? $row->items_count.' · активных: '.$row->active_items_count : '1 · демонстрационный' }}</x-cell>
 <x-cell label="Действия"><div class="actions">
-<a href="{{ $real ? route('admin.dictionaries.items.index', $row) : $links['admin-dictionary'] }}">Открыть</a>
-<a href="{{ $real ? route('admin.dictionaries.edit', $row) : route('prototype.admin-dictionaries',['variant'=>'edit']) }}">Редактировать</a>
+<x-button kind="secondary" icon="arrow-up-right" :href="$real ? route('admin.dictionaries.items.index', $row) : $links['admin-dictionary']">Открыть</x-button>
+<x-button kind="secondary" icon="pencil" :href="$real ? route('admin.dictionaries.edit', $row) : route('prototype.admin-dictionaries',['variant'=>'edit'])">Редактировать</x-button>
 @if($real && !in_array($row->code, $coreCodes, true) && $row->items_count === 0)
 <x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-dictionary-{{ $row->id }}">Удалить</x-button>
 @endif

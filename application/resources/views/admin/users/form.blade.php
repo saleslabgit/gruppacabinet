@@ -11,6 +11,10 @@
 <x-validation-summary :errors="$prototype ? array_intersect_key($errors, array_flip(['last_name', 'first_name', 'middle_name', 'phone', 'email', 'education_type_id', 'other_education', 'modality_program', 'training_center', 'graduation_year', 'training_hours', 'license_number', 'license_expires_at', 'group_leading_experience', 'groups_conducted_count', 'personal_data_consent_version', 'personal_data_consent_at', 'documents_confirmed', 'education_confirmed', 'live_session_ready', 'disabled'])) : $errors" />
 <x-panel title="Анкета">
 <p class="meta mb-4">Email обязателен. Остальные поля могут быть не заполнены.</p>
+@if(!($creating ?? false) && $variant !== 'create')
+<div class="actions mb-3"><x-status domain="user" :value="$user['status']" /><x-status domain="access" :value="$user['disabled'] ? 'disabled' : 'enabled'" /><x-tariff :free="$user['free']" suffix="тариф" /></div>
+<p class="meta mb-4">Статус анкеты, тариф и доступ меняются отдельными действиями в <a href="{{ $prototype ? $links['admin-user'] : route('admin.psychologists.show', $user['id']) }}">карточке психолога</a>.</p>
+@endif
 <h3>Контактные данные</h3>
 <div class="row">
 <div class="col-md-6">
@@ -77,18 +81,13 @@
 <x-checkbox name="education_confirmed" label="Соответствие образования подтверждено" :checked="$prototype ? true : (bool) old('education_confirmed', $user['education_confirmed'])" />
 @if(!$prototype)<input type="hidden" name="live_session_ready" value="0">@endif
 <x-checkbox name="live_session_ready" label="Готовность провести вебинар или эфир" :checked="$prototype ? false : (bool) old('live_session_ready', $user['live_session_ready'])" />
-</x-panel>
-<x-panel title="Тариф и доступ">
-<p>Статус анкеты меняется действиями модерации в карточке психолога.</p>
-<x-status domain="user" :value="$variant === 'create' ? 'pending' : $user['status']" />
+
 @if($prototype || $creating)
 <fieldset class="mt-4">
 <legend class="h3">Тариф</legend>
 <x-radio name="free" value="1" label="Бесплатный" :checked="$prototype || (string) old('free', $user['free']) === '1'" />
 <x-radio name="free" value="0" label="Платный" :checked="!$prototype && !(bool) old('free', $user['free'])" />
 </fieldset>
-@else
-<p>Тариф и доступ меняются отдельными действиями в карточке психолога.</p>
 @endif
 @if($prototype)
 <x-checkbox name="disabled" label="Отключить доступ к кабинету" :checked="$user['disabled']" />

@@ -30,12 +30,12 @@
 @if($realGroups ?? false)
 @if(!empty($filters['quick']))<input type="hidden" name="quick" value="{{ $filters['quick'] }}">@endif
 <x-button icon="search" kind="secondary" type="submit">Применить</x-button>
-<a href="{{ route('admin.groups.index') }}">Сбросить</a>
+<x-button icon="arrow-counterclockwise" kind="ghost" :href="route('admin.groups.index')">Сбросить</x-button>
 @else
 <x-button icon="search" kind="secondary" data-noop>Применить</x-button>
 @endif
 </form>
-<div class="actions small mt-3">
+<div class="actions quick-filters mt-3">
 @foreach(['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные черновики'] as $state=>$label)
 <a href="{{ ($realGroups ?? false) ? route('admin.groups.index',['quick'=>$state]) : route('prototype.admin-groups',['variant'=>$state]) }}">{{ $label }}</a>
 @endforeach
@@ -48,7 +48,6 @@
 @foreach($groups as $group)
 <article class="group-row">
 <div>
-<p class="eyebrow">Внутренний ID {{ $group['id'] }}</p>
 <h2>{{ $group['title'] }}</h2>
 <p>
 <a href="{{ ($realGroups ?? false) ? route('admin.psychologists.show', $group['owner_id']) : $links['admin-user'] }}">{{ ($realGroups ?? false) ? $group['owner']['name'] : $user['name'] }}</a>

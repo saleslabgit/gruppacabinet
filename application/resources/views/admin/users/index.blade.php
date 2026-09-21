@@ -32,9 +32,11 @@
 <p>{{ $user['phone'] }}</p>
 </x-cell>
 <x-cell label="Статус и тариф">
+<div class="status-stack">
 <x-status domain="user" :value="$user['status']" />
-<p>{{ $user['free'] ? 'Бесплатный' : 'Платный' }}</p>
+<x-tariff :free="$user['free']" />
 <x-status domain="access" :value="$user['disabled'] ? 'disabled' : 'enabled'" />
+</div>
 </x-cell>
 <x-cell label="Регистрация">
 <x-date :value="$user['created_at']" />
