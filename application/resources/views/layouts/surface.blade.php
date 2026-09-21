@@ -6,7 +6,7 @@
     <title>@yield('title', $title ?? 'Кабинет психолога') · gruppa</title>
     <link rel="stylesheet" href="{{ asset('vendor/bootstrap/5.3.8/css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('vendor/bootstrap-icons/1.13.1/bootstrap-icons.css') }}">
-    <link rel="stylesheet" href="{{ asset('ui.css') }}">
+    <link rel="stylesheet" href="{{ asset('ui.css').'?v='.filemtime(public_path('ui.css')) }}">
 </head>
 <body class="surface-{{ $surface }}">
 <a href="#main" class="skip-link">К содержимому</a>
@@ -27,6 +27,6 @@
 </div>
 <div class="container pb-4 meta" role="status" aria-live="polite" id="prototype-feedback"></div>
 <script src="{{ asset('vendor/bootstrap/5.3.8/js/bootstrap.bundle.min.js') }}"></script>
-<script src="{{ asset('ui.js') }}"></script>
+<script src="{{ asset('ui.js').'?v='.filemtime(public_path('ui.js')) }}"></script>
 </body>
 </html>

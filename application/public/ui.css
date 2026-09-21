@@ -350,9 +350,9 @@ textarea.form-control{
     max-width:100%
 }
 .status[data-status="access:enabled"]{
-    background:var(--surface);
-    color:var(--muted);
-    font-weight:500
+    background:var(--info-bg);
+    color:var(--info);
+    font-weight:600
 }
 .detail-grid{
     display:grid;
@@ -632,10 +632,11 @@ textarea.form-control{
 
 /* Shared work surfaces and interaction states. */
 .bi{
-    display:inline-block;
+    display:inline-flex;
+    align-items:center;
     flex-shrink:0;
     line-height:1;
-    vertical-align:-.125em
+    vertical-align:middle
 }
 .btn .bi{
     margin:0
@@ -646,9 +647,9 @@ textarea.form-control{
     justify-content:center;
     gap:var(--s2)
 }
-.control-label{
-    position:relative;
-    top:1px
+.bi::before{
+    display:block;
+    vertical-align:0
 }
 .nav-links a,.sidebar a,.status{
     gap:var(--s2)
@@ -1215,8 +1216,13 @@ textarea.form-control{
 .psychologist-group + .psychologist-group{
     border-top:1px solid var(--separator)
 }
-.psychologist-group > strong{
-    flex:1 1 240px
+.psychologist-group-summary{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:var(--s2);
+    flex:1 1 240px;
+    min-width:0
 }
 .admin-navigation{
     align-self:start;
@@ -1318,4 +1324,27 @@ textarea.form-control{
     color:var(--muted);
     cursor:default;
     opacity:.65
+}
+
+/* Keep the upload button flush with the shared control border. */
+.form-control[type="file"]{
+    padding:0;
+    line-height:42px
+}
+.form-control[type="file"]::file-selector-button{
+    margin:0 var(--s3) 0 0;
+    padding:0 var(--s3);
+    line-height:42px;
+    color:var(--ink);
+    background:var(--surface-2);
+    border:0;
+    border-right:1px solid var(--border)
+}
+.form-control[type="file"]:hover:not(:disabled)::file-selector-button{
+    background:var(--border)
+}
+.dictionary-actions{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    justify-items:stretch
 }

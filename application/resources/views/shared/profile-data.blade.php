@@ -14,7 +14,7 @@
 </section>
 @endforeach
 </x-panel>
-<x-panel class="panel-secondary" title="Подтверждения и согласие">
+<x-panel title="Подтверждения и согласие">
 <dl class="detail-grid">
 @foreach(['documents_confirmed'=>'Достоверность документов','education_confirmed'=>'Соответствие образования','live_session_ready'=>'Готовность провести вебинар или эфир'] as $key=>$label)
 <div>

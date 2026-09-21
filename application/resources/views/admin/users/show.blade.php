@@ -41,14 +41,14 @@
 <x-panel title="Группы психолога">
 @if($prototype)
 <div class="psychologist-group">
-<strong>{{ $group['title'] }}</strong>
-<div class="actions"><x-status :value="$group['status']" /><x-button kind="secondary" icon="arrow-up-right" :href="$links['admin-group']">Открыть группу</x-button></div>
+<div class="psychologist-group-summary"><strong>{{ $group['title'] }}</strong><x-status :value="$group['status']" /></div>
+<div class="actions"><x-button kind="secondary" icon="arrow-up-right" :href="$links['admin-group']">Открыть группу</x-button></div>
 </div>
 @else
 @forelse($psychologistGroups as $ownedGroup)
 <div class="psychologist-group">
-<strong>{{ $ownedGroup->title }}</strong>
-<div class="actions"><x-status :value="$ownedGroup->status->value" /><x-button kind="secondary" icon="arrow-up-right" :href="route('admin.groups.show', $ownedGroup)">Открыть группу</x-button></div>
+<div class="psychologist-group-summary"><strong>{{ $ownedGroup->title }}</strong><x-status :value="$ownedGroup->status->value" /></div>
+<div class="actions"><x-button kind="secondary" icon="arrow-up-right" :href="route('admin.groups.show', $ownedGroup)">Открыть группу</x-button></div>
 </div>
 @empty
 <p>Групп пока нет.</p>
