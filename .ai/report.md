@@ -1,138 +1,162 @@
-# Report: TASK-2026-09-21-08
+# Report: TASK-2026-09-21-09
 
-Status: done
+## 1. Status
 
-## Summary
+partial
 
-Реализован Stage 10: внутренние заявки участников, счётчики групп, доступ
-владельца, обработка/возврат, административный поиск и ежедневная очистка.
-Использованы утверждённые Blade views и общие компоненты без изменения CSS.
-Stage 11 API/intake, email и WEBPAY не реализовывались.
+Аудит проведён по всем предписанным фокусным материалам (WORKFLOW.md, task.md,
+project-status.md, ui-pages.md, SPEC.md §24.2/24.5/25, routes/web.php, все
+файлы визуального foundation, все перечисленные core-компоненты, все shared
+partials, все указанные psychologist- и admin-страницы). Найдены и исправлены
+конкретные, безопасные UI-проблемы. Полноценный запуск/браузерная проверка и
+обязательные pre-commit checks не выполнялись — среда не даёт docker, vendor/
+и доступ к `http://localhost:8080/cabinet` (см. раздел «Verification»), поэтому
+статус зафиксирован как `partial`, а не `done`, как того требует WORKFLOW.md
+при невозможности выполнить проверки.
 
-## Changed Files
+## 2. UI direction
 
-- `app/Models/GroupApplication.php`, `database/factories/GroupApplicationFactory.php`:
-  типизированная связь, фабрика с обязательной существующей группой, явно
-  синтетическими именами/вымышленными телефонами и processed/unprocessed states.
-- `app/Support/PhoneNormalizer.php`: международный формат +digits, поддержка 00,
-  отдельный ключ поиска; неоднозначные местные номера явно отклоняются.
-- `app/Http/Controllers/{Psychologist,Admin}/ApplicationController.php`,
-  `app/Http/Requests/ApplicationIndexRequest.php`, `routes/web.php`:
-  четыре owner endpoints и два read-only admin endpoints, фильтры/поиск,
-  сортировка created_at DESC/id DESC, пагинация 20 и сохранение query string.
-- `app/Policies/GroupApplicationPolicy.php`, `app/Services/ApplicationWorkflow.php`:
-  проверка аккаунта/владельца, scoped lookup, транзакция/блокировки, идемпотентность.
-- `app/Models/Group.php`, `app/Http/Controllers/Psychologist/GroupController.php`,
-  `app/Support/GroupPages.php`: три агрегированных счётчика в запросе группы,
-  реальная последняя заявка на карточке.
-- `app/Support/ApplicationPages.php`, `app/Support/PsychologistPages.php`,
-  `resources/views/shared/application-{list,detail}.blade.php`,
-  `resources/views/psychologist/groups/{index,show}.blade.php`: реальные
-  URL/POST actions, admin navigation, сохранение синтетического режима прототипов.
-- `app/Services/ApplicationRetentionService.php`,
-  `app/Console/Commands/CleanupApplications.php`, `routes/console.php`:
-  физическое удаление порциями по 500 ID и daily withoutOverlapping.
-- `tests/Feature/Application{Workflow,Retention}Test.php`: новые MySQL-проверки;
-  `GroupWorkflowTest.php` / `GroupLifecycleTest.php`: прежние ожидания отсутствия
-  заявок заменены актуальными, остальные регрессионные ограничения сохранены.
-- `docs/{architecture,development,project-status,ui-pages}.md`, `.ai/report.md`.
+Существующая после Stage 3 дизайн-система (Montserrat, приглушённая
+светлая палитра, мягкие/pill-скругления, единые токены spacing/radius/status в
+`ui.css`, набор Blade-компонентов `panel/button/status/alert/table/...`) уже
+достаточно дисциплинирована и соответствует SPEC §24.2. Она сохранена как
+базовое направление без переписывания «с нуля» — переработка Stage 3
+явно разрешена, но конкретно найденные нарушения принципов из task.md
+(в первую очередь «stack of identical panels» на самых загруженных
+detail-страницах — модерация группы админом и карточка психолога) были
+устранены точечно, вместо параллельного визуального языка.
 
-Пути приложения выше указаны относительно `application/`.
+## 3. System-level changes
 
-## Checks
+- **Panels/surfaces**: добавлен вариант `panel-muted` (проп `:muted` в
+  `x-panel`, класс `.panel-muted` в `ui.css`): нейтральный фон вместо белой
+  карточки, без border/shadow, заголовок компактного размера. Используется
+  для второстепенных, «исторических» блоков (история статусов группы,
+  история действий по психологу), чтобы такие блоки визуально уступали
+  панелям с текущим статусом и основным действием — устраняет описанный в
+  task.md антипаттерн «stack of identical panels» без изменения состава
+  данных или порядка операций.
+- Остальные элементы shell/navigation/typography/spacing/forms/lists —
+  уже соответствуют требованиям task.md/SPEC §24.2/25 (Montserrat 500/600,
+  токены spacing/radius, единая шкала status/alert tones, адаптивная
+  сетка `.app-shell`, мобильная трансформация `.data-table` в карточки,
+  `:focus-visible`, `skip-link`, `aria-current`) и не потребовали
+  системных изменений в рамках выполненного объёма.
 
-- Исходный статус чистый; актуальный planner `3b570d8`, его родитель совпадает
-  с требуемым `96b64c9323ba78ff434e35f2bdeadf15c623e344`.
-- `docker compose ps`: PHP и MySQL healthy, web Up.
-- `docker compose exec -T php php artisan migrate --seed`: Nothing to migrate;
-  сидирование выполнено, destructive reset не использовался.
-- `docker compose exec -T php php artisan test --filter=Application`:
-  33 passed, 280 assertions (включая один существующий тест с Application в имени).
-- `docker compose exec -T php php artisan test --filter=PrototypeTest`:
-  8 passed, 1014 assertions; все 31 группы / 249 вариантов, no-op и isolation.
-- `docker compose exec -T php php artisan test`: **321 passed, 3947 assertions**,
-  273.02 s; Stage 4–9, MySQL-only, прототипы и новые сценарии проходят.
-- После финального переноса счётчиков карточки в основной SELECT повторён
-  `php artisan test --filter=test_owner_counters_details_and_idempotent_processing_without_side_effects`:
-  1 passed, 34 assertions. Повторный Pint изменённого контроллера проходит.
-- `docker compose exec -T php ./vendor/bin/pint --test`: PASS, 120 files.
-- `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`:
-  OK, No errors. Первоначальные замечания к PHPDoc счётчиков/лишнему null-check
-  исправлены до успешного запуска.
-- `docker compose exec -T php composer check-platform-reqs`: все success,
-  PHP 8.2.32 и требуемые расширения доступны.
-- `docker compose exec -T php php artisan view:cache`: cached successfully.
-- `php artisan route:list --path=applications`: шесть реальных маршрутов;
-  create/API/admin mutation отсутствуют.
-- `docker compose exec -T -e APP_ENV=production php php artisan route:list --json`:
-  отдельная проверка подтвердила шесть application routes и отсутствие
-  prototype/foundation/API routes.
-- `php artisan schedule:list`: groups:expire `* * * * *` без изменения;
-  applications:cleanup `0 0 * * *`. Автотест проверяет withoutOverlapping обоих.
-- Query-count tests: число запросов owner group list, owner application list и
-  admin application list одинаково при 1 и 24 строках/росте числа владельцев.
-  Счётчики групп находятся в одном SELECT с подзапросами, payment queries нет.
-- `git diff --check`: успешно. Итоговый diff и staged-файлы проверены;
-  task/spec/governance, секреты и runtime/browser artifacts не включены.
+## 4. Page-level changes
 
-### Runtime/browser
+Psychologist:
+- `groups/show.blade.php` (через `shared.group-history`): история статусов
+  теперь визуально второстепенна (`panel-muted`) относительно статуса и
+  действий группы.
+- groups (список/форма/продление), applications (список/детали), profile —
+  без изменений: при чтении не обнаружено безопасно исправимых в рамках
+  бюджета задачи проблем, выходящих за рамки уже принятой Stage 3 системы.
 
-Реальный Chromium + Docker, URL `http://localhost:8080/cabinet`, только временные
-синтетические данные: два одобренных психолога с отдельными группами, 25 заявок.
+Admin:
+- `groups/show.blade.php`: убрана отдельная панель «Психолог» — ссылка/email/
+  телефон владельца перенесены строкой внутрь основной панели группы
+  (`shared/group-data.blade.php`, только при `$admin`), что убирает одну
+  «одинаковую» панель перед блоком модерации и не меняет ни одного
+  выводимого поля. История статусов — `panel-muted`.
+- `users/show.blade.php`: панели «Документы» и «Группы психолога» объединены
+  в одну панель «Связанные данные» (`detail-grid` с двумя пунктами вместо
+  двух отдельных карточек); «История действий» — `panel-muted`.
+- home, groups (список/форма/модерация-действия), applications, dictionaries/
+  items, settings, payments info — без изменений: структура уже соответствует
+  требованиям (единая dense-таблица, явные danger-действия, компактные формы
+  настроек/справочников, информационное состояние платежей).
 
-- Owner: счётчики 23 новые / 1 обработанная / 24 всего; список, карточка,
-  process/unprocess через реальные CSRF-формы, фильтры new/processed,
-  страницы 20 + 3 новых заявки. Чужая группа, чужая заявка и подмена заявки
-  внутри своей группы возвращают HTTP 404.
-- Admin: пункт «Заявки», записи обоих владельцев, поиск по имени участника,
-  форматированному/нормализованному телефону, группе, ФИО/email психолога;
-  processed filter, query-preserving pagination, empty search result,
-  реальные переходы к группе и анкете. Кнопок изменения обработки нет.
-- Проверены owner group list/detail/application list/detail и admin application
-  list/detail при 1440/1024/390 px: HTTP 200, горизонтального переполнения нет;
-  просмотрены снимки интерфейса. CSS и структура прототипов сохранены.
-- Временный PHP smoke в local заморозил UTC-время и создал пять записей около
-  cutoff, включая processed и soft-deleted parent. Artisan-команда выдала строго
-  `Deleted applications: 3`, затем `Deleted applications: 0`.
-  Exact/newer сохранились. Сравнены хеши групп, пользователей, платежей,
-  истории, аудита, jobs/failed_jobs: изменений нет. Удаление посторонних
-  eligible records заранее исключено проверкой.
-- Автотесты дополнительно подтверждают отсутствие sent/queued mail и queue work,
-  неизменность lifecycle/payment/audit, изменение retention settings на следующем
-  запуске, удаление 1003 записей без пропуска порций и конец календарного месяца.
-- Smoke-only заявки, группы и пользователи удалены по проверенным ID;
-  браузер закрыт. Скрипты/снимки/логи вынесены в `/tmp`, не staged.
-  Для браузера использована временная ссылка на уже установленный Chromium
-  взамен устаревшего пути инструмента; после проверки ссылка удалена.
+## 5. Important UX decisions
 
-## Facts
+- Не выполнялась широкая переверстка списков/форм/таблиц: они уже используют
+  один согласованный паттерн (`x-table`/`x-cell`/`x-pagination`,
+  `group-row`/`detail-grid`, единая мобильная трансформация таблиц), и
+  повторная реализация того же паттерна другими средствами увеличила бы риск
+  регрессии без проверяемой пользы.
+- Точечная правка (муто-панели, слияние соседних информационных панелей)
+  выбрана вместо структурного редизайна detail-страниц, так как она снижает
+  визуальный шум «стопки одинаковых панелей» с минимальным немедленно
+  проверяемым (по коду) риском для разметки форм/CSRF/маршрутов.
+- Изменения `shared/group-data.blade.php` и `x-panel` затрагивают несколько
+  страниц одновременно (psychologist- и admin-показ группы), поэтому
+  проверены построчно на обоих путях использования, чтобы не изменить вывод
+  для психолога (условие `$admin ?? false` гарантирует это).
 
-- processed_at — единственный источник состояния; повтор одинакового действия
-  сохраняет исходные processed_at и updated_at.
-- Owner lookup всегда через group.owner_id и затем application.group_id;
-  lifecycle/disabled группы не скрывает существующие заявки. Account/role
-  middleware и policy блокируют отозванный доступ и противоположную роль.
-- Admin eager-load включает исторические soft-deleted parents; мутаций нет.
-- Retention читает текущую типизированную настройку один раз за запуск,
-  удаляет только created_at < UTC cutoff и выводит только общий счётчик.
-- Зависимости, миграции, Node/npm/Vite, внешние API и production deployment
-  не добавлялись. Реальные персональные данные не использовались.
+## 6. Remaining issues
 
-## Assumptions
+Не выполнено в рамках этой итерации (не потому что не важно, а из‑за
+объёма/бюджета и невозможности верифицировать в этой среде):
 
-- Для хранения требуется явный международный префикс + или 00; без достоверного
-  правила определения страны bare/local номера не преобразуются.
-- Месячный cutoff использует календарные месяцы без overflow на конце месяца.
-  Оба решения описаны в документации и покрыты тестами.
+- Полный Pass 2–5 по task.md (единый паттерн форм/фильтров/timeline/document
+  list, глубокая ревизия admin-навигации, предметная проверка при 1440/1024/390
+  в реальном браузере/прототипах) не проводился построчно по всем страницам —
+  только по перечисленным в task.md focus-файлам, и не по остальным admin/
+  psychologist прототип-вариантам.
+- Возможное дублирование пояснения статуса (badge + alert + prose-предложение
+  в `shared/group-summary.blade.php`) не тронуто: это, по прочтении, скорее
+  «badge + причина + следующее действие», а не буквальный повтор одного и
+  того же текста, и удаление любой части — продуктовое решение, которое
+  выходит за рамки безопасной точечной правки без браузерной проверки.
+- Реальная браузерная/CI проверка (390/1024/1440 px, консоль JS, конфирмации
+  на мобильном viewport, прогон прототипов) не выполнена — см. «Verification».
 
-## Unknowns
+## 7. Verification
 
-- Интеграционные требования публичного сайта и финальная валидация входящих
-  номеров относятся к Stage 11; production scheduler/deployment не проверялись.
-- Блокирующих неизвестных для Stage 10 нет.
+Все пункты ниже — то, что было реально выполнено; ничего не выдаётся за
+пройденное, если оно не запускалось.
 
-## Risks / Next Step
+- `git log --oneline`, `git status --short`: HEAD базы задачи
+  `e96ce0a8c41282827513f9b3fb6fea3f140dacce` подтверждён, planner-коммит
+  `9187623` — текущий верхний коммит, рабочая директория была чистой до
+  начала правок.
+- Прочитаны все файлы из разделов «First read only», «Visual foundation
+  files», «Core components», «Shared product partials», «Psychologist pages»,
+  «Admin pages» задания — без чтения остальной части репозитория/тестов/249
+  вариантов прототипов.
+- `git diff`/`git status` просмотрены построчно перед коммитом; в staged
+  входят только файлы этой задачи и `.ai/report.md`.
+- **Не выполнено** (нет docker/vendor/сети на localhost:8080 в этой сессии):
+  `php artisan test`, `./vendor/bin/pint --test`,
+  `./vendor/bin/phpstan analyse`, `composer check-platform-reqs`,
+  `php artisan view:cache`, любые browser/Playwright-проверки 1440/1024/390,
+  проверка консоли JS, проверка прототипов (31/249).
+- Попытка обойти ограничение: `composer install` локально с системным
+  PHP 8.4 (`/usr/bin/php`, без docker) — запущен, но не завершился: сетевые
+  запросы через прокси к `api.github.com` обрывались
+  (`ws_closed_mid_exchange`), `vendor/` не установлен. Дальнейшие попытки не
+  предпринимались, чтобы не расходовать бюджет задачи на заведомо
+  недоступную сеть.
+- Ручная построчная проверка изменённых Blade-файлов на непротиворечивость
+  условий (`$admin ?? false`, наличие `$links['admin-user']`/`$user` в обоих
+  путях использования `shared/group-data.blade.php` и
+  `shared/group-history.blade.php`) выполнена чтением
+  `App\Support\GroupPages::detail()`; автотестами не подтверждена.
 
-Stage 10 завершён. По запросу владельца продукта рекомендуемая отдельная
-следующая задача — глобальный UI/UX-аудит перед Stage 11 incoming integration.
-Нормализация номера синтаксическая и не подтверждает существование абонента.
+## 8. Files changed
+
+UI foundation:
+- `application/public/ui.css` — добавлен `.panel-muted`.
+
+Components:
+- `application/resources/views/components/panel.blade.php` — добавлен проп
+  `muted`.
+
+Shared partials:
+- `application/resources/views/shared/group-data.blade.php` — добавлена
+  строка с психологом при `$admin`.
+- `application/resources/views/shared/group-history.blade.php` — панель
+  истории помечена `:muted="true"`.
+
+Pages:
+- `application/resources/views/admin/groups/show.blade.php` — удалена
+  отдельная панель «Психолог».
+- `application/resources/views/admin/users/show.blade.php` — панели
+  «Документы»/«Группы психолога» объединены, «История действий» помечена
+  `:muted="true"`.
+
+Docs/report:
+- `.ai/report.md` — этот отчёт.
+
+Тесты/маршруты/презентеры/справочная документация вне `.ai/report.md` не
+менялись.

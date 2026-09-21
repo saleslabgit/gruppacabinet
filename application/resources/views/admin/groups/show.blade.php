@@ -14,10 +14,6 @@
 </p>
 <p class="small mt-3">Сохраните этот ID у соответствующей группы на основном сайте. Перед активацией убедитесь, что группа опубликована вручную и ID сохранён. Автоматическая проверка связи не выполняется.</p>
 </x-panel>
-<x-panel title="Психолог">
-<a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a>
-<p>{{ $user['email'] }} · {{ $user['phone'] }}</p>
-</x-panel>
 @include('shared.group-data')
 <x-panel title="Модерация и действия">
 <div class="actions">

@@ -1,4 +1,7 @@
 <x-panel :title="$group['title']">
+@if($admin ?? false)
+<p class="meta mb-3">Психолог: <a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a> · {{ $user['email'] }} · {{ $user['phone'] }}</p>
+@endif
 @include('shared.group-summary')
 <hr class="my-4">
 <h3>О группе</h3>

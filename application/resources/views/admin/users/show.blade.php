@@ -32,18 +32,25 @@
 </div>
 </x-panel>
 @include('shared.profile-data')
-<x-panel title="Документы">
-<a href="{{ $prototype ? $links['admin-documents'] : route('admin.psychologists.documents.index', $user['id']) }}">Просмотреть документы ({{ $prototype ? 4 : $psychologist->documents_count }})</a>
-</x-panel>
-<x-panel title="Группы психолога">
+<x-panel title="Связанные данные">
+<dl class="detail-grid">
+<div>
+<dt>Документы</dt>
+<dd><a href="{{ $prototype ? $links['admin-documents'] : route('admin.psychologists.documents.index', $user['id']) }}">Просмотреть ({{ $prototype ? 4 : $psychologist->documents_count }})</a></dd>
+</div>
+<div>
+<dt>Группы</dt>
+<dd>
 @if($prototype)
-<p>1 группа · {{ $group['title'] }}</p>
-<a href="{{ $links['admin-group'] }}">Открыть группу</a>
+{{ $group['title'] }} · <a href="{{ $links['admin-group'] }}">Открыть</a>
 @else
-<p>Групп: {{ $psychologist->groups_count }}</p>
+Групп: {{ $psychologist->groups_count }}
 @endif
+</dd>
+</div>
+</dl>
 </x-panel>
-<x-panel title="История действий">
+<x-panel title="История действий" :muted="true">
 <p>
 <x-date :value="$user['created_at']" /> · Анкета получена</p>
 @if(!$prototype)

@@ -202,6 +202,11 @@ main{
 .panel h3{
     margin-bottom:var(--s3)
 }
+.panel-muted{
+    background:var(--surface);
+    border-color:transparent;
+    box-shadow:none
+}
 .actions{
     display:flex;
     flex-wrap:wrap;
