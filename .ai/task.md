@@ -1,877 +1,796 @@
-# Task: TASK-2026-09-20-05
+# Task: TASK-2026-09-21-01
 
 Status: planned
-Created from: 1b1b22ea61051c013be443cbe0385a0084d6a75d (main)
+Created from: 1070957220c003d825d2bf6a026171b6ee7bc8ec (main)
 
 ## Title
 
-Stage 3 — Build and approve the complete Blade frontend prototype for all MVP pages and UI states
+Stage 3 visual revision — full design audit, typography reset, density cleanup, and form-control refinement
+
+## Execution Assignment
+
+The user explicitly assigned this task to **Claude**.
+
+For this task only, that explicit user instruction overrides the executor label in `WORKFLOW.md`. All other repository workflow, safety, scope, testing, reporting, and review rules remain in force.
+
+Claude must treat `.ai/task.md` as the implementation contract, update `.ai/report.md`, and keep the implementation confined to this visual revision.
 
 ## Goal
 
-Create the complete static frontend version of the future application described by §§23–25 and Stage 3 of `SPEC.md`, using the final production view structure and the final frontend stack:
+Perform a complete visual/design audit of the accepted Stage 3 Blade frontend and revise the shared visual system across the entire prototype catalog.
 
-- Blade;
-- Bootstrap 5.3.8 already committed locally;
-- project-owned CSS;
-- minimal Vanilla JS;
-- locally stored Montserrat.
+The current Stage 3 information architecture, page coverage, product states, and business wording are broadly correct, but the visual execution is **not accepted**.
 
-This stage must finish the page structure, visual language, reusable Blade components, responsive behavior, and all required product states **before** real authentication and CRUD/backend flows are connected.
+Primary user feedback:
 
-The deliverable is not a disposable mockup or a separate UI-kit. It is the real set of Blade views that later stages will reuse by replacing fixture data with real data and wiring real actions.
+- typography hierarchy is poor;
+- the main page heading is often visually too close to subordinate headings/subtitles;
+- typography feels oversized and inconsistent across the application;
+- alerts/notices are excessively large and visually dominate pages;
+- input controls are too rounded;
+- the visual system must be reviewed globally rather than patched page by page.
 
-Do not implement real authentication, CRUD, email, public API, scheduler behavior, or WEBPAY requests.
+This task must improve the entire interface systematically: typography, visual hierarchy, component density, spacing, alerts, forms, cards, navigation, tables, modals, and responsive composition.
+
+The redesign must remain on the existing Blade + Bootstrap + project CSS + minimal Vanilla JS stack and must preserve the product structure and all Stage 3 page/state coverage.
 
 ## Facts
 
-- Stage 1 and Stage 2 are accepted through commit `1b1b22ea61051c013be443cbe0385a0084d6a75d`.
-- The application already runs under the real local base path `/cabinet`.
-- Bootstrap 5.3.8 is already stored locally under `application/public/`.
-- Current frontend files are only the minimal Stage 1 foundation layout/page and small `app.css`/`app.js`.
-- Stage 2 provides the domain enums/models/schema, but Stage 3 prototype rendering must not depend on real database records or unfinished business flows.
-- Prototype routes must render the same Blade view files that later production controllers will render.
-- Prototype routes must be registered only in `local`/`testing`; they must not exist in production.
-- Separate `DESIGN_SYSTEM.md` and `uikit/` deliverables are not used. The approved interface itself is the source of truth after this stage.
-- Visible user-facing copy is Russian unless a technical identifier/provider name requires otherwise.
-- No Node/npm/Vite/frontend build pipeline is allowed.
-
-## Assumptions
-
-- The existing technical foundation page may remain available for Stage 1 diagnostics; do not repurpose the real application root into the Stage 4 authenticated flow yet.
-- Prototype URLs live under `/_prototype`, which locally resolves under the application base path as `/cabinet/_prototype/...`.
-- The simplest implementation is preferred: Blade layouts/components + a small fixture provider/arrays + GET-only development prototype routes.
-- Prototype forms may be non-submitting/no-op at this stage, but their field names, grouping, help/error areas, and action hierarchy should be production-ready.
-- The product has no approved graphic logo asset in the repository. Use a restrained typographic product name/wordmark rather than inventing a new logo.
-- No external icon library is required. Prefer text labels and minimal inline SVG only where an icon materially improves clarity.
-- Exact design tokens that were intentionally left to Stage 3 are fixed by this task below and should remain consistent across pages.
+- Stage 3 implementation is commit `1070957220c003d825d2bf6a026171b6ee7bc8ec`.
+- The prototype catalog contains 31 page groups and 249 direct variants.
+- The actual final product Blade views already exist and must remain the production view source.
+- Prototype routes use synthetic fixtures and are local/testing only.
+- Montserrat 500 and 600 are already stored locally with Cyrillic support.
+- Bootstrap 5.3.8 is local.
+- There is no frontend build pipeline and none may be added.
+- Current `ui.css` uses:
+  - page title 32px;
+  - section title 24px;
+  - subsection 20px;
+  - body 16px;
+  - 32px large panel radius;
+  - 24px normal radius;
+  - pill one-line inputs/selects;
+  - 24px alert padding;
+  - many generously padded panels and large vertical gaps.
+- Current visual hierarchy has been rejected by the product owner.
+- The user explicitly requires **input rounding no greater than 10px**.
+- The current product flows, page catalog, business statuses, safe WEBPAY wording, gruppa.info UUID block, and Stage 3 non-functional prototype boundary must be preserved unless a visual correction requires minor markup restructuring.
 
-## Unknowns
+## Design Direction
 
-- Approved user-facing dictionary item values and actual placement/extension prices are still unavailable. Prototype fixtures may use clearly fictional display examples for visual layout only, but must not change database seed values or documentation as if those examples were product-approved configuration.
-- Real authentication/error behavior and real validation messages are connected in later stages. Stage 3 represents those states visually only.
-- Real WEBPAY provider responses are unavailable and must not be contacted; payment pages use fixture states only.
+The revised interface should feel:
 
-## Scope
+- professional;
+- calm;
+- dense enough for a working cabinet/admin tool;
+- clearly hierarchical;
+- readable rather than oversized;
+- modern without looking like a marketing landing page;
+- visually restrained;
+- consistent between psychologist and admin surfaces.
 
-### 1. Final frontend structure
+Avoid:
 
-Create the real reusable view structure in `application/resources/views/`.
+- oversized headings everywhere;
+- multiple competing large headings on one screen;
+- oversized alert blocks;
+- excessive empty vertical space;
+- over-rounded “bubble” UI;
+- pill-shaped text inputs;
+- cards inside cards without clear hierarchy;
+- every section looking equally important;
+- strong colors used for large surfaces without need;
+- large bold text for routine metadata;
+- decorative styling that hurts information density.
 
-Use a clear hierarchy such as:
+The existing orange brand palette may remain. This task is not a brand-color redesign unless a contrast/accessibility issue requires a small adjustment.
 
-```text
-resources/views/
-  layouts/
-  components/
-  auth/
-  errors/
-  psychologist/
-    groups/
-    applications/
-    profile/
-    payments/
-  admin/
-    users/
-    groups/
-    applications/
-    payments/
-    dictionaries/
-    settings/
-  prototype/
-```
+## Mandatory Typography Reset
 
-The exact names may vary if an equally clear existing Laravel convention is used, but:
+Create a clear, centralized type hierarchy in shared CSS and apply it consistently to all pages.
 
-- production views and prototype views must not be duplicated;
-- `prototype/` should contain only prototype index/catalog or prototype-specific wrappers, not copies of the product pages;
-- later controllers must be able to render the actual `auth/*`, `psychologist/*`, `admin/*`, and `errors/*` views directly.
-
-Do not build a parallel static HTML tree.
+### Font family and weights
 
-### 2. Shared layouts
+Keep local Montserrat.
 
-Implement reusable final layouts for the required surfaces:
+Use:
 
-- authentication/public system surface;
-- psychologist cabinet;
-- admin area;
-- system/error pages where appropriate.
+- 500 for normal body/supporting text;
+- 600 for titles, labels, buttons, important values, and intentional emphasis.
 
-Layouts must:
+Do not add extra font weights unless there is a proven design need and the font asset/license is handled correctly.
 
-- retain the application `/cabinet` base path through Laravel helpers;
-- load Bootstrap locally;
-- load project CSS/JS locally;
-- load local Montserrat;
-- expose page title/header/action areas cleanly;
-- provide responsive navigation;
-- avoid page-specific duplicated chrome.
+### Required hierarchy
 
-#### Psychologist navigation
+Use the following target scale unless a very small technical adjustment is required for rendering:
 
-At minimum:
+#### Desktop
 
-- «Мои группы»;
-- «Мои данные»;
-- «Выход» visual action.
+- page title / H1: **38px**, line-height about **1.15**, weight 600;
+- section title / H2: **24px**, line-height about **1.30**, weight 600;
+- card/subsection title / H3: **18px**, line-height about **1.35**, weight 600;
+- body: **15px**, line-height about **1.55**, weight 500;
+- form labels/buttons: **13–14px**, weight 600;
+- supporting/small text: **13px**, line-height about 1.45;
+- compact metadata: **12px**, line-height about 1.4.
 
-#### Admin navigation
+#### Smartphone
 
-At minimum:
+- page title / H1: **30px**, line-height about 1.18;
+- section title / H2: **21px**;
+- card/subsection title / H3: **17px**;
+- body remains approximately **15px**;
+- supporting/meta text must remain readable and should not collapse below 12px.
 
-- рабочая сводка;
-- психологи;
-- группы;
-- заявки;
-- платежи;
-- справочники;
-- настройки;
-- выход visual action.
+### Hierarchy rules
 
-The logout controls are visual/no-op at this stage; real POST/CSRF behavior belongs to Stage 4.
+- There must be an obvious visual difference between page title, section title, card title, body, and metadata.
+- Do not use H2-sized typography inside routine alerts.
+- Do not use large headings merely to label small cards.
+- Avoid multiple H1-like elements on the same screen.
+- Page supporting copy/subtitles should be visually subordinate to H1 through size, color, spacing, and weight.
+- Long page titles must wrap cleanly without overwhelming the viewport.
+- Dense admin/list pages should use compact but readable typography.
+- Review every page for semantic heading order as well as visual size.
 
-### 3. Local Montserrat assets
+## Mandatory Form-Control Geometry
 
-Add locally served Montserrat with:
+The user explicitly requires input rounding no greater than 10px.
 
-- weight 500 for normal body text;
-- weight 600 for headings, labels, buttons, important values, and emphasis;
-- Cyrillic support;
-- `font-display: swap`;
-- no Google Fonts or other runtime CDN dependency.
+Apply consistently:
 
-Prefer WOFF2 static files for only the two used weights. Include the applicable font license/source attribution in the repository.
+- text inputs: border radius **8–10px**, never pill;
+- email/password/number/date/file inputs: **8–10px**;
+- selects: **8–10px**;
+- textarea: preferably **10px**, maximum **12px** only if visually necessary;
+- input groups or comparable one-line controls: no radius above 10px;
+- validation/error controls use the same geometry rather than a different rounded style.
 
-Do not add extra font weights that the UI does not use.
+Target control height:
 
-If authentic licensed Montserrat assets cannot be obtained/verified, mark the task blocked rather than substituting a different font.
+- ordinary one-line controls: approximately **42–44px**;
+- avoid unnecessarily tall 48px+ fields unless an accessibility issue requires it.
 
-### 4. Fixed Stage 3 visual tokens
+Labels/help/errors should become more compact and clearly associated with controls.
 
-Implement one shared CSS token layer in project CSS. Do not hardcode arbitrary per-page alternatives.
+Checkboxes/radios may keep native/Bootstrap geometry where appropriate.
 
-#### Required colors
+## Alerts / Notices Redesign
 
-Use exactly:
+The current notices are too large.
 
-- accent: `#FF714A`;
-- accent strong / primary button: `#CC4B2A`;
-- main text: `#3C3834`;
-- surface 1: `#F5F4F0`;
-- surface 2: `#EBE9E2`;
-- white: `#FFFFFF`;
-- success: `#2F7D5A`;
-- success surface: `#EAF4EE`;
-- warning: `#9A6817`;
-- warning surface: `#FFF2D9`;
-- danger: `#C84E42`;
-- danger surface: `#FBE9E6`;
-- info: `#4F6F8F`;
-- info surface: `#EAF0F5`.
+Redesign the shared alert/notice component and all alert usage.
 
-Use shared neutral derived tokens:
+Default notice target:
 
-- muted text: `#716B65`;
-- border: `#D8D5CC`;
-- subtle border/background separator: `#E5E2DA`.
+- padding approximately **10–12px vertical / 14–16px horizontal**;
+- radius approximately **10–12px**;
+- body text approximately **13–14px**;
+- compact line-height;
+- routine alerts should not use H2/H3 typography;
+- margin below notice approximately 12–16px, not large card spacing;
+- semantic border/background should remain visible but restrained.
 
-#### Typography
+Rules:
 
-Use a consistent scale:
+- a notice is not a full content panel;
+- warning/success/info/danger states must not dominate the entire page unless the state is genuinely the primary page content;
+- replace large headings inside alerts with a compact `notice-title`/strong label where appropriate;
+- keep long warning text readable without creating huge colored blocks;
+- validation summary should be concise;
+- login/auth errors should not visually exceed the form itself;
+- payment confirmation states may be more prominent, but still use intentional hierarchy rather than oversized generic alerts.
 
-- body: 16px / 1.55, weight 500;
-- small/supporting text: 14px / 1.5;
-- compact meta text: 13px / 1.45 where necessary;
-- page title: 32px / 1.2 desktop, 28px mobile, weight 600;
-- section title: 24px / 1.3, weight 600;
-- card/subsection title: 20px / 1.35, weight 600;
-- control labels/buttons: 14–16px, weight 600.
+Audit every `<x-alert>` usage.
 
-Do not create unrelated type scales on individual pages.
+## Cards / Panels / Surfaces Audit
 
-#### Spacing and sizing
+Reduce the “bubble UI” feeling.
 
-Use a shared spacing scale based on:
+Target geometry:
 
-`4, 8, 12, 16, 24, 32, 48, 64px`.
+- major panel/card radius: approximately **16–18px**;
+- table/list wrapper radius: approximately **12–16px**;
+- compact nested surface radius: approximately **10–12px**;
+- modals: approximately **16–18px**;
+- badges/status chips may remain pill-shaped.
 
-Set shared minimum control/button heights suitable for touch, approximately 44–48px.
+Do not use 24–32px radius as the default for normal work surfaces.
 
-Use Bootstrap breakpoints rather than inventing a parallel responsive system.
+Panel padding targets:
 
-#### Radius
+- desktop: usually **20–24px**;
+- tablet/mobile: usually **16–20px**;
+- compact list/filter panels may use less.
 
-Use shared tokens:
+Rules:
 
-- large cards/panels/modals: 32px;
-- normal cards/table wrappers: 24px;
-- compact containers: 20px;
-- textarea/multiline surfaces: 24px;
-- buttons, badges/chips, and suitable one-line inputs/selects: pill / 9999px.
+- avoid nested white cards where spacing/dividers can communicate hierarchy more clearly;
+- avoid putting every small information group into a large panel;
+- related metadata should be visually grouped without excessive containers;
+- keep important actions easy to scan;
+- auth screens may remain centered but should not look oversized.
 
-#### Shadow
+## Buttons and Action Hierarchy Audit
 
-Use one restrained shared card/popover shadow derived from the main text, e.g. a low-opacity soft shadow; do not add multiple dramatic shadow systems.
-
-### 5. Shared Blade components
-
-Build reusable Blade components for repeated patterns. At minimum cover:
-
-- primary/secondary/ghost/danger buttons;
-- label + required/optional indication;
-- input;
-- textarea;
-- select;
-- checkbox;
-- radio;
-- validation error;
-- validation summary;
-- alert/notice;
-- card/panel;
-- status badge;
-- table/list wrapper;
-- responsive row/list item where needed;
-- pagination;
-- modal/confirmation;
-- dropdown/action menu;
-- empty state;
-- page header;
-- navbar/header;
-- admin sidebar/navigation;
-- date/time display;
-- money display.
-
-Components must support the required normal/hover/focus/disabled/error states.
-
-Use the existing date and money formatting primitives where appropriate rather than inventing separate formatting rules.
-
-Do not create an abstract component library larger than the actual pages require.
-
-### 6. Status presentation
-
-Create a centralized visual mapping for statuses used in prototypes.
-
-#### User statuses
-
-- pending;
-- approved;
-- rejected;
-- separately show enabled/disabled access state and free/paid tariff.
-
-#### Group statuses
-
-- awaiting_payment;
-- draft;
-- moderation;
-- revision;
-- rejected;
-- approved;
-- active;
-- expired;
-- active + expiry warning;
-- expired inside extension window;
-- expired outside extension window;
-- disabled where relevant.
-
-#### Payment statuses
-
-- created;
-- pending;
-- pending requiring manual review;
-- succeeded;
-- failed;
-- cancelled;
-- refunded.
-
-Status must never be communicated by color alone. Every badge/alert includes explicit text and, where useful, an icon/label.
-
-### 7. Development-only prototype routes and fixtures
-
-Add a development prototype catalog at:
-
-`/_prototype`
-
-and dedicated child routes for all pages/variants.
+Review all button styles and action clusters.
 
 Requirements:
 
-- routes are registered only when environment is `local` or `testing`;
-- in `production`, route registration must be absent, not merely hidden by UI;
-- all routes use the real final Blade view files;
-- fixture/mock data comes from simple arrays or a small explicit fixture provider/ViewModel;
-- prototype page rendering must not depend on seeded business data or database queries;
-- prototype GET routes do not perform writes;
-- real production controllers/actions are not created yet.
-
-Every route should have a stable descriptive name and be documented in `docs/ui-pages.md`.
-
-Variant handling may use separate paths or an explicit `variant` parameter/query string, but the index must link directly to each required state.
-
-### 8. Prototype catalog — implement all 31 page groups
-
-Implement every page group and all required variants from §24.3.
-
-#### Common/system
-
-1. Login.
-2. Password setup.
-3. System errors: 403, 404, 419, 429, 500.
-4. Common confirmation/alert states.
-
-#### Psychologist cabinet
-
-5. My groups — empty state.
-6. My groups — populated list with all group visual variants.
-7. Group create/edit — draft, revision, validation/error states.
-8. Psychologist group detail/read-only with status/history/action variants.
-9. Placement payment — awaiting/start state.
-10. WEBPAY return — confirmation pending.
-11. WEBPAY return — confirmed success.
-12. WEBPAY return/payment — unsuccessful/cancel/undetermined state with safe wording.
-13. Extension flow with all six required variants.
-14. Group applications list — normal/empty/filter/processed states.
-15. Application detail.
-16. My profile/data.
-
-#### Admin
-
-17. Admin home/work queue summary.
-18. Psychologists list.
-19. Psychologist detail.
-20. Psychologist create/edit.
-21. Psychologist documents.
-22. Groups admin list.
-23. Group admin detail/moderation.
-24. Group admin create/edit.
-25. Applications admin list.
-26. Application admin detail.
-27. Payments admin list.
-28. Payment admin detail/refund-accounting form.
-29. Dictionaries list.
-30. Dictionary items.
-31. Settings.
-
-No catalog item may be represented only by a placeholder link or “coming later” page.
-
-### 9. Required content and variants
-
-Follow §24.3 field-by-field. In particular:
-
-#### Login
-
-Show:
-
-- product name;
-- email;
-- password;
-- submit button;
-- generic safe authentication error;
-- field validation state;
-- rate-limit/error alert;
-- mobile and desktop behavior.
-
-No real login POST route yet.
-
-#### Password setup
-
-Show:
-
-- user/email identification in a Laravel-compatible flow;
-- password;
-- confirmation;
-- requirements;
-- validation errors;
-- expired/invalid token;
-- success/return-to-login state.
-
-#### Error pages
-
-Create real Blade views appropriate for later Laravel error rendering:
-
-- 403;
-- 404;
-- 419;
-- 429;
-- 500.
-
-They must include a clear safe action back to the cabinet/login surface.
-
-#### My groups list
-
-Every group row/card must communicate:
-
-- title;
-- format;
-- status;
-- creation date;
-- publication date;
-- expiry date;
-- expiry warning;
-- new/processed/all application counters;
-- primary next action;
-- secondary actions.
-
-Show all required status variants from §24.3, including revision comment and rejection reason.
-
-Desktop may use table/structured list; mobile must have a purpose-built readable card/stack representation rather than an unusable squeezed table.
-
-#### Group form
-
-Include all §11 fields with final field names where possible:
-
-- title;
-- description;
-- schedule;
-- format;
-- meeting duration;
-- participant capacity;
-- gender;
-- meeting price.
-
-Include help text, required/optional markers, validation error placement, save/send/cancel hierarchy, draft/revision variants, visible moderator comment/history for revision.
-
-Do not add new business fields absent from the specification.
-
-#### Psychologist group detail
-
-Show:
-
-- all group data read-only;
-- current status + explanation;
-- moderator/rejection messages;
-- status/comment history;
-- publication/expiry dates;
-- application counters/list preview;
-- status-appropriate actions;
-- disabled representation.
-
-#### Payment/WEBPAY visual pages
-
-These are visual fixtures only. No request may leave the application.
-
-The pending confirmation page must use the exact concept:
-
-«Оплата подтверждается WEBPAY»
-
-Browser cancel must not be presented as trusted financial cancellation when server confirmation is unknown.
-
-#### Extension
-
-Show separately:
-
-- free active;
-- free expired;
-- paid active;
-- paid expired;
-- expired after extension window;
-- paid confirmation pending.
-
-The page content must make clear whether admin republication will later be required for an expired group.
-
-#### Applications
-
-Show new/processed/all counters, filters, participant name, phone, date, processed state, toggling visual action, empty state, mobile representation.
-
-#### My data
-
-Read-only only. Show:
-
-- questionnaire/profile data;
-- education/license data;
-- consent information;
-- available document list;
-- no edit controls.
-
-#### Admin dashboard
-
-It is a work queue, not analytics. Show actionable counts/links for:
-
-- pending psychologists;
-- moderation groups;
-- approved waiting for publication;
-- expired waiting for manual unpublish;
-- pending payments needing attention.
-
-Do not invent charts/KPIs/product analytics.
-
-#### Psychologists admin
-
-List/detail/form/document pages must include the fields and states from §§6 and 24.3, including tariff/access/status, document actions, groups summary, confirmation dialogs, pending/approved/rejected/disabled variants.
-
-#### Groups admin
-
-List/detail/form must include required search/filter/sort surfaces and moderation state variants.
-
-Admin group detail must prominently include:
-
-**«Интеграция с gruppa.info»**
-
-and:
-
-**«ID группы для gruppa.info»**
-
-with fixture `public_uuid`, a functional client-side «Скопировать ID» action, and explanatory text.
-
-Moderation UI must visibly support:
-
-- approve;
-- request revision with required comment;
-- reject with required reason;
-- activate after manual publication;
-- edit;
-- delete;
-- paid-rejected manual-refund warning.
-
-Actions remain visual/no-op in this stage.
-
-#### Payments admin
-
-List includes:
-
-- pre-WEBPAY informational empty state;
-- normal records;
-- pending/manual-review state;
-- filters by status/type/psychologist/period.
-
-Detail includes:
-
-- internal payment ID;
-- order number;
-- transaction id;
-- amount/currency;
-- type/status;
-- linked group/user;
-- paid/refunded timestamps;
-- status-check metadata;
-- notification summary without secrets;
-- refund accounting form;
-- explicit warning that «Отметить возврат выполненным в WEBPAY» does not send money or call a refund API.
-
-#### Dictionaries/settings
-
-Build the final management surfaces with validation/confirmation states, but no real CRUD.
-
-Settings must cover:
-
-- placement price;
-- extension price;
-- placement days;
-- warning days;
-- expired extension window;
-- application retention;
-- password setup TTL.
-
-Use clear units in labels/help text.
-
-### 10. Cross-page states
-
-For every page where applicable, create direct prototype variants for:
-
-- normal;
-- empty;
-- validation error;
-- success notice;
-- access/permission error;
-- disabled action;
-- destructive confirmation;
-- long text/long name stress case;
-- pagination;
-- business statuses affecting the page.
-
-Do not create meaningless variants where the state cannot apply; document the applicable coverage in `docs/ui-pages.md`.
-
-### 11. Responsive requirements
-
-All product pages must be usable at:
-
-- desktop — validate around 1440px width;
-- tablet — validate around 1024px width;
-- smartphone — validate around 390px width.
+- primary action must be visually clear but not oversized;
+- secondary/ghost/destructive actions must have predictable hierarchy;
+- routine buttons should be approximately 40–44px high;
+- avoid visually huge pill buttons in dense admin pages;
+- reserve pill geometry primarily for status badges/chips; buttons may use a consistent moderate radius;
+- destructive actions must remain clearly distinct;
+- button text should use the compact control typography scale;
+- mobile actions must wrap/stack cleanly;
+- action groups must not create large vertical blocks.
+
+If button radius is changed, choose one coherent shared value; do not create per-page variants.
+
+## Spacing / Density Audit
+
+Rework spacing globally instead of only changing font sizes.
+
+Use a restrained shared scale centered around:
+
+- 4;
+- 8;
+- 12;
+- 16;
+- 20;
+- 24;
+- 32;
+- 40/48 when a major section break actually needs it.
+
+Review:
+
+- page header → first content section;
+- panel padding;
+- gaps between related fields;
+- gaps between list rows;
+- action groups;
+- table cell padding;
+- modal spacing;
+- form section spacing;
+- auth layout spacing;
+- empty-state spacing.
+
+Target behavior:
+
+- information-dense admin screens should show materially more useful content above the fold;
+- psychologist screens should remain approachable but not spacious to the point of looking unfinished;
+- whitespace should indicate hierarchy, not be applied uniformly everywhere.
+
+## Page Header Audit
+
+The page header component is a priority.
 
 Requirements:
 
-- navigation adapts without hover dependence;
-- forms use available width;
-- buttons remain within viewport;
-- tables either scroll safely or transform to a mobile list/card representation;
-- main actions remain obvious on touch;
-- modals fit the viewport and remain scrollable;
-- long IDs, emails, UUIDs, names, comments, and URLs wrap safely;
-- no horizontal page overflow at smartphone width.
+- H1 must be unmistakably the primary page title;
+- eyebrow/context text must be much smaller and quieter;
+- supporting subtitle/description must not compete with H1;
+- page actions align cleanly and do not visually outweigh the title;
+- long titles wrap correctly;
+- mobile page header stacks naturally;
+- avoid giant vertical gaps below the page header.
 
-Use Bootstrap responsive utilities/grid plus shared project CSS.
+Audit every page using the shared page header.
 
-### 12. Minimal Vanilla JS
+## Navigation Audit
 
-Use JavaScript only where the static prototype benefits materially, such as:
+Review top navigation and admin sidebar.
 
-- admin group UUID copy button;
-- Bootstrap modal/dropdown behavior if needed;
-- simple prototype-only state demonstration controls only when necessary.
+Requirements:
 
-Do not build client-side state management, SPA behavior, AJAX business actions, or framework-like utilities.
+- navigation typography should be compact and work-oriented;
+- active state is clear without oversized pills;
+- wordmark/product title should not compete with page H1;
+- logout remains visible but subordinate;
+- tablet/mobile wrapping should feel intentional, not like desktop navigation accidentally wrapping;
+- admin sidebar density should support quick scanning;
+- preserve all existing navigation destinations and prototype behavior.
 
-Project JavaScript remains directly served from `application/public/` with no build step.
+Do not redesign information architecture in this task.
 
-### 13. Accessibility and interaction baseline
+## Tables / Lists Audit
 
-For all views/components:
+Review every list/table surface.
 
-- semantic headings and landmarks;
-- explicit form labels;
-- visible keyboard focus;
-- sufficient contrast using the approved palette;
-- buttons vs links chosen semantically;
-- disabled controls have both visual and HTML disabled/aria state where applicable;
-- modal markup follows Bootstrap accessibility expectations;
-- form errors are associated with their fields;
-- status is not color-only;
-- touch targets remain usable.
+Requirements:
 
-Do not claim a formal WCAG audit unless one is actually performed.
+- table text should generally be 13–14px;
+- row/cell padding should be compact but usable;
+- headers must be clearly distinct without becoming visually heavy;
+- status/action columns should scan quickly;
+- long names/UUIDs/emails wrap safely;
+- desktop tables should use available width efficiently;
+- mobile card transformation must preserve label/value hierarchy;
+- application/group/payment/user lists should not feel like a stack of oversized marketing cards;
+- pagination should be compact.
 
-### 14. Prototype fixtures must be obviously synthetic
+Where existing “one giant panel per row” layouts are visually inefficient, minor markup restructuring is allowed as long as product information and actions remain unchanged.
 
-Use stable fictional data for layout demonstration.
+## Form Layout Audit
 
-Do not use real user/production information.
+Review all forms:
 
-For sensitive-looking fields:
+- login;
+- password setup;
+- group form;
+- psychologist admin form;
+- documents;
+- moderation comments;
+- refund form;
+- dictionaries;
+- settings.
 
-- use fake phone numbers/names;
-- use fake document filenames;
-- use fake payment/order/transaction identifiers;
-- use fixture UUIDs;
-- never use actual credentials/secrets.
+Requirements:
 
-Payment examples must not be mistaken for real WEBPAY responses.
+- clear section hierarchy;
+- compact labels/help/errors;
+- field groups should be visually related;
+- validation should be noticeable but not visually overwhelming;
+- required/optional markers should be subtle;
+- field width should reflect content type where practical;
+- long forms should be easier to scan;
+- avoid excessive 32px panel padding around every form section;
+- no input/select radius above 10px.
 
-### 15. `docs/ui-pages.md`
+## Modal / Confirmation Audit
 
-Create a complete catalog containing for every page group:
+Review every confirmation dialog.
 
-- final Blade view path;
-- prototype URL(s);
-- variants;
-- key reusable components used;
-- responsive behavior notes;
-- any intentionally non-functional actions in Stage 3.
+Requirements:
 
-This document becomes the page/state index for later implementation/review.
+- compact title and body;
+- modal should not look like a giant card;
+- clear primary/destructive action;
+- cancel remains obvious;
+- content fits comfortably on 390px width;
+- validation within moderation/refund modals remains readable;
+- no giant alert blocks inside modal unless truly necessary.
 
-Do not create a separate design-system document.
+## Status / Badge Audit
 
-### 16. Automated verification
+Keep status badges explicitly labeled.
 
-Add focused tests sufficient to protect the Stage 3 contract.
+Requirements:
 
-At minimum verify:
+- status badges may remain pill-shaped;
+- compact height/padding;
+- 12–13px text;
+- color remains semantic and accessible;
+- multiple statuses on one row should not create visual clutter;
+- tariff/access metadata should not look as visually strong as lifecycle status unless intentionally needed.
 
-- prototype route index is reachable in `testing`;
-- every documented prototype URL returns HTTP 200;
-- prototype routes are not registered under production environment;
-- prototype pages render from the final product Blade views, not duplicate HTML copies;
-- prototype rendering does not require product database fixtures/records;
-- all required page groups are linked from the prototype catalog;
-- key group status variants are present;
-- admin group integration block contains the `public_uuid` label/copy control;
-- local asset URLs preserve `/cabinet`;
-- local Montserrat CSS/assets are referenced and no Google Fonts/CDN is used by the application layouts;
-- existing MySQL Stage 2 tests remain green.
+## Empty States Audit
 
-Do not add browser-test Node dependencies.
+Current empty states must be reviewed for scale.
 
-### 17. Manual visual/runtime verification
+Requirements:
 
-Start the real Docker runtime and review the prototype catalog through:
+- do not use oversized whitespace or headings;
+- empty-state title should generally be H3/subsection scale, not page-title scale;
+- explanation compact;
+- one clear action where applicable;
+- empty states inside panels/lists should not consume most of the viewport without reason.
 
-`http://localhost:8080/cabinet/_prototype/`
+## Payment / WEBPAY Page Audit
 
-Manually inspect every page group and applicable variant at desktop, tablet, and smartphone widths.
+Preserve all safe business wording and existing trusted/untrusted confirmation distinctions.
 
-At minimum explicitly check:
+Visually refine:
 
+- pending confirmation;
+- success;
+- failure/cancel;
+- placement;
+- extension.
+
+Requirements:
+
+- state is immediately understandable;
+- amount/order metadata is secondary;
+- “Оплата подтверждается WEBPAY” remains exact in meaning;
+- browser cancel remains untrusted;
+- do not reintroduce misleading financial language;
+- no oversized generic alert dominating the whole page.
+
+## Full 31-Page Audit
+
+Claude must audit **every one of the 31 page groups**, not only shared CSS.
+
+For each group, visually check at least one primary variant and every materially different visual state.
+
+Audit categories:
+
+1. login;
+2. password setup;
+3. system errors;
+4. common notices;
+5. psychologist groups empty;
+6. psychologist groups list;
+7. group create/edit;
+8. psychologist group detail;
+9. placement payment;
+10. payment confirmation pending;
+11. payment success;
+12. payment unsuccessful/cancel/unknown;
+13. extension;
+14. psychologist applications list;
+15. psychologist application detail;
+16. psychologist profile/documents;
+17. admin work queue;
+18. psychologists list;
+19. psychologist detail;
+20. psychologist create/edit;
+21. psychologist documents;
+22. admin groups list;
+23. admin group moderation/detail;
+24. admin group create/edit;
+25. admin applications list;
+26. admin application detail;
+27. admin payments list;
+28. admin payment detail;
+29. dictionaries;
+30. dictionary items;
+31. settings.
+
+Do not leave a page on an old visual pattern simply because shared CSS did not automatically fix it.
+
+## Full 249-Variant Regression
+
+All existing 249 prototype variants must remain reachable.
+
+Requirements:
+
+- no variant may be deleted merely to simplify the redesign;
+- existing product-state coverage remains;
+- prototype routes remain local/testing only;
+- final product Blade views remain the source;
+- synthetic fixtures remain synthetic;
+- no real backend actions are introduced;
+- no Stage 4 functionality is added.
+
+## Allowed Markup Changes
+
+This task explicitly authorizes material **visual hierarchy and presentation** changes to the accepted Stage 3 UI.
+
+Claude may:
+
+- restructure headings;
+- reduce/merge decorative panels;
+- change shared component markup;
+- change grid arrangements;
+- adjust action placement;
+- change card/list/table presentation;
+- improve semantic heading structure;
+- add small visual helper wrappers/classes where necessary.
+
+Claude must not:
+
+- change the product information architecture;
+- add/remove business functionality;
+- remove required fields/states/actions;
+- change business rules;
+- change navigation destinations;
+- invent a new feature;
+- silently change safe WEBPAY semantics;
+- begin Stage 4 auth/backend integration.
+
+## Preserve Product-Critical UI Content
+
+The following must remain functionally/semantically present:
+
+- all group lifecycle states;
+- revision comment and rejection reason;
+- applications counters/states;
+- psychologist “Мои группы” and “Мои данные” navigation;
+- admin work queue;
+- admin moderation actions;
+- gruppa.info integration block;
+- “ID группы для gruppa.info” label;
+- functional prototype UUID copy action;
+- payment/manual refund warnings;
+- safe WEBPAY return wording;
+- tariff/access/status presentation;
+- dictionary/settings forms;
+- all required validation/empty/permission/confirmation states.
+
+## CSS Architecture
+
+Prefer a coherent revision of the existing `application/public/ui.css`.
+
+Requirements:
+
+- centralize typography/radius/spacing/control tokens;
+- remove obsolete oversized tokens after migration;
+- avoid conflicting duplicate CSS declarations;
+- do not add page-specific arbitrary font sizes/radii when a token solves it;
+- keep Bootstrap as foundation and project CSS after it;
+- do not introduce Tailwind or another CSS framework;
+- no frontend build system.
+
+If `app.css` remains a Stage 1 diagnostic-only file, do not move the Stage 3 system back into it without need.
+
+## JavaScript
+
+Keep JavaScript minimal.
+
+Existing prototype behavior must continue:
+
+- no-op form/action behavior;
+- modal/dropdown behavior;
+- UUID clipboard copy feedback.
+
+Do not implement UI state frameworks, AJAX, or frontend business logic.
+
+## Accessibility Baseline
+
+Maintain or improve:
+
+- semantic heading order;
+- keyboard focus visibility;
+- form labels;
+- error associations;
+- color contrast;
+- non-color status labels;
+- usable touch targets;
+- modal accessibility;
+- mobile readability.
+
+Do not claim a formal WCAG certification unless actually audited.
+
+## Responsive Review
+
+Review at approximately:
+
+- 1440px desktop;
+- 1024px tablet;
+- 390px smartphone.
+
+Typography and density must be responsive intentionally, not merely shrink through Bootstrap.
+
+Explicitly inspect:
+
+- page headers;
 - navigation;
-- tables/mobile transformations;
-- forms/errors/help;
+- long forms;
+- tables/mobile cards;
+- action groups;
+- alerts;
 - modals;
-- long text/UUID wrapping;
-- status colors + text;
-- primary/secondary/destructive action hierarchy;
-- payment wording;
-- admin group integration/copy control;
-- no external font/CDN requests;
-- no horizontal overflow on smartphone.
+- long names/emails/comments;
+- gruppa.info UUID;
+- payment identifiers.
 
-Do not commit screenshots or temporary visual-test artifacts unless they are explicitly needed by the repository (they are not required for this task).
+No page-level horizontal overflow is allowed at 390px.
 
-If actual viewport/runtime visual verification cannot be performed, do not mark the task `done`; report `partial` with the limitation.
+## Design Audit Process
 
-### 18. Documentation updates
+Before changing the UI, Claude must visually inspect the current implementation and record the major observed problems in `.ai/report.md` under a **Design Audit — Before** section.
 
-Update:
+At minimum assess:
 
-- `docs/ui-pages.md` — required new catalog;
-- `docs/architecture.md` — final Stage 3 frontend/view structure and prototype-route boundary;
-- `docs/development.md` — how to browse prototypes locally;
-- `docs/project-status.md` — actual Stage 3 state.
+- type hierarchy;
+- component scale;
+- spacing/density;
+- form geometry;
+- alerts;
+- card/panel overuse;
+- navigation;
+- tables/lists;
+- modal scale;
+- mobile density;
+- visual consistency between psychologist/admin areas.
 
-Update README only if the developer entry point materially changes.
+Then implement systemic fixes.
 
-Documentation must describe implemented state only.
+After implementation, repeat the audit under **Design Audit — After** and explain how each major issue was addressed.
+
+Do not create a permanent standalone `DESIGN_SYSTEM.md` or abstract UI-kit document.
+
+## Documentation
+
+Update only documentation affected by the redesign:
+
+- `docs/ui-pages.md` if responsive/layout/component notes changed materially;
+- `docs/project-status.md` to state that Stage 3 visual revision is awaiting/reached acceptance;
+- `docs/architecture.md` only if shared frontend structure actually changes;
+- `docs/development.md` only if prototype browsing/verification instructions change.
+
+Do not churn documentation just to restate CSS values already visible in code.
+
+## Automated Tests
+
+Preserve all existing prototype/domain tests.
+
+Update/add tests where useful to protect key design constraints, at minimum:
+
+- 31 page groups still exist;
+- 249 variants still render;
+- production still has no prototype routes;
+- no external font/CDN is introduced;
+- local Montserrat still loads;
+- gruppa.info copy control remains;
+- safe WEBPAY wording remains;
+- form controls use the revised shared CSS;
+- CSS no longer applies pill radius to normal `.form-control` / `.form-select`;
+- form-control radius token/value is <=10px;
+- typography tokens expose clearly separated page/section/subsection sizes;
+- alert component no longer relies on oversized generic heading styles.
+
+Do not create brittle snapshot tests of entire HTML pages unless necessary.
+
+## Visual Verification
+
+A full design task cannot be marked done based only on PHPUnit.
+
+Perform actual browser rendering against the Docker runtime.
+
+### Required automated browser regression
+
+Using browser tooling external to the repository if necessary:
+
+- render all 249 variants at 1440px, 1024px, and 390px;
+- verify HTTP success;
+- verify no JS exceptions;
+- verify no external runtime asset requests;
+- verify no page-level horizontal overflow;
+- verify visible interactive controls remain inside the viewport;
+- verify local fonts load.
+
+Do not add Node/npm dependencies to the repository.
+
+### Required manual visual review
+
+Create temporary screenshots/contact sheets outside the repository and visually review all 31 page groups.
+
+Manually inspect especially:
+
+- login;
+- psychologist groups normal;
+- group revision form;
+- group detail;
+- payment pending;
+- paid-expired extension;
+- applications list;
+- psychologist profile;
+- admin home;
+- psychologists list/detail/form;
+- admin groups list;
+- admin moderation;
+- admin payment detail;
+- dictionaries/items;
+- settings;
+- representative errors/modals.
+
+Inspect all three target widths.
+
+Do not commit screenshots, browser profiles, logs, or generated audit artifacts.
+
+If actual browser visual verification cannot be performed, task status must be `partial`, not `done`.
+
+## Required Checks
+
+Run and report exact results:
+
+1. Docker runtime healthy.
+2. `/_prototype` catalog reachable.
+3. All 249 variants render.
+4. Production environment contains no prototype routes.
+5. Local Bootstrap/CSS/JS/Montserrat assets return HTTP 200.
+6. Full MySQL test suite:
+   - `docker compose exec -T php php artisan test`
+7. Pint:
+   - `docker compose exec -T php ./vendor/bin/pint --test`
+8. Larastan:
+   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
+9. Composer platform:
+   - `docker compose exec -T php composer check-platform-reqs`
+10. Blade compilation:
+   - `docker compose exec -T php php artisan view:cache`
+11. Browser regression at 1440/1024/390.
+12. Manual design review of all 31 page groups.
+13. UUID copy interaction.
+14. Modal interaction at desktop/mobile.
+15. Git diff/status/staged inspection.
+16. Confirm no Node artifacts, screenshots, secrets, provider requests, or unrelated files are staged.
+
+## Acceptance Criteria
+
+1. A complete before/after visual audit is recorded in `.ai/report.md`.
+2. The entire interface uses a clear, visibly differentiated typography hierarchy.
+3. H1/page titles are clearly distinct from H2/H3/supporting copy on every page.
+4. Routine alerts/notices are materially smaller and no longer dominate pages.
+5. No normal text input/select has border radius greater than 10px.
+6. Textareas use restrained rounding and no form control is pill-shaped.
+7. Cards/panels/modals use materially less exaggerated radii.
+8. Overall vertical density is improved across admin and psychologist screens.
+9. Forms are easier to scan and validation remains clear without being oversized.
+10. Tables/lists are more compact and information-dense while remaining readable.
+11. Navigation and action hierarchy are clearer and less visually heavy.
+12. Status badges remain explicit and compact.
+13. Empty states are visually proportionate.
+14. Payment/WEBPAY pages preserve safe business semantics while improving hierarchy.
+15. All 31 page groups are visually reviewed and consistent.
+16. All 249 variants remain reachable and render successfully.
+17. Smartphone pages have no page-level horizontal overflow.
+18. Desktop/tablet/mobile layouts remain usable.
+19. Local Montserrat and local Bootstrap remain; no external font/CDN dependency is introduced.
+20. No Stage 4/backend/business behavior is added.
+21. All existing domain/prototype tests remain green after necessary test updates.
+22. PHPUnit, Pint, Larastan, Composer platform checks, and Blade compilation pass.
+23. Browser regression passes at 1440/1024/390.
+24. `.ai/report.md` contains exact verification results and remaining design risks.
+25. Final diff is limited to Stage 3 visual/frontend revision, relevant tests/docs, and `.ai/report.md`.
 
 ## Out Of Scope
 
 Do not implement:
 
-- real login/logout/session authorization;
-- password broker/token behavior;
-- role/access middleware;
-- real psychologist/admin CRUD;
-- real Form Request handling;
-- real policies/actions;
-- document upload/download;
-- real group creation/moderation/activation;
-- actual payment creation or WEBPAY redirects;
-- WEBPAY notify/return/get_transaction;
-- real extension effects;
-- public-site API;
-- participant application ingestion;
-- SMTP/email;
+- real authentication/login/logout;
+- real password setup;
+- real CRUD;
+- Form Request backend handling;
+- policies/access middleware;
+- document transfer;
+- payment creation/confirmation;
+- WEBPAY network requests;
+- public API;
+- email;
 - scheduler/queue business jobs;
-- real dictionary/settings mutations;
-- production deployment.
+- database/domain redesign;
+- new product pages;
+- new navigation sections;
+- tariff-product redesign;
+- unrelated content rewriting.
 
-Do not modify Stage 2 domain rules merely to make fixtures easier.
-
-Do not add Node/npm/Vite, Tailwind, Vue, React, Livewire, Inertia, external font CDN, external Bootstrap CDN, or an icon framework.
-
-Do not change `SPEC.md`, `WORKFLOW.md`, or `AGENTS.md` unless a genuine blocking contradiction is discovered; stop and report instead.
-
-## Constraints
-
-- Follow `WORKFLOW.md` and `AGENTS.md`.
-- Work only on Stage 3.
-- Build real final Blade views, not disposable HTML.
-- Prototype routes are development/testing-only and must be absent in production.
-- Prototype rendering must use fixture/mock data, not unfinished backend flows.
-- Use the approved visual tokens from this task and `SPEC.md`.
-- Use Montserrat 500/600 locally with Cyrillic.
-- Use local Bootstrap 5.3.8 already in the project.
-- No frontend build pipeline.
-- Preserve `/cabinet` base-path compatibility.
-- Keep business actions no-op and clearly prototype-only.
-- Do not invent real prices, credentials, approved dictionary values, or provider responses.
-- Do not alter `.ai/task.md`.
-
-## Acceptance Criteria
-
-1. The final Blade view structure contains all 31 page groups from §24.3.
-2. `/_prototype` provides direct navigation to every required page and applicable variant.
-3. Prototype routes register only in `local`/`testing` and are absent in production.
-4. Prototype routes render the same final Blade files intended for later production controllers; there is no duplicate static HTML version.
-5. Prototype pages render without depending on real business database records.
-6. Montserrat 500/600 with Cyrillic is stored locally, loaded with `font-display: swap`, and no external font CDN is used.
-7. All pages use the fixed shared colors, type scale, spacing, radii, status colors, and components from this task.
-8. Required shared Blade components exist and are reused rather than page-specific duplicated primitives.
-9. Login, password setup, system errors, and common alert/confirmation states are visually complete.
-10. Psychologist pages implement all required group/payment/extension/application/profile states.
-11. Admin pages implement the complete user/group/application/payment/dictionary/settings surfaces.
-12. Every business status that affects UI has an explicit labeled visual representation; statuses are not color-only.
-13. Admin group detail includes the required gruppa.info integration block, fixture `public_uuid`, and functional copy action.
-14. WEBPAY visual pages make no provider requests and use safe wording that does not trust browser return/cancel as financial confirmation.
-15. Forms contain production-oriented field names, labels, help/error areas, and validation variants without real submission behavior.
-16. Pages are usable at desktop/tablet/smartphone widths; smartphone has no page-level horizontal overflow.
-17. Long names/comments/UUIDs/IDs wrap safely.
-18. Navigation and primary actions do not require hover.
-19. `docs/ui-pages.md` accurately catalogs views, URLs, variants, and responsive notes.
-20. Existing Stage 1/2 runtime/domain behavior remains intact.
-21. Automated tests for prototype routing/rendering/assets/environment boundary pass.
-22. Full MySQL test suite passes.
-23. Pint, Larastan, and `composer check-platform-reqs` pass.
-24. Actual Docker/browser-equivalent visual verification is performed across all page groups at desktop/tablet/smartphone sizes and recorded in `.ai/report.md`.
-25. No Stage 4+ real business/auth/integration functionality is introduced.
-26. Final diff contains only Stage 3 frontend prototype work, required local assets/docs/tests, and `.ai/report.md`.
-
-## Checks
-
-Run and report exact results. At minimum:
-
-1. Start/verify Docker and open:
-   - `http://localhost:8080/cabinet/_prototype/`
-2. Confirm every catalog link/variant returns successfully.
-3. Confirm production route registration excludes `/_prototype`.
-4. Verify prototype requests do not require business database records/seed state.
-5. Verify local assets under `/cabinet` return HTTP 200:
-   - Bootstrap;
-   - app CSS/JS;
-   - Montserrat 500/600 font files.
-6. Search rendered HTML/CSS for prohibited runtime dependencies:
-   - Google Fonts;
-   - Bootstrap CDN;
-   - Node/Vite-generated assets;
-   - external icon libraries.
-7. Run automated tests covering prototype route/view/state contract.
-8. Run the full MySQL suite:
-   - `docker compose exec -T php php artisan test`
-9. Run:
-   - `docker compose exec -T php ./vendor/bin/pint --test`
-   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
-   - `docker compose exec -T php composer check-platform-reqs`
-10. Perform visual inspection of every page group/applicable variant at approximately:
-   - 1440px desktop;
-   - 1024px tablet;
-   - 390px smartphone.
-11. Explicitly verify no smartphone horizontal overflow, unreadable squeezed tables, inaccessible modal content, or action controls outside the viewport.
-12. Test the admin group «Скопировать ID» control in the browser.
-13. Inspect `git diff`, `git status --short`, and staged files before commit.
-14. Confirm no real credentials, user data, WEBPAY requests, generated screenshots, temporary assets, Node artifacts, or unrelated files are staged.
+Do not change `SPEC.md`, `WORKFLOW.md`, or `AGENTS.md` for this task.
 
 ## Hard Workflow Gate
 
 Before changing files:
 
-- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/project-status.md`, and this `.ai/task.md`;
+- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/ui-pages.md`, `docs/project-status.md`, and this `.ai/task.md`;
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm this task corresponds to the latest relevant `planner:` commit;
-- do not touch unknown local changes.
+- confirm base commit `1070957220c003d825d2bf6a026171b6ee7bc8ec`;
+- confirm no unknown local changes will be overwritten;
+- inspect current rendered prototypes before editing.
 
 During implementation:
 
-- stay strictly inside Stage 3 frontend prototype scope;
-- do not implement Stage 4 auth/backend actions;
+- make systemic shared-component/CSS changes first;
+- then inspect and fix page-specific visual issues;
+- keep all 31 page groups and 249 variants;
 - do not alter `.ai/task.md`;
-- do not change governance/spec files;
-- do not invent product configuration or provider behavior;
-- do not add a frontend build tool;
-- keep prototype routes absent from production;
-- use the actual final Blade views throughout.
+- do not begin Stage 4;
+- do not introduce a frontend build system;
+- do not change product/business rules.
 
 Before commit:
 
-- run all automated checks;
-- perform and record the required visual viewport review;
-- update `.ai/report.md` with:
-  - pages/components/assets created;
-  - prototype route/catalog coverage;
-  - visual viewport checks;
-  - automated checks;
-  - any unresolved visual/product gaps;
-- inspect complete diff;
+- run every required automated check;
+- perform actual visual review at all three widths;
+- update `.ai/report.md` with Design Audit — Before / After;
+- inspect full diff;
 - inspect staged files;
-- stage only Stage 3 files plus `.ai/report.md`;
-- confirm no secrets, temporary screenshots, build artifacts, or unrelated files are staged.
+- ensure screenshots/browser artifacts remain outside repository;
+- ensure no secrets or unrelated files are staged.
 
 Completion:
 
-- use `Status: done` only if all required prototype pages/states exist and actual desktop/tablet/smartphone visual verification was performed;
+- use `Status: done` only if the design revision and required browser review are complete;
 - otherwise use `partial`, `blocked`, or `failed`;
-- if the gate passes, commit with:
+- if complete, commit with:
 
 ```text
-codex: TASK-2026-09-20-05 build complete Blade prototypes
+claude: TASK-2026-09-21-01 audit and refine Stage 3 design
 ```
 
 - do not create an `accept:` commit.
