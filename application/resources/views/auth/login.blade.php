@@ -1,5 +1,13 @@
 @extends('layouts.public')
 @section('content')
+@php
+    $prototype = $prototype ?? false;
+    $variant = $prototype ? $variant : session('login_state', 'normal');
+    $fieldErrors = $prototype ? $errors : $errors->getMessages();
+    if (!$prototype) {
+        $fieldErrors = array_map(fn ($messages) => $messages[0], $fieldErrors);
+    }
+@endphp
 <div class="auth-wrap">
 <x-panel>
 <p class="eyebrow">Кабинет психолога</p>
@@ -14,11 +22,15 @@
 @if($variant === 'disabled')
 <x-alert tone="warning">Доступ к кабинету ограничен. Обратитесь к администратору.</x-alert>
 @endif
-<form data-prototype-form>
-<x-validation-summary :errors="array_intersect_key($errors, array_flip(['email','password']))" />
-<x-input name="email" label="Email" type="email" autocomplete="username" :required="true" :error="$errors['email'] ?? null" />
-<x-input name="password" label="Пароль" type="password" autocomplete="current-password" :required="true" :error="$errors['password'] ?? null" />
-<x-button class="w-100" data-noop :disabled="$variant === 'disabled'">Войти</x-button>
+@if(!$prototype && session('access_revoked'))
+<x-alert tone="warning">{{ session('access_revoked') }}</x-alert>
+@endif
+<form @if($prototype) data-prototype-form @else method="POST" action="{{ route('login.store') }}" @endif>
+@unless($prototype) @csrf @endunless
+<x-validation-summary :errors="array_intersect_key($fieldErrors, array_flip(['email','password']))" />
+<x-input name="email" label="Email" type="email" autocomplete="username" :value="$prototype ? '' : old('email', '')" :required="true" :error="$fieldErrors['email'] ?? null" />
+<x-input name="password" label="Пароль" type="password" autocomplete="current-password" :required="true" :error="$fieldErrors['password'] ?? null" />
+<x-button class="w-100" :data-noop="$prototype" :type="$prototype ? 'button' : 'submit'" :disabled="$variant === 'disabled'">Войти</x-button>
 </form>
 </x-panel>
 </div>

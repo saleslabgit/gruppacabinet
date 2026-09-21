@@ -40,6 +40,17 @@ class PrototypeTest extends TestCase
         }
     }
 
+    public function test_prototype_login_and_navigation_remain_no_op(): void
+    {
+        $this->get('http://localhost/_prototype/login/normal')->assertOk()
+            ->assertSee('data-prototype-form')->assertDontSee('name="_token"', false)
+            ->assertDontSee('type="submit"', false);
+        foreach (['groups/normal', 'admin-home/normal'] as $page) {
+            $this->get('http://localhost/_prototype/'.$page)->assertOk()
+                ->assertSee('data-noop')->assertDontSee('action="'.route('logout').'"', false);
+        }
+    }
+
     public function test_unknown_variants_are_not_rendered(): void
     {
         $this->get('http://localhost/_prototype/group/not-a-status')->assertNotFound();
@@ -56,6 +67,8 @@ class PrototypeTest extends TestCase
             $app->make(Kernel::class)->bootstrap();
             foreach ($app['router']->getRoutes() as $route) {
                 $this->assertStringNotContainsString('_prototype', $route->uri());
+                $this->assertStringNotContainsString('_foundation', $route->uri());
+                $this->assertNotSame('redirect-check', $route->uri());
             }
         } finally {
             putenv('APP_ENV='.($original[0] ?: 'testing'));

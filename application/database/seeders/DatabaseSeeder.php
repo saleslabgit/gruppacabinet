@@ -16,7 +16,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->seedDictionaries();
         $this->seedSettings();
-        $this->seedDevelopmentAdministrator();
+        $this->seedDevelopmentUsers();
     }
 
     private function seedDictionaries(): void
@@ -48,11 +48,21 @@ class DatabaseSeeder extends Seeder
         }
     }
 
-    private function seedDevelopmentAdministrator(): void
+    private function seedDevelopmentUsers(): void
     {
         if (! app()->environment(['local', 'testing'])) {
             return;
         }
+
+        User::query()->firstOrCreate(
+            ['email' => 'psychologist@gruppa.test'],
+            [
+                'password' => Hash::make('password'),
+                'status' => UserStatus::Approved,
+                'admin' => false,
+                'disabled' => false,
+            ],
+        );
 
         User::query()->firstOrCreate(
             ['email' => 'admin@gruppa.test'],

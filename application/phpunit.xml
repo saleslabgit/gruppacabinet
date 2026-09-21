@@ -18,7 +18,7 @@
         </include>
     </source>
     <php>
-        <env name="APP_ENV" value="testing"/>
+        <server name="APP_ENV" value="testing" force="true"/>
         <env name="APP_KEY" value="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="/>
         <env name="APP_URL" value="http://localhost:8080/cabinet"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>

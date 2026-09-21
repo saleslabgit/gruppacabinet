@@ -26,12 +26,27 @@ class SettingsAndSeedTest extends TestCase
         $this->assertSame(7, Setting::query()->count());
         $this->assertSame(1, User::query()->where('email', 'admin@gruppa.test')->count());
 
+        $this->assertSame(1, User::query()->where('email', 'psychologist@gruppa.test')->count());
+        $psychologist = User::query()->where('email', 'psychologist@gruppa.test')->firstOrFail();
+        $this->assertSame(UserStatus::Approved, $psychologist->status);
+        $this->assertFalse($psychologist->admin);
+        $this->assertFalse($psychologist->disabled);
+        $this->assertTrue($psychologist->accept);
+        $this->assertTrue(Hash::check('password', (string) $psychologist->password));
+
         $admin = User::query()->where('email', 'admin@gruppa.test')->firstOrFail();
         $this->assertSame(UserStatus::Approved, $admin->status);
         $this->assertTrue($admin->admin);
         $this->assertTrue($admin->accept);
         $this->assertFalse($admin->disabled);
         $this->assertTrue(Hash::check('password', (string) $admin->password));
+    }
+
+    public function test_production_seed_does_not_create_known_password_accounts(): void
+    {
+        $this->app->instance('env', 'production');
+        $this->artisan('db:seed', ['--class' => DatabaseSeeder::class, '--force' => true])->assertExitCode(0);
+        $this->assertSame(0, User::query()->count());
     }
 
     public function test_setting_service_returns_typed_values_and_keeps_prices_unconfigured(): void

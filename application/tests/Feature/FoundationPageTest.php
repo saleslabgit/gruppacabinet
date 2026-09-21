@@ -18,7 +18,7 @@ class FoundationPageTest extends TestCase
         config()->set('app.url', 'http://localhost');
         URL::forceRootUrl('http://localhost');
 
-        $response = $this->get('/');
+        $response = $this->get('/_foundation');
 
         $response->assertOk()
             ->assertSee('MySQL connection')

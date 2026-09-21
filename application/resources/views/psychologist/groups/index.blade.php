@@ -1,11 +1,11 @@
 @extends('layouts.psychologist')
 @section('actions')
-<x-button :href="$links['group-form']">Добавить группу</x-button>
+<x-button :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
 @endsection
 @section('content')
 @if($empty)
-<x-empty title="Здесь будут ваши группы" text="Добавьте первую группу, чтобы отправить её на модерацию и получать заявки.">
-<x-button :href="$links['group-form']">Добавить группу</x-button>
+<x-empty title="Здесь будут ваши группы" :text="($canCreateGroup ?? true) ? 'Добавьте первую группу, чтобы отправить её на модерацию и получать заявки.' : 'Создание и просмотр групп пока недоступны.'">
+<x-button :href="$links['group-form'] ?? null" :disabled="!($canCreateGroup ?? true)">Добавить группу</x-button>
 </x-empty>
 @else
 <div class="group-list">

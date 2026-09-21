@@ -85,7 +85,44 @@ nor emits session-dependent CSRF cookies. Other routes keep their middleware.
 The views show final forms, state-dependent actions and confirmations, but
 mutating controls are explicitly no-op. JavaScript only handles prototype
 feedback, suppression of form submission, Bootstrap confirmation examples and
-UUID clipboard copying. There is no authentication, CRUD or provider request.
+UUID clipboard copying. Prototype pages do not authenticate users, perform CRUD or call providers.
 Later controllers must supply actual view data/links and connect validation,
 authorization and actions to these same templates. See `docs/ui-pages.md` for
-all direct variants; page structure is awaiting Stage 3 acceptance.
+all direct variants; page structure is the accepted Stage 3 baseline.
+
+
+## Stage 4 authentication and access
+
+`GET /login` and `POST /login` (`login`, `login.store`) use the shared approved
+login view, a LoginRequest and Laravel's `web` session guard. Email is trimmed
+and lowercased. Authentication requires a non-deleted, approved, enabled user;
+`accept` is never an access condition. All credential/account-state failures
+share one generic message. Five failed attempts per normalized email + IP are
+allowed in 60 seconds; the sixth is rejected before authentication. Success
+clears that key, regenerates the session ID and redirects by role.
+
+Protected routes use `account` (EnsureAccountAccess), which extends Laravel's
+Authenticate middleware: it authenticates with `web`, reloads the account and
+checks its current status/disabled flag, then permits the role check. An old
+session whose user has disappeared or been soft-deleted is also invalidated.
+Revocation logs out, invalidates the current session, regenerates the CSRF token
+and redirects to login with a safe access-revoked message.
+`role:psychologist` requires `admin=false`; `role:admin` requires `admin=true`.
+Cross-role requests return 403. Guests redirect to the named login route.
+
+`GET /` (`psychologist.home`) reuses the groups view in empty mode with creation
+unavailable, without querying groups. `GET /admin` (`admin.home`) reuses the
+admin home with its work queue unavailable. Both use real navigation URLs and
+POST logout forms. There are no links to prototypes or future CRUD actions.
+`POST /logout` uses normal web CSRF middleware, logs out, invalidates the session
+and regenerates its CSRF token. GET logout is not registered.
+
+Sessions use the existing database store. `SessionInvalidator::invalidate(User)`
+rotates the user's remember token and deletes all their session rows from the
+configured session connection/table, leaving other users and guests intact.
+It is available for later administrative actions; those actions are not yet
+implemented. No remember-me option is exposed.
+
+The old database diagnostic is now `/_foundation`; it and `/redirect-check`
+are registered only in local/testing, like the unchanged prototype catalog.
+All real URLs are generated with Laravel helpers and retain `/cabinet`.

@@ -9,12 +9,12 @@
 </head>
 <body>
 <a href="#main" class="skip-link">К содержимому</a>
-<x-navbar :navigation="$surface === 'psychologist' ? ($navigation ?? []) : []" />
+<x-navbar :home-url="$homeUrl ?? null" :logout-url="($prototype ?? false) ? null : ($logoutUrl ?? null)" :navigation="$surface === 'psychologist' ? ($navigation ?? []) : []" />
 @if($prototype ?? false)
 <div class="prototype-note"><div class="container">Прототип · Все данные вымышлены. Действия не сохраняются. <a href="{{ $links['catalog'] }}">Все страницы и состояния</a></div></div>
 @endif
 <div class="container app-shell {{ $surface !== 'admin' ? 'no-sidebar' : '' }}">
-    @if($surface === 'admin') <x-sidebar :navigation="$navigation ?? []" /> @endif
+    @if($surface === 'admin') <x-sidebar :logout-url="($prototype ?? false) ? null : ($logoutUrl ?? null)" :navigation="$navigation ?? []" /> @endif
     <main id="main">
         @if($surface !== 'public')
             <x-page-header :title="$title ?? ''" :eyebrow="$surface === 'admin' ? 'Администрирование' : 'Личный кабинет'">@yield('actions')</x-page-header>

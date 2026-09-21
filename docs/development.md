@@ -17,7 +17,7 @@ docker compose ps
 docker compose logs php web mysql
 ```
 
-Visit `http://localhost:8080/cabinet/`. A successful page shows `OK` for the MySQL connection. The local root URL redirects to this base path.
+Visit `http://localhost:8080/cabinet/login` after migrations and seeding. The local root URL redirects to `/cabinet/`, which requires psychologist authentication. The local/testing database diagnostic is at `http://localhost:8080/cabinet/_foundation`.
 
 The normal local configuration uses the database drivers for sessions and
 queues. The first startup copies these values from `.env.example`:
@@ -69,8 +69,10 @@ The seed creates empty dictionary containers for education type, group format,
 and gender; it does not invent display values. It also creates typed business
 settings. Placement and extension prices are intentionally unconfigured
 (`NULL`). In `local` and `testing` only, the seed creates the development
-administrator `admin@gruppa.test` with password `password`; production seeding
-does not create this known-password account.
+administrator `admin@gruppa.test` and approved psychologist
+`psychologist@gruppa.test`, both with password `password`. Production seeding
+creates neither known-password account. Repeated seeding preserves existing
+accounts and does not duplicate them.
 
 `php artisan test` uses MySQL in Docker with the dedicated `gruppa_cabinet_test` database. The one-shot `mysql-provision` Compose service creates that database and grants the local application user access on every stack start, so both fresh and existing MySQL volumes are supported without touching the `gruppa_cabinet` development database.
 
@@ -93,7 +95,7 @@ The catalog links to all 31 page groups and their direct state variants.
 `docs/ui-pages.md` lists the view files and URLs. These pages work without
 business records or seed data. Examples of prices, dictionaries, names,
 phones, UUIDs, documents and payment identifiers are synthetic and do not
-configure the database. The technical foundation remains at `/cabinet/`.
+configure the database. The technical foundation is at `/cabinet/_foundation`.
 
 Forms, upload/download, logout, moderation and payment buttons do not perform
 business operations. Modal confirmations, navigation and copying the group UUID
@@ -109,3 +111,18 @@ docker compose exec -T php php artisan test tests/Feature/PrototypeTest.php
 Review the catalog at 1440, 1024 and 390 px, including long content and open
 confirmations. Browser tools are external verification tools, not application
 dependencies; screenshots and temporary browser artifacts are not committed.
+
+
+## Real Stage 4 login
+
+Open `http://localhost:8080/cabinet/login`. Use `psychologist@gruppa.test` /
+`password` to open `/cabinet/` (Мои группы), or `admin@gruppa.test` / `password`
+to open `/cabinet/admin`. The opposite role's home returns 403. Click «Выход»
+to submit the real CSRF-protected POST logout form and return to login.
+The psychologist creation action is disabled and the admin work queue is not
+yet available; real profile/group/admin CRUD belongs to later stages.
+
+Five failed login attempts per normalized email and client IP are allowed
+within 60 seconds. After that, wait 60 seconds from the first failed attempt.
+A successful login clears the failure counter. Unknown, pending, rejected,
+disabled and deleted accounts all receive the same generic failure message.

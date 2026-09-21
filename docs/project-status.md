@@ -35,13 +35,29 @@ Development-only GET routes render synthetic data without business database
 records. UUID copying is functional; business actions remain no-op. Payment
 wording distinguishes an unknown browser-return outcome from trusted success.
 
-The page and state index is `docs/ui-pages.md`. The visual revision is awaiting
-Stage 3 acceptance; exact automated and browser verification results are in
-`.ai/report.md`. Stages 4 and later are not started.
+The page and state index is `docs/ui-pages.md`. The visual revision is accepted as the baseline for backend integration.
+
+## Stage 4 authentication and access
+
+Session login/logout now use the approved Blade UI and database sessions.
+Login has generic failures, email+IP throttling and session ID regeneration.
+Protected psychologist/admin homes check current account eligibility on each
+request and enforce opposite role boundaries. Disabled, non-approved and
+soft-deleted accounts lose access; SessionInvalidator supports later bulk
+session revocation and rotates remember tokens.
+
+The psychologist home renders the existing empty groups view with creation
+unavailable. The admin home renders an unavailable-work-queue state without
+fixture counts. Real navigation has CSRF-protected POST logout. The 31 groups /
+249 prototype variants remain local/testing only. The old DB diagnostic moved
+to local/testing-only `/_foundation`.
+
+Idempotent local/testing seeding includes approved admin and psychologist
+accounts. No new migrations or dependencies are required.
 
 ## Intentionally not implemented
 
-No authentication flow, CRUD controllers, uploads,
+No Stage 5+ CRUD controllers, uploads,
 public API, mail/jobs/scheduler behavior, group lifecycle automation, or WEBPAY
 requests, signatures, credentials, callbacks, and payment effects are present.
 

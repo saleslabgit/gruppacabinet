@@ -1,5 +1,6 @@
 @extends('layouts.admin')
 @section('content')
+@if($workQueueAvailable ?? true)
 <p class="page-description mb-3">Задачи, которые требуют вашего внимания.</p>
 <div class="catalog-grid work-queue">
 @foreach([
@@ -10,4 +11,7 @@
 </x-panel>
 @endforeach
 </div>
+@else
+<x-empty title="Добро пожаловать" text="Доступ к кабинету открыт. Разделы управления пока недоступны." />
+@endif
 @endsection
