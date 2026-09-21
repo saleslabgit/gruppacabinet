@@ -1,796 +1,632 @@
-# Task: TASK-2026-09-21-01
+# Task: TASK-2026-09-21-02
 
 Status: planned
-Created from: 1070957220c003d825d2bf6a026171b6ee7bc8ec (main)
+Created from: 04395636b1eb34d9754b5b3eae2198f77120f913 (main)
 
 ## Title
 
-Stage 3 visual revision — full design audit, typography reset, density cleanup, and form-control refinement
-
-## Execution Assignment
-
-The user explicitly assigned this task to **Claude**.
-
-For this task only, that explicit user instruction overrides the executor label in `WORKFLOW.md`. All other repository workflow, safety, scope, testing, reporting, and review rules remain in force.
-
-Claude must treat `.ai/task.md` as the implementation contract, update `.ai/report.md`, and keep the implementation confined to this visual revision.
+Stage 4 — Implement session authentication, role boundaries, access revocation, and authenticated application entry points
 
 ## Goal
 
-Perform a complete visual/design audit of the accepted Stage 3 Blade frontend and revise the shared visual system across the entire prototype catalog.
+Implement the complete Stage 4 authentication/access foundation from `SPEC.md` on top of the accepted Stage 2 domain model and accepted Stage 3 Blade interface.
 
-The current Stage 3 information architecture, page coverage, product states, and business wording are broadly correct, but the visual execution is **not accepted**.
+This task must provide:
 
-Primary user feedback:
+- real Laravel session authentication on guard `web`;
+- the real login/logout flow using the approved Stage 3 login/navigation UI;
+- protected psychologist and administrator entry points;
+- per-request account-state validation;
+- role boundaries;
+- database-session invalidation support for later administrative actions;
+- login throttling;
+- local/testing credentials for one approved psychologist in addition to the existing development administrator.
 
-- typography hierarchy is poor;
-- the main page heading is often visually too close to subordinate headings/subtitles;
-- typography feels oversized and inconsistent across the application;
-- alerts/notices are excessively large and visually dominate pages;
-- input controls are too rounded;
-- the visual system must be reviewed globally rather than patched page by page.
-
-This task must improve the entire interface systematically: typography, visual hierarchy, component density, spacing, alerts, forms, cards, navigation, tables, modals, and responsive composition.
-
-The redesign must remain on the existing Blade + Bootstrap + project CSS + minimal Vanilla JS stack and must preserve the product structure and all Stage 3 page/state coverage.
+This is an authentication/access milestone only. Do not start psychologist/admin CRUD, group CRUD, password invitation email, public API, or WEBPAY work.
 
 ## Facts
 
-- Stage 3 implementation is commit `1070957220c003d825d2bf6a026171b6ee7bc8ec`.
-- The prototype catalog contains 31 page groups and 249 direct variants.
-- The actual final product Blade views already exist and must remain the production view source.
-- Prototype routes use synthetic fixtures and are local/testing only.
-- Montserrat 500 and 600 are already stored locally with Cyrillic support.
-- Bootstrap 5.3.8 is local.
-- There is no frontend build pipeline and none may be added.
-- Current `ui.css` uses:
-  - page title 32px;
-  - section title 24px;
-  - subsection 20px;
-  - body 16px;
-  - 32px large panel radius;
-  - 24px normal radius;
-  - pill one-line inputs/selects;
-  - 24px alert padding;
-  - many generously padded panels and large vertical gaps.
-- Current visual hierarchy has been rejected by the product owner.
-- The user explicitly requires **input rounding no greater than 10px**.
-- The current product flows, page catalog, business statuses, safe WEBPAY wording, gruppa.info UUID block, and Stage 3 non-functional prototype boundary must be preserved unless a visual correction requires minor markup restructuring.
+- Stage 2 domain foundation is complete.
+- Stage 3 frontend and its visual revision are accepted by the product owner as the baseline for backend integration.
+- Current HEAD is `04395636b1eb34d9754b5b3eae2198f77120f913`.
+- The application uses Laravel 12 / PHP 8.2 / MySQL.
+- The default auth guard is already the Laravel session guard `web` backed by `App\Models\User`.
+- `gp_users` contains:
+  - nullable password;
+  - `remember_token`;
+  - lifecycle `status`;
+  - independent `disabled`;
+  - independent `admin`;
+  - soft delete.
+- User status values are `pending`, `approved`, and `rejected`.
+- Only an active, non-deleted, `approved`, `disabled=false` user may access protected application routes.
+- `admin=true` identifies administrators; approved non-admin users are psychologists.
+- Database session storage and the `sessions` table already exist.
+- Normal local configuration already uses `SESSION_DRIVER=database`.
+- Stage 3 already contains the final login, psychologist, and admin layouts/views. Backend integration must reuse them rather than creating alternative visual implementations.
+- Prototype routes must remain local/testing only and continue to work with synthetic data.
+- The current application root `/` still serves the old Stage 1 diagnostic page and must now become the protected psychologist application root.
+- Production base URL remains `https://gruppa.info/cabinet/`; local base URL remains under `/cabinet/`.
 
-## Design Direction
+## Product Behavior
 
-The revised interface should feel:
+### Login
 
-- professional;
-- calm;
-- dense enough for a working cabinet/admin tool;
-- clearly hierarchical;
-- readable rather than oversized;
-- modern without looking like a marketing landing page;
-- visually restrained;
-- consistent between psychologist and admin surfaces.
+Real login page:
 
-Avoid:
+`GET /login`
 
-- oversized headings everywhere;
-- multiple competing large headings on one screen;
-- oversized alert blocks;
-- excessive empty vertical space;
-- over-rounded “bubble” UI;
-- pill-shaped text inputs;
-- cards inside cards without clear hierarchy;
-- every section looking equally important;
-- strong colors used for large surfaces without need;
-- large bold text for routine metadata;
-- decorative styling that hurts information density.
+Real login submission:
 
-The existing orange brand palette may remain. This task is not a brand-color redesign unless a contrast/accessibility issue requires a small adjustment.
+`POST /login`
 
-## Mandatory Typography Reset
+Use the existing `resources/views/auth/login.blade.php`.
 
-Create a clear, centralized type hierarchy in shared CSS and apply it consistently to all pages.
+The production login form must:
 
-### Font family and weights
+- submit to the Laravel login endpoint;
+- include CSRF protection;
+- use server-side validation;
+- use the existing approved field/error/alert areas;
+- not create a parallel login template.
 
-Keep local Montserrat.
+Authentication identifier is email.
 
-Use:
+A successful login redirects:
 
-- 500 for normal body/supporting text;
-- 600 for titles, labels, buttons, important values, and intentional emphasis.
+- administrator → `/admin`;
+- psychologist → `/`.
 
-Do not add extra font weights unless there is a proven design need and the font asset/license is handled correctly.
+Do not add a “remember me” option in this stage because it is not part of the approved UI/spec.
 
-### Required hierarchy
+### Generic login failure
 
-Use the following target scale unless a very small technical adjustment is required for rendering:
+Pre-authentication failures must not disclose whether an email exists or whether an account is pending/rejected/disabled.
 
-#### Desktop
+Use the same generic authentication failure message for:
 
-- page title / H1: **38px**, line-height about **1.15**, weight 600;
-- section title / H2: **24px**, line-height about **1.30**, weight 600;
-- card/subsection title / H3: **18px**, line-height about **1.35**, weight 600;
-- body: **15px**, line-height about **1.55**, weight 500;
-- form labels/buttons: **13–14px**, weight 600;
-- supporting/small text: **13px**, line-height about 1.45;
-- compact metadata: **12px**, line-height about 1.4.
+- nonexistent email;
+- wrong password;
+- `pending`;
+- `rejected`;
+- `disabled=true`;
+- soft-deleted account.
 
-#### Smartphone
+The existing prototype-specific disabled/error variants may remain for visual catalog coverage, but the real login flow must not reveal account state before authentication.
 
-- page title / H1: **30px**, line-height about 1.18;
-- section title / H2: **21px**;
-- card/subsection title / H3: **17px**;
-- body remains approximately **15px**;
-- supporting/meta text must remain readable and should not collapse below 12px.
+### Psychologist entry point
 
-### Hierarchy rules
+The real application route:
 
-- There must be an obvious visual difference between page title, section title, card title, body, and metadata.
-- Do not use H2-sized typography inside routine alerts.
-- Do not use large headings merely to label small cards.
-- Avoid multiple H1-like elements on the same screen.
-- Page supporting copy/subtitles should be visually subordinate to H1 through size, color, spacing, and weight.
-- Long page titles must wrap cleanly without overwhelming the viewport.
-- Dense admin/list pages should use compact but readable typography.
-- Review every page for semantic heading order as well as visual size.
+`GET /`
 
-## Mandatory Form-Control Geometry
+is psychologist-only and corresponds to:
 
-The user explicitly requires input rounding no greater than 10px.
+`https://gruppa.info/cabinet/`
 
-Apply consistently:
+in production.
 
-- text inputs: border radius **8–10px**, never pill;
-- email/password/number/date/file inputs: **8–10px**;
-- selects: **8–10px**;
-- textarea: preferably **10px**, maximum **12px** only if visually necessary;
-- input groups or comparable one-line controls: no radius above 10px;
-- validation/error controls use the same geometry rather than a different rounded style.
+At Stage 4 it must reuse the approved psychologist layout/view and provide a truthful authenticated shell without inventing later functionality.
 
-Target control height:
+Use the approved “Мои группы” view as the psychologist landing surface.
 
-- ordinary one-line controls: approximately **42–44px**;
-- avoid unnecessarily tall 48px+ fields unless an accessibility issue requires it.
+Because group CRUD is Stage 7:
 
-Labels/help/errors should become more compact and clearly associated with controls.
+- do not query or implement the real group workflow yet;
+- render the approved empty-state form of the page;
+- do not present an active “Добавить группу” action that points to an unimplemented or prototype-only route;
+- adapt the existing view through explicit availability data/props rather than creating a new alternative page.
 
-Checkboxes/radios may keep native/Bootstrap geometry where appropriate.
+The Stage 6 task will connect real psychologist profile/documents; Stage 7 will connect real groups/create actions.
 
-## Alerts / Notices Redesign
+### Administrator entry point
 
-The current notices are too large.
+Real admin route:
 
-Redesign the shared alert/notice component and all alert usage.
+`GET /admin`
 
-Default notice target:
+is administrator-only and corresponds to:
 
-- padding approximately **10–12px vertical / 14–16px horizontal**;
-- radius approximately **10–12px**;
-- body text approximately **13–14px**;
-- compact line-height;
-- routine alerts should not use H2/H3 typography;
-- margin below notice approximately 12–16px, not large card spacing;
-- semantic border/background should remain visible but restrained.
+`https://gruppa.info/cabinet/admin`
 
-Rules:
+in production.
 
-- a notice is not a full content panel;
-- warning/success/info/danger states must not dominate the entire page unless the state is genuinely the primary page content;
-- replace large headings inside alerts with a compact `notice-title`/strong label where appropriate;
-- keep long warning text readable without creating huge colored blocks;
-- validation summary should be concise;
-- login/auth errors should not visually exceed the form itself;
-- payment confirmation states may be more prominent, but still use intentional hierarchy rather than oversized generic alerts.
+Reuse the approved admin layout and `admin.home` view.
 
-Audit every `<x-alert>` usage.
+Do not fabricate business work-queue counts or link production users to prototype routes.
 
-## Cards / Panels / Surfaces Audit
+If the actual Stage 5+ work-queue data is not yet implemented, adapt the existing admin home view to render a truthful Stage 4 authenticated-shell state using injected data/state, while preserving the prototype catalog’s synthetic work-queue version.
 
-Reduce the “bubble UI” feeling.
+Do not create a parallel admin dashboard.
 
-Target geometry:
+### Logout
 
-- major panel/card radius: approximately **16–18px**;
-- table/list wrapper radius: approximately **12–16px**;
-- compact nested surface radius: approximately **10–12px**;
-- modals: approximately **16–18px**;
-- badges/status chips may remain pill-shaped.
+Real logout:
 
-Do not use 24–32px radius as the default for normal work surfaces.
-
-Panel padding targets:
-
-- desktop: usually **20–24px**;
-- tablet/mobile: usually **16–20px**;
-- compact list/filter panels may use less.
-
-Rules:
-
-- avoid nested white cards where spacing/dividers can communicate hierarchy more clearly;
-- avoid putting every small information group into a large panel;
-- related metadata should be visually grouped without excessive containers;
-- keep important actions easy to scan;
-- auth screens may remain centered but should not look oversized.
-
-## Buttons and Action Hierarchy Audit
-
-Review all button styles and action clusters.
+`POST /logout`
 
 Requirements:
 
-- primary action must be visually clear but not oversized;
-- secondary/ghost/destructive actions must have predictable hierarchy;
-- routine buttons should be approximately 40–44px high;
-- avoid visually huge pill buttons in dense admin pages;
-- reserve pill geometry primarily for status badges/chips; buttons may use a consistent moderate radius;
-- destructive actions must remain clearly distinct;
-- button text should use the compact control typography scale;
-- mobile actions must wrap/stack cleanly;
-- action groups must not create large vertical blocks.
+- POST only;
+- normal Laravel CSRF protection;
+- call Laravel logout;
+- invalidate the current session;
+- regenerate the CSRF token;
+- redirect to the login page;
+- `GET /logout` must not perform logout.
 
-If button radius is changed, choose one coherent shared value; do not create per-page variants.
+Use the existing approved navigation components.
 
-## Spacing / Density Audit
+Prototype navigation must remain no-op.
 
-Rework spacing globally instead of only changing font sizes.
+Real authenticated navigation must render a real POST logout form/control without duplicating the navigation layout.
 
-Use a restrained shared scale centered around:
+## Scope
 
-- 4;
-- 8;
-- 12;
-- 16;
-- 20;
-- 24;
-- 32;
-- 40/48 when a major section break actually needs it.
+### 1. Authentication controller/request foundation
 
-Review:
+Implement a small conventional Laravel authentication layer.
 
-- page header → first content section;
-- panel padding;
-- gaps between related fields;
-- gaps between list rows;
-- action groups;
-- table cell padding;
-- modal spacing;
-- form section spacing;
-- auth layout spacing;
-- empty-state spacing.
+Prefer:
 
-Target behavior:
+- one session/auth controller;
+- one dedicated login Form Request or equivalent explicit request class;
+- normal Laravel `Auth` / guard APIs.
 
-- information-dense admin screens should show materially more useful content above the fold;
-- psychologist screens should remain approachable but not spacious to the point of looking unfinished;
-- whitespace should indicate hierarchy, not be applied uniformly everywhere.
+Do not install Breeze, Jetstream, Fortify, or another auth package merely for this task.
 
-## Page Header Audit
+The login request must validate at least:
 
-The page header component is a priority.
+- email;
+- password.
+
+Do not add registration fields.
+
+### 2. Login throttle
+
+Add an explicit login rate limit.
+
+Use a simple deterministic policy:
+
+- maximum 5 failed attempts per 60 seconds;
+- key by normalized email + client IP;
+- clear the throttle counter after successful authentication.
+
+When throttled:
+
+- do not attempt authentication;
+- do not create a session;
+- render/redirect to the approved login UI with the rate-limit state/message;
+- do not disclose whether the account exists.
+
+Cover the threshold and reset behavior with tests.
+
+### 3. Credential/access check
+
+A successful credential check requires all of:
+
+- active non-soft-deleted User;
+- valid password;
+- `status=approved`;
+- `disabled=false`.
+
+The authentication response must not distinguish which precondition failed.
+
+Do not use compatibility `accept` as an auth condition.
+
+Use `status` as the lifecycle truth.
+
+### 4. Session security
+
+On successful login:
+
+- regenerate the session ID;
+- clear the login throttle key;
+- establish the authenticated guard session.
+
+On logout:
+
+- logout;
+- invalidate session;
+- regenerate CSRF token.
+
+Add tests proving session fixation protection / session ID regeneration.
+
+### 5. Per-request account access middleware
+
+Add reusable middleware that runs on every protected psychologist/admin request after authentication.
+
+It must verify the authenticated User is still:
+
+- present/active;
+- `status=approved`;
+- `disabled=false`.
+
+If an already-authenticated account becomes ineligible:
+
+- revoke access immediately on the next protected request;
+- terminate the current authenticated session;
+- redirect to login with a safe message that access is no longer available;
+- do not continue rendering protected content.
+
+A pre-auth login failure remains generic; the revoked-session message is allowed because the user had already authenticated previously.
+
+### 6. Role middleware / boundaries
+
+Add explicit role boundaries.
+
+Psychologist routes:
+
+- require authenticated active approved user;
+- require `admin=false`.
+
+Admin routes:
+
+- require authenticated active approved user;
+- require `admin=true`.
+
+Expected behavior:
+
+- psychologist requesting `/admin` → HTTP 403;
+- administrator requesting psychologist-only `/` → HTTP 403;
+- guest requesting either protected route → redirect to login.
+
+Do not introduce a general roles/permissions package.
+
+### 7. Reusable SessionInvalidator
+
+Implement a small reusable service for immediate access revocation in later admin tasks.
+
+It must accept a user and:
+
+- delete all database session records belonging to that user;
+- rotate/invalidate the user’s `remember_token` so existing recaller credentials cannot remain valid;
+- not delete sessions for other users.
+
+This service will be reused by Stage 5 when disabling/rejecting/deleting psychologists.
+
+Do not wire Stage 5 admin actions in this task.
+
+Add direct MySQL-backed tests proving:
+
+- all sessions for target user are removed;
+- sessions for another user remain;
+- remember token changes/is invalidated.
+
+### 8. Access-state revocation tests
+
+Cover existing authenticated sessions when the user changes state.
+
+At minimum test:
+
+- `approved → disabled=true`: next protected request loses access;
+- approved account changed to `rejected` directly for test setup: next protected request loses access;
+- soft-deleted account: next protected request does not receive protected content;
+- normal approved account continues to work.
+
+Do not add an invalid `approved → rejected` domain transition to the state machine; tests may update persistence directly to simulate externally changed access state because that transition is intentionally not a normal product workflow.
+
+### 9. Routes
+
+Implement stable named routes for real auth/access:
+
+- `GET /login` — `login`;
+- `POST /login` — a clear login submission route name;
+- `POST /logout` — `logout`;
+- `GET /` — psychologist home;
+- `GET /admin` — admin home.
+
+The auth middleware’s guest redirect must resolve correctly through the application base path.
+
+All generated real URLs/actions must include `/cabinet` under the configured base URL.
+
+Do not expose production routes that point into `/_prototype`.
+
+### 10. Stage 1 diagnostic route cleanup
+
+The root `/` can no longer be the public Stage 1 foundation page.
+
+Preserve the diagnostic only if still useful by moving it to a clearly technical route available only in `local`/`testing`, for example:
+
+- `/_foundation`.
+
+The old diagnostic and redirect-check routes must not conflict with real production auth routes.
+
+Update affected Stage 1 tests accordingly.
+
+Do not expose a database-connectivity diagnostic publicly in production.
+
+### 11. Approved Stage 3 UI integration
+
+Reuse existing UI files.
+
+#### Login view
+
+Adapt the existing login view so:
+
+- prototype requests remain no-op;
+- real requests use POST + CSRF;
+- real validation/auth/rate-limit errors appear in the approved UI;
+- there is still one shared login markup structure.
+
+#### Button component
+
+If required, extend the existing button component to support semantic button types such as `submit` without breaking prototype buttons.
+
+#### Navbar/sidebar
+
+Adapt existing shared navigation so:
+
+- prototypes keep the existing no-op “Выход” control;
+- authenticated production views use the real POST logout action;
+- no second production navigation template is introduced.
+
+#### Psychologist home
+
+Reuse `psychologist.groups.index`.
+
+Make later-stage actions explicitly unavailable rather than linking authenticated users into prototype routes.
+
+#### Admin home
+
+Reuse `admin.home`.
+
+Prototype fixture mode must retain its full synthetic work queue.
+
+Real Stage 4 mode must not show fake counts or prototype URLs.
+
+Do not perform a new visual redesign during backend integration.
+
+### 12. Local/testing psychologist seed
+
+The existing development administrator remains:
+
+- email: `admin@gruppa.test`;
+- password: `password`.
+
+Add one idempotent local/testing psychologist:
+
+- email: `psychologist@gruppa.test`;
+- password: `password`;
+- `status=approved`;
+- `admin=false`;
+- `disabled=false`.
 
 Requirements:
 
-- H1 must be unmistakably the primary page title;
-- eyebrow/context text must be much smaller and quieter;
-- supporting subtitle/description must not compete with H1;
-- page actions align cleanly and do not visually outweigh the title;
-- long titles wrap correctly;
-- mobile page header stacks naturally;
-- avoid giant vertical gaps below the page header.
+- use normal Laravel password hashing;
+- do not set compatibility `accept` manually;
+- let existing status mapping derive it;
+- do not create known-password users in production;
+- repeated seeding must not duplicate the account.
 
-Audit every page using the shared page header.
+Do not add product passwords for manually created real users; that belongs to later onboarding stages.
 
-## Navigation Audit
+### 13. Documentation
 
-Review top navigation and admin sidebar.
+Update actual-state documentation:
 
-Requirements:
+- `docs/architecture.md` — auth/access middleware boundary and session invalidator;
+- `docs/development.md` — local login URLs and development credentials;
+- `docs/project-status.md` — Stage 4 implemented state and remaining Stage 5+ scope.
 
-- navigation typography should be compact and work-oriented;
-- active state is clear without oversized pills;
-- wordmark/product title should not compete with page H1;
-- logout remains visible but subordinate;
-- tablet/mobile wrapping should feel intentional, not like desktop navigation accidentally wrapping;
-- admin sidebar density should support quick scanning;
-- preserve all existing navigation destinations and prototype behavior.
+Update `docs/ui-pages.md` only if required to explain real-route wiring; avoid unrelated design churn.
 
-Do not redesign information architecture in this task.
-
-## Tables / Lists Audit
-
-Review every list/table surface.
-
-Requirements:
-
-- table text should generally be 13–14px;
-- row/cell padding should be compact but usable;
-- headers must be clearly distinct without becoming visually heavy;
-- status/action columns should scan quickly;
-- long names/UUIDs/emails wrap safely;
-- desktop tables should use available width efficiently;
-- mobile card transformation must preserve label/value hierarchy;
-- application/group/payment/user lists should not feel like a stack of oversized marketing cards;
-- pagination should be compact.
-
-Where existing “one giant panel per row” layouts are visually inefficient, minor markup restructuring is allowed as long as product information and actions remain unchanged.
-
-## Form Layout Audit
-
-Review all forms:
-
-- login;
-- password setup;
-- group form;
-- psychologist admin form;
-- documents;
-- moderation comments;
-- refund form;
-- dictionaries;
-- settings.
-
-Requirements:
-
-- clear section hierarchy;
-- compact labels/help/errors;
-- field groups should be visually related;
-- validation should be noticeable but not visually overwhelming;
-- required/optional markers should be subtle;
-- field width should reflect content type where practical;
-- long forms should be easier to scan;
-- avoid excessive 32px panel padding around every form section;
-- no input/select radius above 10px.
-
-## Modal / Confirmation Audit
-
-Review every confirmation dialog.
-
-Requirements:
-
-- compact title and body;
-- modal should not look like a giant card;
-- clear primary/destructive action;
-- cancel remains obvious;
-- content fits comfortably on 390px width;
-- validation within moderation/refund modals remains readable;
-- no giant alert blocks inside modal unless truly necessary.
-
-## Status / Badge Audit
-
-Keep status badges explicitly labeled.
-
-Requirements:
-
-- status badges may remain pill-shaped;
-- compact height/padding;
-- 12–13px text;
-- color remains semantic and accessible;
-- multiple statuses on one row should not create visual clutter;
-- tariff/access metadata should not look as visually strong as lifecycle status unless intentionally needed.
-
-## Empty States Audit
-
-Current empty states must be reviewed for scale.
-
-Requirements:
-
-- do not use oversized whitespace or headings;
-- empty-state title should generally be H3/subsection scale, not page-title scale;
-- explanation compact;
-- one clear action where applicable;
-- empty states inside panels/lists should not consume most of the viewport without reason.
-
-## Payment / WEBPAY Page Audit
-
-Preserve all safe business wording and existing trusted/untrusted confirmation distinctions.
-
-Visually refine:
-
-- pending confirmation;
-- success;
-- failure/cancel;
-- placement;
-- extension.
-
-Requirements:
-
-- state is immediately understandable;
-- amount/order metadata is secondary;
-- “Оплата подтверждается WEBPAY” remains exact in meaning;
-- browser cancel remains untrusted;
-- do not reintroduce misleading financial language;
-- no oversized generic alert dominating the whole page.
-
-## Full 31-Page Audit
-
-Claude must audit **every one of the 31 page groups**, not only shared CSS.
-
-For each group, visually check at least one primary variant and every materially different visual state.
-
-Audit categories:
-
-1. login;
-2. password setup;
-3. system errors;
-4. common notices;
-5. psychologist groups empty;
-6. psychologist groups list;
-7. group create/edit;
-8. psychologist group detail;
-9. placement payment;
-10. payment confirmation pending;
-11. payment success;
-12. payment unsuccessful/cancel/unknown;
-13. extension;
-14. psychologist applications list;
-15. psychologist application detail;
-16. psychologist profile/documents;
-17. admin work queue;
-18. psychologists list;
-19. psychologist detail;
-20. psychologist create/edit;
-21. psychologist documents;
-22. admin groups list;
-23. admin group moderation/detail;
-24. admin group create/edit;
-25. admin applications list;
-26. admin application detail;
-27. admin payments list;
-28. admin payment detail;
-29. dictionaries;
-30. dictionary items;
-31. settings.
-
-Do not leave a page on an old visual pattern simply because shared CSS did not automatically fix it.
-
-## Full 249-Variant Regression
-
-All existing 249 prototype variants must remain reachable.
-
-Requirements:
-
-- no variant may be deleted merely to simplify the redesign;
-- existing product-state coverage remains;
-- prototype routes remain local/testing only;
-- final product Blade views remain the source;
-- synthetic fixtures remain synthetic;
-- no real backend actions are introduced;
-- no Stage 4 functionality is added.
-
-## Allowed Markup Changes
-
-This task explicitly authorizes material **visual hierarchy and presentation** changes to the accepted Stage 3 UI.
-
-Claude may:
-
-- restructure headings;
-- reduce/merge decorative panels;
-- change shared component markup;
-- change grid arrangements;
-- adjust action placement;
-- change card/list/table presentation;
-- improve semantic heading structure;
-- add small visual helper wrappers/classes where necessary.
-
-Claude must not:
-
-- change the product information architecture;
-- add/remove business functionality;
-- remove required fields/states/actions;
-- change business rules;
-- change navigation destinations;
-- invent a new feature;
-- silently change safe WEBPAY semantics;
-- begin Stage 4 auth/backend integration.
-
-## Preserve Product-Critical UI Content
-
-The following must remain functionally/semantically present:
-
-- all group lifecycle states;
-- revision comment and rejection reason;
-- applications counters/states;
-- psychologist “Мои группы” and “Мои данные” navigation;
-- admin work queue;
-- admin moderation actions;
-- gruppa.info integration block;
-- “ID группы для gruppa.info” label;
-- functional prototype UUID copy action;
-- payment/manual refund warnings;
-- safe WEBPAY return wording;
-- tariff/access/status presentation;
-- dictionary/settings forms;
-- all required validation/empty/permission/confirmation states.
-
-## CSS Architecture
-
-Prefer a coherent revision of the existing `application/public/ui.css`.
-
-Requirements:
-
-- centralize typography/radius/spacing/control tokens;
-- remove obsolete oversized tokens after migration;
-- avoid conflicting duplicate CSS declarations;
-- do not add page-specific arbitrary font sizes/radii when a token solves it;
-- keep Bootstrap as foundation and project CSS after it;
-- do not introduce Tailwind or another CSS framework;
-- no frontend build system.
-
-If `app.css` remains a Stage 1 diagnostic-only file, do not move the Stage 3 system back into it without need.
-
-## JavaScript
-
-Keep JavaScript minimal.
-
-Existing prototype behavior must continue:
-
-- no-op form/action behavior;
-- modal/dropdown behavior;
-- UUID clipboard copy feedback.
-
-Do not implement UI state frameworks, AJAX, or frontend business logic.
-
-## Accessibility Baseline
-
-Maintain or improve:
-
-- semantic heading order;
-- keyboard focus visibility;
-- form labels;
-- error associations;
-- color contrast;
-- non-color status labels;
-- usable touch targets;
-- modal accessibility;
-- mobile readability.
-
-Do not claim a formal WCAG certification unless actually audited.
-
-## Responsive Review
-
-Review at approximately:
-
-- 1440px desktop;
-- 1024px tablet;
-- 390px smartphone.
-
-Typography and density must be responsive intentionally, not merely shrink through Bootstrap.
-
-Explicitly inspect:
-
-- page headers;
-- navigation;
-- long forms;
-- tables/mobile cards;
-- action groups;
-- alerts;
-- modals;
-- long names/emails/comments;
-- gruppa.info UUID;
-- payment identifiers.
-
-No page-level horizontal overflow is allowed at 390px.
-
-## Design Audit Process
-
-Before changing the UI, Claude must visually inspect the current implementation and record the major observed problems in `.ai/report.md` under a **Design Audit — Before** section.
-
-At minimum assess:
-
-- type hierarchy;
-- component scale;
-- spacing/density;
-- form geometry;
-- alerts;
-- card/panel overuse;
-- navigation;
-- tables/lists;
-- modal scale;
-- mobile density;
-- visual consistency between psychologist/admin areas.
-
-Then implement systemic fixes.
-
-After implementation, repeat the audit under **Design Audit — After** and explain how each major issue was addressed.
-
-Do not create a permanent standalone `DESIGN_SYSTEM.md` or abstract UI-kit document.
-
-## Documentation
-
-Update only documentation affected by the redesign:
-
-- `docs/ui-pages.md` if responsive/layout/component notes changed materially;
-- `docs/project-status.md` to state that Stage 3 visual revision is awaiting/reached acceptance;
-- `docs/architecture.md` only if shared frontend structure actually changes;
-- `docs/development.md` only if prototype browsing/verification instructions change.
-
-Do not churn documentation just to restate CSS values already visible in code.
-
-## Automated Tests
-
-Preserve all existing prototype/domain tests.
-
-Update/add tests where useful to protect key design constraints, at minimum:
-
-- 31 page groups still exist;
-- 249 variants still render;
-- production still has no prototype routes;
-- no external font/CDN is introduced;
-- local Montserrat still loads;
-- gruppa.info copy control remains;
-- safe WEBPAY wording remains;
-- form controls use the revised shared CSS;
-- CSS no longer applies pill radius to normal `.form-control` / `.form-select`;
-- form-control radius token/value is <=10px;
-- typography tokens expose clearly separated page/section/subsection sizes;
-- alert component no longer relies on oversized generic heading styles.
-
-Do not create brittle snapshot tests of entire HTML pages unless necessary.
-
-## Visual Verification
-
-A full design task cannot be marked done based only on PHPUnit.
-
-Perform actual browser rendering against the Docker runtime.
-
-### Required automated browser regression
-
-Using browser tooling external to the repository if necessary:
-
-- render all 249 variants at 1440px, 1024px, and 390px;
-- verify HTTP success;
-- verify no JS exceptions;
-- verify no external runtime asset requests;
-- verify no page-level horizontal overflow;
-- verify visible interactive controls remain inside the viewport;
-- verify local fonts load.
-
-Do not add Node/npm dependencies to the repository.
-
-### Required manual visual review
-
-Create temporary screenshots/contact sheets outside the repository and visually review all 31 page groups.
-
-Manually inspect especially:
-
-- login;
-- psychologist groups normal;
-- group revision form;
-- group detail;
-- payment pending;
-- paid-expired extension;
-- applications list;
-- psychologist profile;
-- admin home;
-- psychologists list/detail/form;
-- admin groups list;
-- admin moderation;
-- admin payment detail;
-- dictionaries/items;
-- settings;
-- representative errors/modals.
-
-Inspect all three target widths.
-
-Do not commit screenshots, browser profiles, logs, or generated audit artifacts.
-
-If actual browser visual verification cannot be performed, task status must be `partial`, not `done`.
-
-## Required Checks
-
-Run and report exact results:
-
-1. Docker runtime healthy.
-2. `/_prototype` catalog reachable.
-3. All 249 variants render.
-4. Production environment contains no prototype routes.
-5. Local Bootstrap/CSS/JS/Montserrat assets return HTTP 200.
-6. Full MySQL test suite:
-   - `docker compose exec -T php php artisan test`
-7. Pint:
-   - `docker compose exec -T php ./vendor/bin/pint --test`
-8. Larastan:
-   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
-9. Composer platform:
-   - `docker compose exec -T php composer check-platform-reqs`
-10. Blade compilation:
-   - `docker compose exec -T php php artisan view:cache`
-11. Browser regression at 1440/1024/390.
-12. Manual design review of all 31 page groups.
-13. UUID copy interaction.
-14. Modal interaction at desktop/mobile.
-15. Git diff/status/staged inspection.
-16. Confirm no Node artifacts, screenshots, secrets, provider requests, or unrelated files are staged.
-
-## Acceptance Criteria
-
-1. A complete before/after visual audit is recorded in `.ai/report.md`.
-2. The entire interface uses a clear, visibly differentiated typography hierarchy.
-3. H1/page titles are clearly distinct from H2/H3/supporting copy on every page.
-4. Routine alerts/notices are materially smaller and no longer dominate pages.
-5. No normal text input/select has border radius greater than 10px.
-6. Textareas use restrained rounding and no form control is pill-shaped.
-7. Cards/panels/modals use materially less exaggerated radii.
-8. Overall vertical density is improved across admin and psychologist screens.
-9. Forms are easier to scan and validation remains clear without being oversized.
-10. Tables/lists are more compact and information-dense while remaining readable.
-11. Navigation and action hierarchy are clearer and less visually heavy.
-12. Status badges remain explicit and compact.
-13. Empty states are visually proportionate.
-14. Payment/WEBPAY pages preserve safe business semantics while improving hierarchy.
-15. All 31 page groups are visually reviewed and consistent.
-16. All 249 variants remain reachable and render successfully.
-17. Smartphone pages have no page-level horizontal overflow.
-18. Desktop/tablet/mobile layouts remain usable.
-19. Local Montserrat and local Bootstrap remain; no external font/CDN dependency is introduced.
-20. No Stage 4/backend/business behavior is added.
-21. All existing domain/prototype tests remain green after necessary test updates.
-22. PHPUnit, Pint, Larastan, Composer platform checks, and Blade compilation pass.
-23. Browser regression passes at 1440/1024/390.
-24. `.ai/report.md` contains exact verification results and remaining design risks.
-25. Final diff is limited to Stage 3 visual/frontend revision, relevant tests/docs, and `.ai/report.md`.
-
-## Out Of Scope
+## Explicit Out Of Scope
 
 Do not implement:
 
-- real authentication/login/logout;
-- real password setup;
-- real CRUD;
-- Form Request backend handling;
-- policies/access middleware;
-- document transfer;
-- payment creation/confirmation;
-- WEBPAY network requests;
-- public API;
-- email;
-- scheduler/queue business jobs;
-- database/domain redesign;
-- new product pages;
-- new navigation sections;
-- tariff-product redesign;
-- unrelated content rewriting.
+- public registration;
+- external psychologist questionnaire intake;
+- password invitation/setup broker flow;
+- password reset;
+- SMTP/email;
+- admin psychologist CRUD;
+- approve/reject UI actions;
+- tariff changes;
+- document upload/download;
+- “Мои данные” real backend;
+- psychologist profile route/data;
+- real group list or group create/edit;
+- group moderation;
+- applications;
+- dictionary/settings mutations;
+- public-site API;
+- scheduler/jobs business logic;
+- WEBPAY;
+- production deployment.
 
-Do not change `SPEC.md`, `WORKFLOW.md`, or `AGENTS.md` for this task.
+Do not add temporary product passwords beyond the documented local/testing seed accounts.
+
+Do not create production links to unimplemented Stage 5–7 actions.
+
+Do not change `SPEC.md`, `WORKFLOW.md`, or `AGENTS.md`.
+
+## Constraints
+
+- Follow `WORKFLOW.md` and `AGENTS.md`.
+- Use the accepted Stage 3 views/components; no parallel auth/admin/psychologist UI.
+- Keep authentication conventional Laravel session auth.
+- Use database sessions.
+- Keep authorization simple; no permissions framework.
+- `status`, not `accept`, is the access lifecycle source of truth.
+- Never reveal account existence/status through login failure messages.
+- Preserve prototype routes and all 249 Stage 3 variants.
+- Preserve the accepted Stage 3 visual design.
+- Preserve `/cabinet` base-path compatibility.
+- Tests remain on MySQL in Docker.
+- No Node/npm/Vite.
+- No new external authentication package.
+- No secrets or production credentials.
+- Do not alter `.ai/task.md`.
+
+## Acceptance Criteria
+
+1. `GET /login` renders the approved login Blade UI.
+2. Valid development psychologist credentials authenticate and redirect to `/`.
+3. Valid development administrator credentials authenticate and redirect to `/admin`.
+4. Successful login regenerates the session ID.
+5. Invalid email/password creates no authenticated session and shows the same generic failure.
+6. `pending`, `rejected`, `disabled`, and soft-deleted accounts cannot log in and receive no account-existence/status disclosure.
+7. Login is throttled after 5 failed attempts per email+IP within 60 seconds.
+8. Successful login clears the relevant throttle counter.
+9. Guest access to `/` and `/admin` redirects to the real login route inside the cabinet base path.
+10. Psychologist access to `/admin` returns 403.
+11. Administrator access to psychologist-only `/` returns 403.
+12. An approved enabled psychologist can access `/`.
+13. An approved enabled administrator can access `/admin`.
+14. If an authenticated user becomes disabled, rejected, or soft-deleted, the next protected request no longer renders protected content.
+15. The reusable SessionInvalidator deletes all database sessions for the target user and leaves other users’ sessions intact.
+16. SessionInvalidator invalidates/rotates the target user’s remember token.
+17. `POST /logout` logs out, invalidates the current session, regenerates CSRF token, and redirects to login.
+18. `GET /logout` does not log the user out and is not an allowed logout endpoint.
+19. The real psychologist root reuses the approved “Мои группы” view in a truthful Stage 4 empty/unavailable-action state.
+20. The real admin root reuses the approved admin home/layout without fake counts and without prototype URLs.
+21. Real navigation uses POST logout; prototype navigation remains no-op.
+22. Existing `/_prototype` catalog and all 249 variants still render.
+23. Prototype routes remain absent in production.
+24. The old Stage 1 root diagnostic no longer occupies `/`; any retained diagnostic is local/testing only.
+25. Development/testing seed creates exactly one approved psychologist and the existing admin, with known credentials only outside production.
+26. No Stage 5+ CRUD/profile/group/payment/email/API behavior is introduced.
+27. Existing Stage 1–3 tests remain green after necessary route/test updates.
+28. Full MySQL test suite passes.
+29. Pint passes.
+30. Larastan passes.
+31. `composer check-platform-reqs` passes.
+32. Blade compilation passes.
+33. Documentation reflects the actual Stage 4 implementation.
+34. Final diff is limited to auth/access foundation, necessary approved-view integration, tests/docs, and `.ai/report.md`.
+
+## Required Tests
+
+Add focused feature/integration coverage for at least:
+
+### Authentication
+
+- psychologist successful login;
+- admin successful login;
+- session ID regeneration;
+- wrong password;
+- unknown email;
+- pending user;
+- rejected user;
+- disabled user;
+- soft-deleted user;
+- generic identical auth failure semantics;
+- rate-limit threshold;
+- rate-limit clear after success.
+
+### Route boundaries
+
+- guest → login for `/`;
+- guest → login for `/admin`;
+- psychologist → `/` 200;
+- psychologist → `/admin` 403;
+- admin → `/admin` 200;
+- admin → `/` 403.
+
+### Access revocation
+
+- authenticated then disabled;
+- authenticated then rejected;
+- authenticated then soft-deleted;
+- approved/enabled unchanged remains authenticated.
+
+### Session invalidation
+
+Use the real MySQL `sessions` table to prove target-user sessions are deleted without deleting another user’s rows and that remember token is invalidated.
+
+### Logout
+
+- POST logout;
+- guest state after logout;
+- current session invalidated;
+- GET logout not accepted.
+
+### UI / base path
+
+- login form uses real POST action in non-prototype mode;
+- prototype login remains no-op;
+- real navigation renders a POST logout form;
+- prototype navigation remains no-op;
+- generated login/logout/home/admin URLs respect `/cabinet`;
+- psychologist Stage 4 root does not expose an active create-group link to a prototype/unimplemented route;
+- admin Stage 4 root contains no prototype URL/fake fixture count.
+
+### Regression
+
+- 31 prototype groups / 249 variants remain;
+- production has no prototype routes;
+- existing domain/MySQL tests remain green.
+
+## Verification Commands
+
+Run and report exact results.
+
+1. Ensure Docker services are healthy.
+2. Seed local/testing development accounts idempotently.
+3. Verify both real login flows manually through the real Docker HTTP runtime:
+   - psychologist login → `/cabinet/`;
+   - admin login → `/cabinet/admin`.
+4. Verify logout through the real UI.
+5. Verify denied role boundary in browser or equivalent HTTP runtime.
+6. Run:
+   - `docker compose exec -T php php artisan test`
+   - `docker compose exec -T php ./vendor/bin/pint --test`
+   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
+   - `docker compose exec -T php composer check-platform-reqs`
+   - `docker compose exec -T php php artisan view:cache`
+7. Inspect route list and confirm:
+   - real auth routes exist;
+   - logout is POST-only;
+   - protected routes have intended middleware;
+   - production route list has no `_prototype`;
+   - production route list has no public Stage 1 DB diagnostic.
+8. Verify database-session invalidator against MySQL.
+9. Verify no login response distinguishes nonexistent/pending/rejected/disabled users.
+10. Verify no Stage 5+ routes/controllers/actions were added.
+11. Inspect `git diff`, `git status --short`, and staged files.
+12. Confirm no secrets, real user data, temporary browser files, or unrelated changes are staged.
 
 ## Hard Workflow Gate
 
 Before changing files:
 
-- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/ui-pages.md`, `docs/project-status.md`, and this `.ai/task.md`;
+- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/project-status.md`, `docs/ui-pages.md`, and this `.ai/task.md`;
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm base commit `1070957220c003d825d2bf6a026171b6ee7bc8ec`;
-- confirm no unknown local changes will be overwritten;
-- inspect current rendered prototypes before editing.
+- confirm the current planner task is based on `04395636b1eb34d9754b5b3eae2198f77120f913`;
+- inspect the approved Stage 3 login/layout/navigation/psychologist/admin views before modifying them;
+- do not overwrite unknown local changes.
 
 During implementation:
 
-- make systemic shared-component/CSS changes first;
-- then inspect and fix page-specific visual issues;
-- keep all 31 page groups and 249 variants;
+- implement only authentication/access foundation;
+- reuse approved views;
+- do not redesign Stage 3;
+- do not start Stage 5–7 functionality;
+- keep prototype behavior intact;
 - do not alter `.ai/task.md`;
-- do not begin Stage 4;
-- do not introduce a frontend build system;
-- do not change product/business rules.
+- do not change governance/spec files;
+- do not add auth packages or frontend build tooling.
 
 Before commit:
 
-- run every required automated check;
-- perform actual visual review at all three widths;
-- update `.ai/report.md` with Design Audit — Before / After;
-- inspect full diff;
-- inspect staged files;
-- ensure screenshots/browser artifacts remain outside repository;
-- ensure no secrets or unrelated files are staged.
+- run all required checks;
+- manually verify the real psychologist/admin login/logout flows under `/cabinet`;
+- update `.ai/report.md` with exact implementation, routes, middleware, tests, runtime checks, facts, assumptions, unknowns, and next step;
+- inspect full diff and staged files;
+- stage only task-related files plus `.ai/report.md`;
+- confirm no secrets or unrelated artifacts are staged.
 
 Completion:
 
-- use `Status: done` only if the design revision and required browser review are complete;
+- use `Status: done` only if the authentication/access acceptance criteria are fully satisfied;
 - otherwise use `partial`, `blocked`, or `failed`;
 - if complete, commit with:
 
 ```text
-claude: TASK-2026-09-21-01 audit and refine Stage 3 design
+codex: TASK-2026-09-21-02 implement authentication access foundation
 ```
 
 - do not create an `accept:` commit.
