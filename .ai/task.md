@@ -1,396 +1,741 @@
-# Task: TASK-2026-09-21-04
+# Task: TASK-2026-09-21-05
 
 Status: planned
-Created from: 2f82b0e525f5c8633d79c2a69d7dab1922314ab0 (main)
+Created from: 2b9ff579d91c69cc2d7a6ecae6438415f93f06e1 (main)
 
 ## Title
 
-Stage 6 — Connect the real psychologist cabinet profile and owner-only private document access
+Stage 7 — Implement real group CRUD, owner workflow, administrator moderation, history, and manual activation without payments
 
 ## Goal
 
-Implement Stage 6 from SPEC.md using the accepted Stage 3 psychologist Blade views and the Stage 4 authentication/access foundation.
+Implement the complete Stage 7 internal group workflow from SPEC.md using the accepted Stage 3 Blade views and the Stage 4–6 authentication/access foundations.
 
-After this task, an approved enabled psychologist can:
+This milestone must make groups fully usable inside the cabinet without WEBPAY:
 
-- enter the cabinet at `/`;
-- see the existing Stage 6 placeholder/empty “Мои группы” page until Stage 7;
-- navigate to “Мои данные”;
-- see only their own real questionnaire/profile data;
-- see only their own real document list;
-- securely view/download only their own private documents;
-- log out through the existing real POST logout control.
+- psychologist creates and owns groups;
+- psychologist saves/edits draft or revision groups;
+- psychologist submits draft/revision to moderation;
+- psychologist sees own group list/detail and status history;
+- psychologist can soft-delete permitted own groups;
+- administrator lists/searches/filters/sorts groups;
+- administrator creates/views/edits groups;
+- administrator moderates moderation -> approved/revision/rejected;
+- revision and rejection require comments/reasons;
+- administrator manually activates approved groups and placement dates are calculated;
+- administrator sees immutable public_uuid as “ID группы для gruppa.info” and can copy it;
+- administrator can delete abandoned drafts;
+- all owner/admin/IDOR/status boundaries are enforced.
 
-This is a read-only psychologist profile/document milestone.
-
-Do not implement psychologist self-editing, document upload/delete, group CRUD, group queries/workflow, applications, payments, email, or admin changes.
+Stage 7 deliberately has no payment flow. Even when owner free=false and the group snapshots free=false, the group starts at draft and may proceed through moderation. No gp_payments row is created and awaiting_payment is unreachable through real Stage 7 UI/actions.
 
 ## Facts
 
-- Stage 5 is accepted through commit `2f82b0e525f5c8633d79c2a69d7dab1922314ab0`.
-- Stage 4 already provides:
-  - real session login/logout;
-  - per-request account eligibility checks;
-  - psychologist/admin role separation;
-  - psychologist root `/`;
-  - real POST logout.
-- Stage 5 already provides:
-  - real psychologist questionnaire data in `gp_users`;
-  - private document metadata in `gp_user_documents`;
-  - private storage under `storage/app/private`;
-  - MIME-safe authorized admin document streaming;
-  - document configuration and safe filename handling.
-- The accepted Stage 3 psychologist profile view is:
-  - `resources/views/psychologist/profile/show.blade.php`.
-- Shared profile/document partials already exist:
-  - `shared/profile-data.blade.php`;
-  - `shared/documents.blade.php`.
-- The Stage 3 psychologist prototype navigation already contains:
-  - “Мои группы”;
-  - “Мои данные”;
-  - “Выход”.
-- The real Stage 4 psychologist navigation currently exposes only “Мои группы”.
-- Independent psychologist questionnaire editing is not required in MVP.
-- SPEC requires private document viewing/downloading by either the owner or administrator after authorization.
-- Stage 6 acceptance explicitly requires that the psychologist:
-  - sees only self and own data;
-  - has no admin access;
-  - sees an empty group list until Stage 7;
-  - cannot retrieve another psychologist’s data/documents;
-  - works on mobile;
-  - reuses approved Stage 3 templates.
+- Stage 6 is accepted through commit 2b9ff579d91c69cc2d7a6ecae6438415f93f06e1.
+- Group model already:
+  - generates immutable UUID v4 public_uuid;
+  - snapshots current owner gp_users.free into gp_groups.free at creation;
+  - derives compatibility accept centrally from status;
+  - uses soft deletes.
+- GroupStatus enum and GroupStatusTransitionService already enforce and record:
+  - awaiting_payment -> draft;
+  - draft -> moderation;
+  - moderation -> approved/revision/rejected;
+  - revision -> moderation;
+  - approved -> active;
+  - active -> expired;
+  - expired -> approved.
+- GroupStatusTransitionService locks the group, validates the transition, updates status, and writes gp_group_status_history transactionally.
+- Stage 7 must use only the subset reachable in this stage:
+  draft -> moderation -> revision/rejected/approved -> active,
+  with revision -> moderation.
+- active -> expired belongs to Stage 9 scheduler.
+- expired -> approved belongs to Stage 9/14 extension flows.
+- awaiting_payment belongs to later WEBPAY placement flow and is not reachable in Stage 7.
+- SettingService already exposes placementDurationDays().
+- Default placement duration seed is 30 days.
+- Database timestamps are UTC; display/input conventions use Europe/Minsk.
+- Group form fields already exist in approved Stage 3 views:
+  title, description, schedule, format_id, meeting_duration_minutes,
+  participant_capacity, gender_id, meeting_price.
+- meeting_price is stored as integer minor units; float must not be used.
+- Dictionaries format/group_format and gender exist as containers, but approved display items may be empty.
+- Stage 3 final views already exist for:
+  psychologist group list/form/detail,
+  admin group list/form/detail,
+  shared group data/history/actions.
+- Stage 10 applications are not implemented yet.
+- Stage 13/14 WEBPAY placement/extension behavior is not implemented yet.
 
-## Product Routes
+## Product Assumptions
 
-Add real psychologist routes behind existing `account` + `role:psychologist` middleware:
-
-```text
-GET /                         psychologist.home
-GET /profile                  psychologist.profile
-GET /profile/documents/{document}/view
-GET /profile/documents/{document}/download
-```
-
-Names should be stable and explicit, e.g.:
-
-```text
-psychologist.profile
-psychologist.documents.view
-psychologist.documents.download
-```
-
-Do not put a psychologist/user ID into the psychologist profile URL.
-
-The current authenticated user is always the profile owner.
+- For Stage 7, both free=true and free=false psychologists create groups directly in draft.
+  The group free snapshot remains correct historical data; it does not gate this temporary no-payment workflow.
+- No real route/action may transition a Stage 7 group into awaiting_payment.
+- No real Stage 7 route/action may create gp_payments.
+- A psychologist group owner is immutable after creation.
+- Administrator chooses the owner when creating a group; owner reassignment of an existing group is not implemented in Stage 7 because it would change ownership semantics and conflict with historical tariff snapshot meaning.
+- Admin create owner options are non-admin, non-deleted, approved psychologists. Disabled psychologists may remain visible only if needed to edit an existing association, but new groups should be created for currently enabled approved psychologists.
+- “Abandoned draft” threshold is not specified by a business setting. For the Stage 7 admin quick filter, use a technical constant/configuration of 30 days. This is only an administrative cleanup threshold and is not placement duration. Document it clearly; do not add it to gp_settings in this stage.
+- Administrator manual deletion in Stage 7 is limited to abandoned draft groups matching that threshold. Do not add general deletion of active/moderated/published groups.
+- Rejection reason minimum length: use 10 characters as a technical validation minimum because SPEC requires a minimum but does not specify the exact number.
+- Revision comment is required and non-blank; use the same 10-character minimum for consistent moderator feedback quality.
+- Psychologist may soft-delete only draft or rejected own groups with no successful non-refunded payment. Stage 7 itself creates no payments, but preserve this safety check for existing/historical rows.
 
 ## Scope
 
-### 1. Real psychologist navigation
+### 1. Real psychologist group routes
 
-Create/reuse one shared psychologist navigation builder/data contract for real psychologist pages.
+Under existing account + role:psychologist protection, add stable real routes for:
 
-Real psychologist navigation must contain:
+- list/home at existing /
+- create draft action
+- group detail
+- group edit form
+- group update/save
+- submit to moderation
+- soft delete
 
-- “Мои группы” → `psychologist.home`;
-- “Мои данные” → `psychologist.profile`;
-- “Выход” → existing CSRF-protected POST logout.
+Recommended route shape:
 
-Correct `aria-current` state must be rendered on both pages.
+POST /groups
+GET /groups/{group}
+GET /groups/{group}/edit
+PUT /groups/{group}
+POST /groups/{group}/submit
+DELETE /groups/{group}
 
-Prototype navigation must remain unchanged and continue using prototype routes.
+Use route names under psychologist.groups.* or another clear existing convention.
 
-Do not add future group/application/payment routes.
+“Добавить группу” on the real root should perform a CSRF-protected POST that creates a draft and redirects to its real edit form. Do not introduce a GET side effect.
 
-### 2. Keep “Мои группы” truthful until Stage 7
+No psychologist route accepts owner_id.
 
-The real root `/` must continue rendering the accepted `psychologist.groups.index` view.
+### 2. Create draft
 
-For Stage 6:
+Creating a psychologist group must:
 
-- keep the list empty even if development/test database contains groups;
-- do not query or expose group data yet;
-- keep group creation unavailable;
-- do not link to prototype or future create-group routes;
-- update only navigation/data plumbing required for Stage 6.
+- use authenticated psychologist as owner_id;
+- create status=draft;
+- let Group model generate public_uuid;
+- let Group model snapshot current owner free value;
+- never create a payment;
+- never create awaiting_payment;
+- create an initial gp_group_status_history entry:
+  from_status = null,
+  to_status = draft,
+  actor_id = psychologist id,
+  actor_type = user,
+  comment = null.
 
-Stage 7 will connect real groups.
+Create group + initial history atomically.
 
-### 3. Real “Мои данные”
+The blank draft may have nullable form fields until saved.
 
-Add a small psychologist cabinet/profile controller or equivalent conventional controller.
+After creation, redirect to edit.
 
-`GET /profile` must:
+### 3. Real psychologist group list
 
-- get the authenticated user from the request/guard;
-- not accept a user ID;
-- load only relations needed for this page:
-  - education type;
-  - documents;
-- render the existing `psychologist.profile.show` view;
-- reuse `shared.profile-data` and `shared.documents`.
-
-Display the current psychologist’s stored questionnaire data, including nullable fields already covered by the shared profile partial:
-
-- surname/name/patronymic;
-- phone/email;
-- education type / other education;
-- modality/program;
-- training center;
-- graduation year;
-- training hours;
-- license number/expiry;
-- group-leading experience;
-- groups conducted count;
-- documents/education confirmation flags;
-- webinar/live-session readiness;
-- personal-data consent date;
-- personal-data consent version.
-
-Do not expose:
-
-- password;
-- remember token;
-- active_email generated column;
-- raw filesystem paths;
-- internal session identifiers.
-
-Do not add edit buttons or self-service update actions.
-
-### 4. Profile data presentation
-
-Reuse the same safe profile mapping/presentation logic where practical instead of creating divergent field interpretation between admin and psychologist pages.
-
-A small refactor of `PsychologistPages::profile()` into a neutral shared presenter/helper is allowed if it materially improves reuse.
-
-Do not introduce a generalized presentation framework.
-
-Date/time display must continue using the project’s timezone/display conventions.
-
-### 5. Psychologist document list
-
-The profile page must show only documents where:
-
-```text
-gp_user_documents.user_id = authenticated_user.id
-```
-
-Use real document metadata:
-
-- business type label;
-- original filename;
-- size;
-- created date;
-- actions: View, Download.
-
-Psychologist must not see Delete or Upload actions.
-
-Admin Stage 5 document management must remain unchanged.
-
-Empty document state must use the approved Stage 3 empty state.
-
-### 6. Adapt shared document partial safely
-
-The existing `shared.documents` real mode currently assumes admin document routes and delete controls.
-
-Refactor the shared partial/component contract so it can render at least three contexts without duplicate page markup:
-
-1. prototype psychologist/admin fixture mode;
-2. real admin management mode:
-   - view;
-   - download;
-   - delete;
-3. real psychologist owner read-only mode:
-   - view;
-   - download;
-   - no delete.
-
-Prefer explicit passed route URLs/capabilities over detecting role implicitly inside the Blade template.
-
-Do not create a second psychologist-only document table with duplicated markup.
-
-### 7. Owner-only document authorization
-
-Extend/reuse `UserDocumentPolicy` or use an equally explicit policy method for owner read access.
-
-Psychologist document authorization must require:
-
-- authenticated user is a non-admin psychologist;
-- user is approved/enabled by the existing account middleware;
-- `document.user_id === authenticated_user.id`.
-
-The psychologist routes themselves must not permit an administrator simply because they are an admin; admin access stays on the existing admin routes.
-
-For a document belonging to another psychologist, no file content or metadata may be returned.
-
-Prefer a 404 for cross-owner document lookup where practical to avoid exposing another user’s document existence.
-
-### 8. Owner document lookup / IDOR defense
-
-Do not trust only a globally bound `UserDocument $document`.
-
-Use an owner-scoped lookup such as:
-
-```text
-currentUser->documents()->whereKey($documentId)->firstOrFail()
-```
-
-or an equivalent route binding explicitly scoped to the authenticated owner.
-
-This ensures:
-
-- another psychologist’s document ID returns 404;
-- an administrator account cannot use psychologist-only routes because of role middleware;
-- soft-deleted/disabled/non-approved owners lose access through Stage 4 middleware before document handling.
-
-Add explicit IDOR tests.
-
-### 9. Secure document view/download
-
-Reuse the existing Stage 5 private-file response/security behavior.
-
-For both owner endpoints:
-
-- authorize/owner-scope first;
-- verify private file exists;
-- verify stored MIME is still in the configured allowlist;
-- serve through Laravel/controller only;
-- set safe Content-Type;
-- set `X-Content-Type-Options: nosniff`;
-- set private/no-store cache headers;
-- use safe filename handling;
-- do not reveal filesystem path;
-- do not create public or temporary URLs.
-
-View should use inline disposition.
-Download should use attachment disposition.
-
-If useful, extract the duplicated secure streaming logic from the admin controller into a very small shared document response service so admin and owner paths cannot drift.
-
-Do not weaken Stage 5 admin authorization while refactoring.
-
-### 10. No psychologist document mutations
-
-Do not add psychologist routes/actions for:
-
-- upload;
-- delete;
-- rename;
-- replace;
-- change document type.
-
-A psychologist may only list, view, and download documents in Stage 6.
-
-The admin retains full Stage 5 document management.
-
-### 11. No self-edit flow
-
-Do not add PATCH/PUT/POST profile mutations.
-
-The psychologist profile is read-only in MVP at this stage.
-
-No button should imply that the psychologist can edit their questionnaire.
-
-### 12. Authorization boundaries
-
-Tests and implementation must prove:
-
-- guest → login for `/profile`;
-- admin → 403 for psychologist `/profile`;
-- psychologist → 200 for own profile;
-- psychologist → 403 for admin routes remains unchanged;
-- disabled/rejected/soft-deleted psychologist loses profile/document access via Stage 4 middleware;
-- psychologist cannot choose another user via URL/request data because no user identifier is accepted;
-- document IDOR returns no content for another psychologist.
-
-### 13. Mobile / accepted UI
-
-Do not redesign Stage 3.
-
-Verify the real profile/document page at:
-
-- desktop ~1440;
-- tablet ~1024;
-- mobile ~390.
+Connect approved psychologist/groups/index Blade to real owned groups.
 
 Requirements:
 
-- no page-level horizontal overflow;
-- long email/document names wrap;
-- profile detail grid collapses correctly;
-- document table uses approved mobile card transformation;
-- View/Download actions remain visible and usable;
-- navigation with “Мои группы”, “Мои данные”, and “Выход” fits/wraps intentionally.
+- only current owner groups;
+- no soft-deleted groups;
+- newest first with deterministic ID tie-break;
+- pagination, 20 per page;
+- eager-load only needed dictionary relations;
+- no N+1;
+- show real status/free snapshot/dates/format;
+- Stage 10 application counters must be truthful without querying applications:
+  render unavailable/zero state and do not link to unimplemented application routes;
+- real action URLs only;
+- no prototype links;
+- “Добавить группу” becomes enabled.
 
-No screenshots need to be committed.
+Do not query gp_payments or gp_group_applications in the Stage 7 real list.
 
-### 14. Prototype regression
+### 4. Psychologist detail
 
-All existing prototype behavior must remain:
+Connect approved psychologist group detail to real owned group.
 
-- 31 page groups;
-- 249 variants;
-- profile prototype variants:
-  - normal;
-  - long;
-  - no-documents;
-  - permission;
-- prototype document actions remain no-op;
-- prototype routes remain local/testing only.
+Show:
 
-Do not replace fixture data with database data inside `/_prototype`.
+- all group fields;
+- lifecycle status;
+- disabled flag if present;
+- historical free snapshot;
+- created/published/expires dates;
+- moderation/rejection current message where applicable;
+- real status history;
+- only actions allowed for current state.
 
-### 15. Tests
+The psychologist must never see or edit public_uuid in a writable field.
+It may be omitted from psychologist UI entirely.
 
-All tests run on MySQL.
+Applications section remains unavailable/empty until Stage 10 and must not link to prototype/future routes.
 
-Add focused tests for at least:
+Payment section/actions must not appear in real Stage 7 psychologist UI.
 
-#### Profile
-- real psychologist profile route renders approved view;
-- current user’s real questionnaire values are shown;
-- nullable/missing values render safely;
-- education relation is loaded correctly;
-- password/remember token/internal values are not present;
-- no edit/upload/delete controls exist;
-- no query for groups is introduced on real Stage 6 root/profile unless required by existing middleware.
+### 5. Psychologist edit/save
 
-#### Navigation
-- root and profile both show real “Мои группы” / “Мои данные” URLs;
-- current nav state is correct;
-- POST logout remains real;
-- root remains empty/unavailable groups until Stage 7.
+Psychologist may edit only own groups in:
 
-#### Documents
-- own documents appear;
-- other users’ documents do not appear;
-- authorized inline view;
-- authorized download;
-- correct MIME/disposition/security headers;
-- another psychologist’s document ID returns 404/no content;
-- missing physical file returns 404;
-- disallowed stored MIME returns 404;
-- no private storage path/public URL in HTML or response headers.
+- draft;
+- revision.
 
-#### Role/access
-- guest redirect;
-- admin 403 on psychologist profile;
-- psychologist 403 on admin;
-- disabled/rejected/deleted access revocation regression remains green.
+Editing must be blocked server-side in:
+
+- moderation;
+- approved;
+- active;
+- expired;
+- awaiting_payment;
+- rejected.
+
+Rejected groups are view/delete only; no resubmission path.
+
+Use policy + explicit status checks.
+
+Editable fields are only the group questionnaire fields:
+- title;
+- description;
+- schedule;
+- format_id;
+- meeting_duration_minutes;
+- participant_capacity;
+- gender_id;
+- meeting_price.
+
+Request must not write:
+- owner_id;
+- status;
+- accept;
+- free;
+- public_uuid;
+- disabled;
+- published_at;
+- expires_at;
+- placement_days;
+- expiry_warning_sent_at;
+- moderator_comment;
+- rejection_reason;
+- deleted_at.
+
+### 6. Group validation
+
+Use Form Request validation.
+
+At minimum:
+
+- title required string max 255;
+- description required string with sensible text limit matching DB text;
+- schedule required string with sensible text limit;
+- format_id required and must belong to group_format dictionary;
+- gender_id required and must belong to gender dictionary;
+- meeting_duration_minutes required positive integer;
+- participant_capacity required positive integer;
+- meeting_price required non-negative money input.
+
+For dictionary selection:
+
+- new forms offer active items only;
+- edit keeps current inactive referenced item available so existing data is not lost;
+- do not invent dictionary item values.
+
+Money:
+
+- accept normal BYN human input such as 35,00 or 35.00;
+- convert to integer minor units without float;
+- reject malformed values or >2 decimal places;
+- display through existing money conventions;
+- never store decimal/float in gp_groups.meeting_price.
+
+### 7. Save vs submit
+
+The real approved group form must support separate actions:
+
+- Save draft/changes: update editable fields, keep status unchanged.
+- Submit to moderation:
+  - validate the complete form;
+  - persist editable data;
+  - transition via GroupStatusTransitionService:
+    draft -> moderation, or revision -> moderation;
+  - actor is current psychologist;
+  - actor_type user.
+
+Do not assign status directly.
+
+A failed validation or failed transition must not partially save a state change/history row.
+
+### 8. Revision flow
+
+Administrator moderation -> revision requires moderator_comment.
+
+Requirements:
+
+- minimum 10 characters after trimming;
+- store latest moderator_comment on group for current-state presentation;
+- transition moderation -> revision via GroupStatusTransitionService;
+- pass comment to transition service so a history row preserves the comment;
+- actor = current admin;
+- actor_type = user.
+
+Psychologist in revision:
+
+- sees current comment prominently;
+- sees complete historical comments/history;
+- may edit group;
+- may save changes without status transition;
+- may resubmit revision -> moderation through transition service.
+
+Previous history comments must never be overwritten/deleted.
+
+### 9. Rejection flow
+
+Administrator moderation -> rejected requires rejection_reason.
+
+Requirements:
+
+- minimum 10 characters after trimming;
+- store current rejection_reason on group;
+- transition via GroupStatusTransitionService with comment/history;
+- actor current admin;
+- rejected group cannot be edited/resubmitted by psychologist in Stage 7;
+- psychologist can view reason/history and may delete group if deletion rules allow.
+
+Do not introduce refund/payment behavior in real Stage 7 UI, even when group.free=false.
+
+### 10. Approve flow
+
+Administrator moderation -> approved:
+
+- explicit confirmed action;
+- use GroupStatusTransitionService;
+- actor current admin;
+- no payment prerequisite in Stage 7;
+- no date placement calculation yet;
+- published_at/expires_at remain null until activation.
+
+Invalid or repeated action must be safely rejected without duplicate history.
+
+### 11. Manual activation
+
+Administrator approved -> active:
+
+- explicit confirmation;
+- before action, admin detail visibly shows “Интеграция с gruppa.info”,
+  “ID группы для gruppa.info”, immutable public_uuid, copy action, and reminder to save it on the public site;
+- use current SettingService::placementDurationDays();
+- within one coordinated transaction:
+  - lock current group;
+  - require status approved;
+  - published_at = current UTC time;
+  - placement_days = current configured duration;
+  - expires_at = published_at + placement_days;
+  - expiry_warning_sent_at = null;
+  - transition approved -> active through domain transition service with admin actor.
+
+Do not calculate from approval time.
+Do not create/update a public-site record automatically.
+Do not store a second public-site ID.
+Do not call external services.
+
+A duplicate activation attempt must fail and must not change dates/history twice.
+
+### 12. Real status history
+
+Replace fixture history on real pages with gp_group_status_history.
+
+Show chronological history with:
+
+- from/to human labels;
+- actor identity where actor exists;
+- actor type/system where relevant;
+- comment/reason when present;
+- created_at formatted through project date/time helpers.
+
+Initial draft history row must appear.
+
+Revision/rejection history must preserve each comment independently.
+
+Avoid N+1 when loading actor/history.
+
+Prototype history stays synthetic.
+
+### 13. Psychologist delete
+
+Allow psychologist soft delete only when:
+
+- current user owns group;
+- status is draft or rejected;
+- group.disabled=false if existing UX requires it;
+- no succeeded payment exists that has not been refunded.
+
+Even though Stage 7 creates no payments, preserve historical payment safety by querying only for deletion authorization when needed.
+
+Use explicit confirmation.
+Soft delete only.
+Do not physically delete status history/payments/applications.
+After deletion, list no longer shows group.
+IDOR must be impossible.
+
+### 14. Group policy / IDOR
+
+Add a GroupPolicy or equivalent clear policy.
+
+At minimum cover:
+
+- owner view;
+- owner update only draft/revision;
+- owner submit only draft/revision;
+- owner delete only permitted states/conditions;
+- admin view/manage;
+- admin moderation;
+- admin edit;
+- admin abandoned-delete.
+
+Psychologist A must receive 404 or 403 without data leakage when guessing psychologist B group ID.
+Prefer owner-scoped lookup for psychologist routes so foreign group IDs return 404.
+
+Administrator routes may use normal group binding plus policy.
+
+### 15. Admin real group routes
+
+Under account + role:admin add real routes for:
+
+- group index;
+- create/store;
+- show;
+- edit/update;
+- approve;
+- revision;
+- reject;
+- activate;
+- delete abandoned draft.
+
+Recommended prefix /admin/groups and names admin.groups.*.
+
+Do not add payment/refund/extension/application routes.
+
+### 16. Admin group list
+
+Connect approved admin/groups/index to real data.
+
+Show real:
+
+- internal ID;
+- title;
+- psychologist;
+- status;
+- free/paid historical snapshot;
+- created_at;
+- published_at;
+- expires_at.
+
+Implement:
+
+- search by numeric ID, title, psychologist name/email;
+- status filter;
+- free/paid filter;
+- sorting by created_at, published_at, expires_at with safe allowlist;
+- pagination 20;
+- query preservation;
+- no N+1, eager load owner and needed dictionary values.
+
+Real Stage 7 UI must not offer successful-payment filter because payment flow is not connected.
+Prototype retains its existing payment filter state.
+
+Quick filters in real UI:
+
+- approved — awaiting manual publication;
+- abandoned — draft older than 30 days;
+- expired may be visible only as ordinary status if historical data exists, but Stage 9 owns expiry/unpublish workflow.
+
+Do not query gp_payments for normal Stage 7 list/filter behavior.
+
+### 17. Admin create/edit
+
+Administrator can create a group for an eligible psychologist and edit group content regardless lifecycle status.
+
+Create:
+
+- choose owner from real eligible psychologists;
+- create status=draft;
+- Group model snapshots owner free and generates public_uuid;
+- create initial null -> draft history with admin actor;
+- no payment;
+- redirect to edit/detail.
+
+Admin edit:
+
+- may edit questionnaire fields regardless group status;
+- owner cannot be changed after creation;
+- public_uuid cannot be changed;
+- free snapshot cannot be changed;
+- lifecycle fields cannot be edited directly.
+
+Show the existing approved warning that published group changes need manual synchronization to the public catalogue.
+
+### 18. Admin detail/moderation
+
+Connect approved admin/groups/show to real data.
+
+Show:
+
+- psychologist with link to real Stage 5 psychologist detail;
+- group content/status/history;
+- public_uuid integration block;
+- real allowed moderation actions by status;
+- activation action only when approved;
+- admin edit action;
+- abandoned-delete only when allowed.
+
+Real Stage 7 page must not show fabricated payment data, WEBPAY refund warning, order numbers, or payment links.
+
+For free=false groups, historical tariff can be displayed but it must not imply that payment is required in this stage.
+
+### 19. Abandoned draft deletion
+
+Use a technical config value such as GROUP_ABANDONED_DRAFT_DAYS=30 or equivalent project configuration.
+
+Add the value to .env.example if using env.
+
+Admin quick filter selects:
+
+- status=draft;
+- created_at <= now - threshold.
+
+Admin delete action is allowed only for a draft meeting the same threshold.
+
+Soft delete only.
+Do not delete history/related records.
+Do not broaden this to arbitrary group deletion.
+
+### 20. Applications remain Stage 10
+
+No real application list/detail/counters in Stage 7.
+
+On group list/detail:
+
+- do not query gp_group_applications;
+- render counters as zero/unavailable in a truthful way;
+- do not provide active production links to application pages.
+
+Prototype application/counter variants remain unchanged.
+
+### 21. Payments remain later
+
+Hard gate:
+
+- no gp_payments create/update/delete in Stage 7;
+- no Payment service/controller integration;
+- no WEBPAY routes/requests;
+- no placement page in real workflow;
+- no payment-success requirement for free=false;
+- no transition into awaiting_payment;
+- no extension behavior.
+
+Add tests that a free=false psychologist creates a group in draft and can complete Stage 7 moderation/activation with zero gp_payments rows.
+
+### 22. Preserve immutable public_uuid
+
+Real forms must never contain editable public_uuid.
+
+Tests must prove:
+
+- UUID generated at creation;
+- submitted public_uuid value is ignored/rejected;
+- psychologist cannot mutate it;
+- admin edit cannot mutate it;
+- repeated save/status changes keep same UUID;
+- admin detail copy control uses exact UUID.
+
+Reuse existing copy JS/component behavior.
+
+### 23. Transactions / workflow service
+
+Prefer a small explicit GroupWorkflow service/orchestrator that composes:
+
+- Group creation + initial history;
+- GroupStatusTransitionService;
+- moderator current fields;
+- activation date changes;
+- deletion eligibility where appropriate.
+
+Do not duplicate status writes in controllers.
+Do not create a generic workflow framework.
+
+Where multiple DB effects belong to one action, coordinate them transactionally with row locking.
+
+Be careful not to nest conflicting lock/query patterns around GroupStatusTransitionService; refactor the existing transition service only if necessary and preserve its accepted behavior/tests.
+
+### 24. Blade integration
+
+Reuse accepted views, not parallel templates.
+
+Adapt existing views/components to support prototype and real modes:
+
+- psychologist/groups/index;
+- psychologist/groups/show;
+- shared/group-form;
+- shared/group-data;
+- shared/group-summary;
+- shared/group-history;
+- psychologist/groups/_actions;
+- shared/group-delete;
+- admin/groups/index;
+- admin/groups/show;
+- admin/groups/form.
+
+Real forms must use:
+- real methods/actions;
+- CSRF;
+- server validation;
+- old input;
+- real dictionaries;
+- real confirmation forms.
+
+Prototype remains no-op and preserves all variants.
+
+Do not redesign Stage 3.
+
+### 25. Navigation
+
+Psychologist navigation remains:
+- Мои группы;
+- Мои данные;
+- Выход.
+
+Admin navigation adds real “Группы” alongside:
+- Главная;
+- Психологи;
+- Группы;
+- Выход.
+
+Do not add applications/payments/dictionaries/settings real navigation yet.
+
+### 26. Tests
+
+All tests use MySQL.
+
+Add focused coverage for at least:
+
+#### Psychologist create/list/detail
+- create draft uses authenticated owner;
+- free=true snapshot;
+- free=false snapshot but status still draft and no payments;
+- initial history row actor;
+- unique immutable public_uuid;
+- list only own non-deleted groups;
+- pagination/no N+1;
+- detail only own group;
+- foreign owner IDOR.
+
+#### Form/update
+- draft edit succeeds;
+- revision edit succeeds;
+- moderation/approved/active/expired edit blocked;
+- protected fields cannot be mass-written;
+- owner/public_uuid/free/status/dates unchanged;
+- dictionary active/inactive behavior;
+- money input converted to minor units without float;
+- malformed money rejected.
+
+#### Submit/moderation
+- draft -> moderation with psychologist actor history;
+- revision -> moderation with psychologist actor history;
+- invalid transition rejected;
+- no direct status writes.
+
+#### Admin moderation
+- moderation -> revision requires 10-char comment and history comment;
+- multiple revision cycles preserve earlier comments;
+- moderation -> rejected requires 10-char reason/history;
+- moderation -> approved succeeds;
+- duplicate/invalid moderation actions no partial writes/history.
+
+#### Activation
+- approved -> active;
+- placement duration read from SettingService;
+- published_at UTC now;
+- placement_days snapshot;
+- expires_at exact plus duration;
+- expiry_warning_sent_at reset;
+- history admin actor;
+- duplicate activation rejected without date/history duplication;
+- public_uuid visible and unchanged.
+
+#### Delete
+- psychologist draft/rejected allowed when safe;
+- other statuses blocked;
+- succeeded unrefunded payment blocks deletion if such historical row exists;
+- admin abandoned draft threshold enforced;
+- soft delete preserves history/related rows.
+
+#### Admin list
+- search ID/title/owner;
+- status/free filters;
+- sort allowlist;
+- pagination/query preservation;
+- approved quick filter;
+- abandoned 30-day quick filter;
+- no admin/payment/application N+1 or per-row queries.
+
+#### Authorization
+- psychologist cannot use admin group routes;
+- admin can view/edit groups;
+- one psychologist cannot access another’s group;
+- disabled/revoked user middleware regression.
+
+#### Hard no-payment gate
+- no gp_payments row for paid owner create/submit/moderate/activate;
+- no real route into awaiting_payment;
+- real group HTML contains no active WEBPAY/payment action.
 
 #### Regression
-- Stage 4 auth tests remain green;
-- Stage 5 admin psychologist/document tests remain green;
-- all 31 / 249 prototype variants remain;
-- production has no prototype/foundation routes.
+- Stage 4–6 suites remain green;
+- Stage 5 admin psychologist/documents remain green;
+- 31 prototype groups / 249 variants remain;
+- production excludes prototype/foundation routes.
 
-### 16. Documentation
+### 27. Manual/runtime verification
+
+Through real Docker HTTP/browser flow verify:
+
+Psychologist:
+1. login;
+2. Add group creates draft;
+3. fill form and save;
+4. submit to moderation;
+5. cannot edit while moderation.
+
+Admin:
+6. open real Groups list;
+7. open moderation group;
+8. send to revision with comment;
+9. psychologist sees comment/history, edits and resubmits;
+10. admin approves;
+11. admin sees/copies public_uuid reminder;
+12. admin activates;
+13. dates appear correctly.
+
+Also verify rejected path and abandoned-draft deletion.
+
+Repeat the create/moderate/activate path with a free=false psychologist and confirm no payment screen/row is created.
+
+Check representative 1440/1024/390 rendering for list/form/detail/admin moderation and no horizontal overflow.
+
+### 28. Documentation
 
 Update actual-state docs:
 
-- `docs/architecture.md` — psychologist self-profile owner-only boundary and shared private document streaming;
-- `docs/development.md` — how to manually verify “Мои данные” with the local psychologist account;
-- `docs/project-status.md` — Stage 6 implemented, Stage 7 groups still pending;
-- `docs/ui-pages.md` only as needed to document real `/profile` wiring.
+- docs/architecture.md — group policy/workflow/status-history/activation boundary;
+- docs/development.md — manual Stage 7 workflow and abandoned threshold;
+- docs/project-status.md — Stage 7 complete, Stage 8+ pending;
+- docs/ui-pages.md — real group route wiring while retaining prototype catalogue.
+
+Add env/config documentation for abandoned draft threshold if introduced.
 
 Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
@@ -398,140 +743,136 @@ Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
 Do not implement:
 
-- psychologist questionnaire editing;
-- psychologist document upload/delete;
-- profile password/change-password UI;
-- invitation/password setup email;
-- public questionnaire/API intake;
-- real psychologist group listing;
-- group create/edit/delete;
-- moderation;
-- applications;
-- group history;
-- payments;
-- dictionaries/settings;
-- scheduler/jobs;
-- WEBPAY;
+- WEBPAY or any payment creation/check/return/notify;
+- awaiting_payment real flow;
+- placement/extension payment pages in production flow;
+- scheduler active -> expired;
+- expiry warning jobs/email;
+- free or paid extension;
+- participant application CRUD/counters;
+- public API;
+- HMAC integration;
+- dictionary CRUD;
+- settings CRUD;
+- psychologist/profile editing;
+- email/password onboarding;
 - production deployment.
 
-Do not create routes or links for these future stages.
-
-## Constraints
-
-- Follow `WORKFLOW.md` and `AGENTS.md`.
-- Reuse accepted Stage 3 views/components.
-- Preserve Stage 4 auth/access behavior.
-- Preserve Stage 5 admin CRUD/document behavior.
-- Psychologist profile routes use current authenticated user, never a user ID.
-- Owner document access must be explicit and IDOR-safe.
-- Private files remain outside public web root.
-- No alternate frontend or redesign.
-- Tests remain MySQL-only.
-- No Node/npm/Vite or new frontend framework.
-- No new dependency unless absolutely required; none is expected.
-- No secrets or real personal data.
-- Do not alter `.ai/task.md`.
+Do not create active real links to these future-stage features.
 
 ## Acceptance Criteria
 
-1. Real psychologist navigation contains “Мои группы”, “Мои данные”, and POST logout.
-2. `GET /profile` is protected by active psychologist access rules.
-3. Psychologist sees only the authenticated user’s questionnaire data.
-4. No user ID is accepted/needed for the profile route.
-5. Profile remains read-only; no profile update endpoint is introduced.
-6. Real profile uses approved `psychologist.profile.show` and shared profile/document partials.
-7. Psychologist document list contains only own documents.
-8. Psychologist can view own private PDF/JPEG/PNG through Laravel.
-9. Psychologist can download own private documents through Laravel.
-10. Another psychologist’s document ID returns no file content and is not exposed.
-11. Admin cannot use psychologist-only profile/document routes; existing admin routes remain functional.
-12. Psychologist has no upload/delete document action.
-13. No private path or direct public URL is exposed.
-14. Missing file/disallowed stored MIME fails safely.
-15. Root “Мои группы” remains empty and no real group query/CRUD is introduced before Stage 7.
-16. Admin access boundaries remain unchanged.
-17. Disabled/rejected/deleted access revocation remains unchanged.
-18. Real profile works at 1440/1024/390 without horizontal overflow.
-19. Prototype profile variants and all 31/249 prototype catalogue entries remain green.
-20. Stage 5 admin CRUD/document tests remain green.
-21. Full MySQL test suite passes.
-22. Pint passes.
-23. Larastan passes.
-24. `composer check-platform-reqs` passes.
-25. Blade compilation passes.
-26. Documentation matches actual Stage 6 behavior.
-27. Final diff is limited to Stage 6 psychologist profile/document read access, necessary shared refactor, tests/docs, and `.ai/report.md`.
+1. Psychologist can create a draft group from real cabinet.
+2. free=false owner still gets draft, with free=false snapshot and zero payments.
+3. Group public_uuid is generated once and immutable.
+4. Initial draft history exists with correct actor.
+5. Psychologist list contains only own groups.
+6. Psychologist can view only own groups.
+7. Draft/revision can be edited; other lifecycle states cannot.
+8. Save and submit are separate real actions.
+9. Draft -> moderation uses domain transition service and history.
+10. Revision -> moderation uses domain transition service and history.
+11. Admin can list/search/filter/sort/paginate real groups without N+1.
+12. Real admin list has approved and abandoned quick filters.
+13. Real admin list does not expose payment filter/workflow.
+14. Admin can create and edit group content using approved Blade form.
+15. Existing group owner/free/public_uuid/lifecycle fields cannot be mass changed through edit.
+16. moderation -> revision requires valid comment and stores full historical comment.
+17. moderation -> rejected requires valid reason and stores history.
+18. moderation -> approved works through domain service.
+19. Invalid/repeated transitions produce no partial status/history.
+20. approved -> active uses current placement duration and calculates dates from activation time.
+21. Activation resets expiry warning marker.
+22. Admin detail visibly contains immutable “ID группы для gruppa.info” and copy control before activation.
+23. No external/public-site call is made on activation.
+24. Psychologist deletion obeys draft/rejected/payment safety and is soft delete.
+25. Admin deletion only removes abandoned drafts and is soft delete.
+26. Group status history renders real chronological actors/comments.
+27. Group dictionary fields use real active items and preserve current inactive referenced items.
+28. meeting_price is validated/converted to integer minor units without float.
+29. IDOR between psychologists is blocked.
+30. Psychologist cannot access admin group routes.
+31. No Stage 7 real route creates gp_payments or transitions to awaiting_payment.
+32. No real group flow links to WEBPAY/applications/extensions.
+33. Stage 4–6 access/profile/document behavior remains green.
+34. All 31/249 prototype variants remain green.
+35. Full MySQL suite passes.
+36. Pint passes.
+37. Larastan passes.
+38. composer check-platform-reqs passes.
+39. Blade compilation passes.
+40. Real representative pages work at 1440/1024/390.
+41. Documentation reflects actual Stage 7 behavior.
+42. Final diff is limited to Stage 7 group CRUD/moderation/history/activation, necessary shared UI integration/config, tests/docs, and .ai/report.md.
 
 ## Verification Commands
 
 Run and report exact results.
 
 1. Confirm Docker services healthy.
-2. Login with local psychologist:
-   - `psychologist@gruppa.test` / `password`.
-3. Verify real HTTP/browser flows:
-   - `/cabinet/` shows empty groups;
-   - navigation opens `/cabinet/profile`;
-   - profile shows current account data;
-   - own document View/Download works;
-   - no edit/upload/delete controls.
-4. Create/attach synthetic test document through existing admin flow, then verify owner can see/view/download it.
-5. Verify a second psychologist cannot access that document by guessed ID.
-6. Verify administrator receives 403 on psychologist-only profile/document routes.
-7. Verify psychologist still receives 403 on admin routes.
-8. Verify no group query/CRUD route was introduced.
-9. Verify mobile rendering at 390px and no horizontal overflow.
-10. Run:
-   - `docker compose exec -T php php artisan test`
-   - `docker compose exec -T php ./vendor/bin/pint --test`
-   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
-   - `docker compose exec -T php composer check-platform-reqs`
-   - `docker compose exec -T php php artisan view:cache`
-11. Inspect route list and production route isolation.
-12. Inspect HTML/headers for private path leakage.
-13. Inspect `git diff`, `git status --short`, and staged files.
-14. Confirm no uploaded test files, .env, real personal data, screenshots, secrets, or temporary artifacts are staged.
+2. Migrate/seed without destructive reset.
+3. Verify real psychologist workflow through Docker HTTP/browser:
+   create draft -> save -> submit.
+4. Verify admin moderation:
+   revision -> psychologist resubmit -> approve -> activate.
+5. Verify rejection path.
+6. Verify paid-owner free=false path creates no payment and no payment redirect.
+7. Verify public_uuid copy and immutability.
+8. Verify IDOR with second psychologist.
+9. Verify admin abandoned filter/delete with records just inside/outside 30-day cutoff.
+10. Verify no real group route queries/creates payment or application data where out of scope.
+11. Run:
+   docker compose exec -T php php artisan test
+   docker compose exec -T php ./vendor/bin/pint --test
+   docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
+   docker compose exec -T php composer check-platform-reqs
+   docker compose exec -T php php artisan view:cache
+12. Inspect route list and production isolation.
+13. Inspect gp_group_status_history after full flow.
+14. Inspect gp_payments remains unchanged/zero for Stage 7 smoke flow.
+15. Inspect representative UI at 1440/1024/390.
+16. Inspect git diff/status/staged files.
+17. Confirm no secrets, real personal data, screenshots, browser artifacts, or unrelated files are staged.
 
 ## Hard Workflow Gate
 
 Before changing files:
 
-- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/project-status.md`, `docs/ui-pages.md`, and this task;
-- run `git log --oneline -5`;
-- run `git status --short`;
-- confirm base commit `2f82b0e525f5c8633d79c2a69d7dab1922314ab0`;
-- inspect Stage 3 profile/documents views and Stage 4/5 access/document code;
+- read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
+- run git log --oneline -5;
+- run git status --short;
+- confirm base commit 2b9ff579d91c69cc2d7a6ecae6438415f93f06e1;
+- inspect existing Group model/enums/transition service and all Stage 3 group views;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- stay strictly in Stage 6;
-- do not implement real group functionality;
-- do not add profile/document mutations for psychologist;
-- use owner-scoped document access;
-- preserve admin document routes;
+- stay strictly in Stage 7;
+- never create payment/WEBPAY behavior;
+- never make awaiting_payment reachable;
+- use GroupStatusTransitionService for status changes;
+- use owner-scoped psychologist access;
+- preserve immutable public_uuid and free snapshot;
 - preserve prototype fixtures/no-op behavior;
-- preserve accepted visual design;
-- do not alter `.ai/task.md`;
+- preserve accepted design;
+- do not alter .ai/task.md;
 - do not change governance/spec files.
 
 Before commit:
 
 - run all required checks;
-- perform real owner profile/document HTTP/browser smoke verification;
-- update `.ai/report.md` with routes, authorization, owner-scoping, shared-view changes, tests/runtime verification, facts/assumptions/unknowns;
+- perform full real psychologist/admin workflow smoke verification;
+- update .ai/report.md with routes, policies, requests, workflow service, history/activation rules, no-payment evidence, tests/runtime checks, facts/assumptions/unknowns;
 - inspect full diff and staged files;
-- stage only Stage 6 files plus `.ai/report.md`;
-- ensure no private uploads/runtime artifacts are staged.
+- stage only Stage 7 files plus .ai/report.md;
+- ensure no runtime/test artifacts are staged.
 
 Completion:
 
-- use `Status: done` only if all acceptance criteria are satisfied;
-- otherwise use `partial`, `blocked`, or `failed`;
+- use Status: done only if all acceptance criteria are satisfied;
+- otherwise use partial, blocked, or failed;
 - if complete, commit with:
 
-```text
-codex: TASK-2026-09-21-04 connect psychologist profile cabinet
-```
+codex: TASK-2026-09-21-05 implement group CRUD moderation workflow
 
-- do not create an `accept:` commit.
+- do not create an accept commit.
