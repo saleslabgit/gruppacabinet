@@ -1,616 +1,676 @@
-# Task: TASK-2026-09-21-06
+# Task: TASK-2026-09-21-07
 
 Status: planned
-Created from: 1f5182039fadcfe53bb737c30748104c2535308c (main)
+Created from: 28aabaab3bcc84622959f9e81088d0844c90fc5f (main)
 
 ## Title
 
-Stage 8 — Implement real dictionary administration, typed business settings, and pre-WEBPAY payment surface
+Stage 9 — Implement placement lifecycle expiration, remaining-time UI, expired admin filter, and free extensions without email or WEBPAY
 
 ## Goal
 
-Implement Stage 8 from SPEC.md using the accepted Stage 3 admin Blade views.
+Implement Stage 9 from SPEC.md on top of the accepted Stage 7 group workflow and Stage 8 typed settings.
 
-After this milestone an authenticated administrator must be able to manage the reusable dictionary values and all defined business-setting values entirely through the cabinet, without direct MySQL access or source edits.
+This milestone completes the time-based lifecycle of an already activated group without email and without WEBPAY:
 
-Also expose the approved admin Payments page as a truthful pre-WEBPAY informational surface only. It must not create, mutate, verify, simulate, or otherwise behave like a payment integration.
+- active groups automatically become expired when expires_at is reached;
+- psychologist/admin pages show truthful remaining/expiry state;
+- administrator has a real expired quick filter for manual unpublication on gruppa.info;
+- a psychologist whose **current** gp_users.free=true can extend active or expired owned groups without payment;
+- active free extension shifts expires_at by the group’s snapshotted placement_days and resets the warning marker;
+- expired free extension transitions expired -> approved without moderation and waits for manual re-publication;
+- manual activation after expired extension recalculates a fresh placement period using the **current** placement_duration_days setting;
+- extension-window rules use the typed expired_extension_window_days setting;
+- paid owners (current gp_users.free=false) receive no payment flow yet and cannot bypass it with direct POST.
 
-This milestone must unblock realistic manual group/profile testing by allowing real values for:
-- education_type;
-- group_format;
-- gender;
-and real configuration of placement/extension prices and lifecycle timing settings.
+Do not implement email warning jobs, SMTP, WEBPAY, payment creation, public API, or participant applications.
 
 ## Facts
 
-- Stages 1–7 are accepted through commit 1f5182039fadcfe53bb737c30748104c2535308c.
-- gp_dictionaries and gp_dictionary_items already exist.
-- Seeded dictionary containers are:
-  - education_type;
-  - group_format;
-  - gender.
-- No approved item display values are currently seeded; this is intentional.
-- Stage 5 psychologist forms already query education_type active items and preserve a current inactive selection.
-- Stage 7 group forms already query group_format/gender active items and preserve current inactive selections.
-- gp_settings already contains the seven typed integer settings:
-  - placement_price_minor_units, nullable;
-  - extension_price_minor_units, nullable;
-  - placement_duration_days;
-  - expiry_warning_days;
-  - expired_extension_window_days;
-  - participant_application_retention_months;
-  - password_setup_link_ttl_hours.
-- SettingService is already the typed cached read boundary.
-- Stage 7 activation reads SettingService::placementDurationDays().
-- Existing active groups snapshot placement_days and expires_at when activated.
-- AuditService and gp_audit_log already exist.
-- SPEC requires audit of critical business-setting changes.
-- Approved Stage 3 views already exist:
-  - admin/dictionaries/index.blade.php;
-  - admin/dictionaries/items.blade.php;
-  - admin/settings/index.blade.php;
-  - admin/payments/index.blade.php;
-  - admin/payments/show.blade.php prototype.
-- Stage 13 is the first real WEBPAY integration stage.
-- No real payment record is created by Stages 1–8.
+- Stages 1–8 are accepted through commit 28aabaab3bcc84622959f9e81088d0844c90fc5f.
+- Stage 7 already implements:
+  - draft/moderation/revision/rejected/approved/active workflow;
+  - manual approved -> active activation;
+  - published_at set at activation;
+  - placement_days snapshotted from SettingService::placementDurationDays();
+  - expires_at = published_at + placement_days;
+  - expiry_warning_sent_at reset to null on activation;
+  - real owner/admin group list/detail views and history.
+- GroupStatus enum already permits:
+  - active -> expired;
+  - expired -> approved.
+- GroupStatusTransitionService already performs lockForUpdate, transition validation and status-history persistence.
+- SettingService already exposes:
+  - placementDurationDays();
+  - expiryWarningDays();
+  - expiredExtensionWindowDays().
+- Stage 8 lets admin change these settings through typed/audited UI.
+- gp_groups has indexed status/expires_at and composite (status, expires_at) for scheduler work.
+- placement_days is the historical duration snapshot of the current placement period.
+- gp_groups.free is only the creation-time tariff snapshot and MUST NOT decide extension tariff.
+- Extension tariff source of truth is current gp_users.free at the moment the extension attempt is processed.
+- No Stage 1–8 real flow creates payment records.
+- Existing Stage 3 views already include active/warning/expired/outside-window and free/paid extension prototype variants.
 
 ## Product / Architecture Decisions
 
-### Stable dictionary codes
+### Active free extension duration
 
-Dictionary and dictionary-item codes are stable identifiers.
+For an active group, free extension uses the group’s existing placement_days snapshot:
 
-- Code is supplied when creating a dictionary/item.
-- Code is immutable after creation.
-- Editing changes display name and other mutable presentation fields, not code.
-- The core dictionary container codes education_type, group_format, gender must not be deleted or renamed because application forms depend on them.
-- Custom dictionary containers may be created.
-- A custom dictionary container may be physically deleted only when it contains no items and is not referenced by application data.
+expires_at = expires_at + placement_days
 
-### Dictionary item removal
+It does NOT re-read the current placement_duration_days setting for that active period.
 
-- Used dictionary items are never physically deleted.
-- Used items are deactivated instead.
-- Deactivated items disappear from new forms but remain visible in existing records/edit forms that already reference them.
-- Unused items may be physically deleted through an explicit confirmation action.
-- Inactive items may be reactivated.
+Changing placement_duration_days therefore:
+- does not alter an already active period;
+- does not alter the duration added by extending that active period;
+- DOES apply when an approved group is manually activated/re-published into a new placement period.
 
-### Settings keys
+### Expired free extension
 
-The seven setting keys are application-defined typed configuration keys, not user-defined records.
+For an expired group inside the extension window:
 
-- Admin may edit their values.
-- Admin must not create arbitrary new setting keys through UI.
-- Admin must not rename or delete required setting keys.
-- All reads/writes go through the typed SettingService boundary.
-- gp_settings remains the source of business-setting values.
+- transition expired -> approved;
+- do not run moderation;
+- do not create payment;
+- do not create new published_at/expires_at at extension time;
+- retain the old dates as the previous placement period until admin re-activates;
+- admin manually republishes on gruppa.info and uses the existing approved -> active action;
+- that activation overwrites published_at/expires_at and snapshots the then-current placement_duration_days setting.
 
-### Payment surface
+### Current tariff
 
-Stage 8 adds a real admin route to the approved Payments index view only.
+Every extension attempt must read current owner gp_users.free from the database.
 
-The real page is informational/pre-WEBPAY:
-- explains that WEBPAY is not connected yet;
-- contains no synthetic payment rows;
-- contains no provider actions;
-- contains no refund actions;
-- does not expose a real payment-detail route;
-- does not query or mutate gp_payments for the normal page.
+- current free=true -> free Stage 9 extension logic;
+- current free=false -> no extension is applied in Stage 9;
+- historical gp_groups.free is ignored for this decision.
 
-Prototype payment list/detail variants remain unchanged and synthetic.
+### Extension window boundary
+
+Expired extension is allowed while:
+
+now <= expires_at + expired_extension_window_days
+
+It is rejected after that exact boundary.
+
+### Warning state
+
+Stage 9 warning is presentation/lifecycle state only.
+
+- For active group with a future expires_at, use current SettingService::expiryWarningDays().
+- warning=true when remaining time is within the configured threshold.
+- Do NOT queue email.
+- Do NOT set expiry_warning_sent_at merely because the warning is displayed.
+- Stage 12 owns warning email jobs and successful-send marker behavior.
+
+### Scheduler frequency
+
+Add an explicit Artisan command for expiration and schedule it every minute through Laravel Scheduler.
+
+The command must be safe to run repeatedly and concurrently:
+- indexed candidate query;
+- bounded/chunked processing;
+- row lock + re-check before each transition;
+- active -> expired only once;
+- no duplicate history;
+- command-level withoutOverlapping is useful but row-level correctness must not depend on it.
+
+Production cron configuration itself remains deployment work; document the standard schedule:run requirement.
 
 ## Scope
 
-### 1. Admin navigation and routes
+### 1. Lifecycle service
 
-Under existing account + role:admin protection add real routes for:
+Add a small explicit service, for example GroupLifecycleService, responsible for:
 
-#### Dictionaries
-- list/create;
-- edit/update dictionary metadata;
-- delete eligible custom empty dictionary;
-- item list/create;
-- item edit/update;
-- activate;
-- deactivate;
-- delete eligible unused item.
+- expireDueGroups();
+- expireOne()/equivalent locked expiration;
+- extension availability calculations;
+- free extension application;
+- remaining/warning presentation data where appropriate.
 
-Use stable names under admin.dictionaries.*.
+Do not create a generic workflow engine.
 
-#### Settings
-- GET /admin/settings;
-- PUT/PATCH /admin/settings.
+Reuse GroupStatusTransitionService for every status transition:
+- active -> expired with actor_type=system, actor=null;
+- expired -> approved with actor_type=system, actor=null.
 
-#### Payments
-- GET /admin/payments only.
+Do not assign status directly.
 
-Update real admin navigation to:
-- Главная;
-- Психологи;
-- Группы;
-- Платежи;
-- Справочники;
-- Настройки;
-- Выход.
+### 2. Expiration command
 
-Do not add real Applications navigation until Stage 10.
-Do not add a real payment detail route in Stage 8.
+Add an Artisan command such as:
 
-### 2. Real dictionary list
+php artisan groups:expire
 
-Connect admin/dictionaries/index.blade.php to gp_dictionaries.
+Behavior:
 
-Display:
-- stable code;
-- name;
-- item count;
-- active item count;
-- actions.
+- select non-deleted groups with status=active and expires_at <= now UTC;
+- ignore active groups whose expires_at is null;
+- process in bounded chunks (e.g. chunkById);
+- for each candidate, transactionally lock and re-read the row;
+- re-check status=active and expires_at <= now after lock;
+- transition active -> expired through GroupStatusTransitionService;
+- history actor_id=null, actor_type=system, comment=null;
+- do not alter published_at, expires_at or placement_days;
+- do not touch payments/applications;
+- do not queue email/jobs.
+
+Command must emit/log only a small aggregate result such as processed/expired count, no personal/group content.
+
+A repeated run must produce zero additional transitions/history for already expired groups.
+
+### 3. Scheduler registration
+
+Register groups:expire in Laravel Scheduler every minute.
+
+Use withoutOverlapping or equivalent command-level guard.
+
+Do not add warning-email schedule/job in Stage 9.
+
+Do not add WEBPAY recovery schedule.
+
+### 4. Scheduler / race safety
+
+Test and implement correctness for:
+
+- before expires_at: no transition;
+- exactly at expires_at: transition permitted;
+- after expires_at: transition;
+- repeated command run: exactly one active -> expired history row;
+- two lifecycle attempts observing the same candidate do not create duplicate transitions;
+- soft-deleted groups ignored;
+- non-active groups ignored;
+- disabled active groups still expire based on time because disabled is independent of lifecycle status.
+
+Do not rely only on candidate query state; re-check under lock.
+
+### 5. Remaining time / warning presentation
+
+Extend real GroupPages/presenter data without changing prototype fixtures.
+
+For active groups with expires_at:
+
+- expose the exact expiry date already shown;
+- expose a computed remaining duration/day count suitable for UI;
+- compute warning using current expiry_warning_days setting;
+- show a visible warning when within threshold.
+
+Use a deterministic rule:
+- remaining_days = max(0, ceil((expires_at - now) / 86400 seconds));
+- when remaining_days > 0, real UI may show “До окончания размещения: N дн.”;
+- when expiry is due/past but scheduler has not yet transitioned the record, show a truthful due/expired-soon state rather than a negative value.
+
+Do not hardcode “3 дня” in real mode.
+Prototype warning variant may retain its synthetic wording/state.
+
+Stage 9 must not set expiry_warning_sent_at from page rendering.
+
+### 6. Expired presentation
+
+For real expired group owner detail/list:
+
+- status “Закончена”;
+- show historical expires_at;
+- show whether extension window is still open;
+- if outside window, show approved existing warning “Срок продления закончился. Создайте новую группу.”;
+- no edit action.
+
+Admin real group detail/list for expired rows should clearly state that public unpublication is manual.
+
+Do not automatically call/update gruppa.info.
+
+### 7. Admin expired quick filter
+
+Extend real /admin/groups quick filters with:
+
+quick=expired
+
+It must select non-deleted status=expired groups requiring manual removal/unpublication from the public site.
+
+UI label should remain consistent with approved prototype wording, e.g. “Снять с публикации”.
 
 Requirements:
-- deterministic ordering by code/id;
-- pagination, 20 per page;
+- no WEBPAY/payment query;
+- query preserved through pagination/sort where applicable;
 - no N+1;
-- real empty state;
-- create form;
-- edit form using the same approved page/view, not a parallel page;
-- prototype mode remains no-op.
+- prototype filter behavior unchanged.
 
-### 3. Dictionary validation
+Do not add a fake “unpublished” state or database flag; manual public-site work remains outside the cabinet.
 
-Use Form Requests.
+### 8. Real extension page
 
-Dictionary create:
-- code required;
-- lowercase stable machine code;
-- allow a-z, 0-9 and underscore;
-- max 64;
-- unique;
-- name required string max 255.
+Connect the existing approved psychologist.groups.extension Blade view to real Stage 9 data rather than creating a new page.
 
-Dictionary update:
-- code must not be writable;
-- name may change.
+Add owner-only GET route, recommended:
 
-Do not permit mass assignment of id/timestamps or unrelated fields.
+GET /groups/{group}/extension
 
-### 4. Core dictionary protection
+Only owned, non-deleted group IDs are resolved.
 
-Protect core containers:
-- education_type;
-- group_format;
-- gender.
+The page must support truthful real states:
 
-For core dictionaries:
-- code immutable;
-- physical delete forbidden.
+#### Current owner free=true, group active
+- show free extension;
+- show current expires_at;
+- show duration that will be added = group.placement_days;
+- real confirmed action available.
 
-Their names may be edited.
+#### Current owner free=true, group expired and inside window
+- show free extension;
+- explain it returns group to “Одобрена, ожидает публикации”;
+- explain admin must manually republish and activate;
+- real confirmed action available.
 
-Custom empty dictionaries may be deleted only after explicit confirmation.
+#### Expired outside window
+- no extension POST action;
+- tell psychologist to create a new group.
 
-A dictionary with items may not be deleted; admin must manage/deactivate/remove eligible items first.
+#### Current owner free=false
+- no payment form;
+- no payment record;
+- no WEBPAY link;
+- explain paid extension will become available after payment integration is connected;
+- no effective POST action.
 
-### 5. Real dictionary item list
+Use the CURRENT owner tariff in all real extension display logic.
+Do not use group.free to choose free/paid extension presentation.
 
-Connect admin/dictionaries/items.blade.php to one real parent dictionary.
+Prototype extension variants remain unchanged.
 
-Display:
-- code;
-- name;
-- sort_order;
-- active/inactive;
-- whether the item is currently used by application data;
-- actions available for that state.
+### 9. Free extension action
+
+Add owner-only POST route, e.g.:
+
+POST /groups/{group}/extension
+
+Use a dedicated Form Request or explicit confirmed action request.
 
 Requirements:
-- parent dictionary identity shown truthfully;
-- order by sort_order then id;
-- pagination, 20 per page;
-- nested ownership/scoping: changing dictionary ID while retaining another dictionary’s item ID must fail safely;
-- no N+1.
-
-### 6. Dictionary item validation / CRUD
-
-Create:
-- stable code required, [a-z0-9_], max 64;
-- code unique within parent dictionary;
-- name required max 255;
-- sort_order non-negative integer;
-- active boolean, default true if omitted.
-
-Update:
-- code immutable;
-- name/sort_order/active mutable, subject to safe lifecycle rules.
-
-Activation/deactivation:
-- explicit actions;
-- deactivation has confirmation;
-- reactivation supported;
-- repeated activation/deactivation must not create misleading state.
-
-Delete:
-- explicit destructive confirmation;
-- unused item may be physically deleted;
-- used item cannot be physically deleted and must instead be deactivated.
-
-Do not silently cascade or rewrite existing users/groups.
-
-### 7. Dictionary usage detection
-
-Usage checks must correctly cover current core references:
-
-- education_type item -> gp_users.education_type_id;
-- group_format item -> gp_groups.format_id;
-- gender item -> gp_groups.gender_id.
-
-Soft-deleted users/groups still count as historical usage and must prevent physical deletion.
-
-Do not infer usage only from current visible records.
-
-For custom dictionaries not referenced by current schema, items are considered unused unless another known relation is introduced.
-
-Keep this logic centralized in a small service/helper rather than scattering raw checks through Blade.
-
-### 8. Integration with existing forms
-
-Prove existing Stage 5/7 behavior with real dictionary mutations:
-
-- active item appears in new psychologist/group forms;
-- deactivated item disappears from new forms;
-- an existing record that references a now-inactive item still shows/preserves it in edit/detail;
-- reactivation restores it to new forms;
-- no source-code change/seed rerun is needed after adding values through admin UI.
-
-This is a core Stage 8 acceptance requirement.
-
-### 9. Real settings page
-
-Connect admin/settings/index.blade.php to real typed values.
-
-Display/edit:
-
-Prices:
-- placement_price_minor_units as human BYN placement_price;
-- extension_price_minor_units as human BYN extension_price;
-- blank means unconfigured/null.
-
-Durations:
-- placement_duration_days;
-- expiry_warning_days;
-- expired_extension_window_days;
-- participant_application_retention_months;
-- password_setup_link_ttl_hours.
-
-Real form:
-- POST method override PUT/PATCH as appropriate;
 - CSRF;
-- server validation;
-- old input;
-- approved validation/error areas;
-- explicit confirmation before committing changes.
+- confirmation;
+- owner-scoped group lookup;
+- existing account + role:psychologist;
+- reject group.disabled=true;
+- only active/expired groups;
+- current owner free must be true;
+- current owner row should be re-read transactionally;
+- no payment creation;
+- no email/job creation.
 
-Prototype form remains no-op.
+### 10. Active free extension
 
-### 10. Settings validation
+Within one transaction/row lock:
 
-Use a dedicated Form Request.
+- re-read current owner tariff;
+- lock/re-read group;
+- require status=active;
+- require expires_at not null;
+- require placement_days positive/non-null;
+- require the current placement not already effectively expired.
 
-Prices:
-- nullable;
-- non-negative;
-- normal human input such as 50, 50.0, 50,00;
-- max 2 fractional digits;
-- convert to integer minor units without float;
-- reject negatives, exponent notation, malformed values, >2 decimals, overflow.
+Then:
 
-Integer settings:
-- required positive integers.
+- expires_at = existing expires_at + placement_days;
+- status remains active;
+- published_at remains unchanged;
+- placement_days remains unchanged;
+- expiry_warning_sent_at = null.
 
-Cross-field:
-- expiry_warning_days must be strictly less than placement_duration_days.
+No status-history row is required because status does not change.
 
-Do not introduce product-specific arbitrary maxima unless required for safe integer/date handling; if technical bounds are required, document them.
+Repeated explicit POSTs are separate user actions and each valid request may add one duration; however a single request must not apply twice because of retries inside the same application action.
 
-### 11. Typed SettingService write boundary
+No payment row.
 
-Extend SettingService with an explicit typed write/update API for the known seven settings.
+### 11. Overdue active race behavior
 
-Controllers must not update gp_settings directly.
+If an extension request reaches an active group whose expires_at <= now before the scheduler has marked it expired, it must NOT receive active-extension semantics.
 
-The write boundary must:
-- accept only known setting keys/typed normalized values;
-- reject unknown keys;
-- keep type=integer;
-- update existing required rows transactionally;
-- not create arbitrary missing keys silently;
-- preserve nullable behavior only for the two price settings;
-- invalidate cached values only after a successful DB commit;
-- expose fresh values immediately after save.
+Choose one safe deterministic implementation:
 
-Do not create a generic untyped settings repository.
+Preferred:
+- under lock transition active -> expired as system first;
+- then apply the expired extension rules in the same coordinated operation if still inside the extension window.
 
-### 12. Settings audit
+Acceptable alternative:
+- reject the request with a clear validation result and require refresh/scheduler transition before retry.
 
-Every changed Stage 8 business setting must create gp_audit_log entries using AuditService.
+Whichever approach is used must be explicitly tested and documented.
+Do not extend from an already elapsed expires_at as though it were still active.
 
-Use a stable action such as:
-- setting.updated
+### 12. Expired free extension
 
-Recommended fields:
-- entity_type = setting;
-- entity_id = gp_settings.id;
-- actor = current administrator;
-- metadata contains only:
-  - key;
-  - old_value;
-  - new_value.
+Within a transaction:
 
-Values should be normalized stored integers/null:
-- prices in minor units;
-- durations/counts in integer units.
+- current owner free must be true;
+- group status must be expired;
+- expires_at must exist;
+- compute deadline = expires_at + current expired_extension_window_days;
+- reject when now > deadline;
+- transition expired -> approved through GroupStatusTransitionService;
+- actor_type=system, actor=null, because this lifecycle transition is defined as a system transition;
+- no moderation;
+- no payment;
+- do not overwrite public_uuid/free/owner/content;
+- do not create new published_at/expires_at values at this moment.
 
-Do not audit unchanged values.
-Do not store form payloads or unrelated data.
+After transition:
+- psychologist detail shows approved waiting for manual publication;
+- admin approved quick filter includes it;
+- admin detail should identify it as a re-publication/extension case using real history, without introducing a new DB flag unless absolutely necessary.
 
-Settings update + audit must be transactional.
-A failed audit must roll back setting changes.
-Cache invalidation must not expose rolled-back values.
+### 13. Re-publication activation
 
-### 13. Placement duration snapshot regression
+Reuse Stage 7 approved -> active activation.
 
-Explicitly prove:
+When the approved group came from expired -> approved:
 
-- an already active group retains its existing placement_days/published_at/expires_at after placement_duration_days is changed;
-- a later activation of another approved group uses the new SettingService placement duration.
+- admin still sees public_uuid/reminder;
+- activation uses CURRENT SettingService::placementDurationDays();
+- published_at becomes current UTC time;
+- placement_days becomes current setting;
+- expires_at = new published_at + current duration;
+- expiry_warning_sent_at = null;
+- status history gets approved -> active with admin actor.
 
-Do not retroactively update existing group dates.
+Add explicit regression proving the old placement_days may differ from the new period.
 
-### 14. Prices before WEBPAY
+Do not rerun moderation.
 
-Stage 8 may configure placement/extension prices even though WEBPAY is not connected.
+### 14. Extension window UI/data
 
-Requirements:
-- prices persist as minor units through SettingService;
-- display back correctly as BYN;
-- no payment is created when saving prices;
-- changing price does not alter any existing payment/group record;
-- Stage 7 free=false temporary no-payment group flow remains unchanged until Stage 13.
+Use current SettingService::expiredExtensionWindowDays() at read/action time.
 
-### 15. Payment informational surface
+Expose on real pages as needed:
+- extension_deadline;
+- outside_window boolean;
+- can_extend boolean;
+- current owner tariff mode.
 
-Add real GET /admin/payments using the existing admin.payments.index Blade.
+Do not persist a duplicate deadline column.
 
-Real mode must render a truthful pre-WEBPAY state, for example:
-“Платежи ещё не подключены”.
+A later settings change affects whether a currently expired group is still inside the extension window because the setting is evaluated at the extension attempt/page read.
 
-Requirements:
-- no synthetic order number, transaction, amount, status, owner or group;
-- no search/filter controls that imply working payment data unless clearly disabled/unavailable;
-- no real payment detail links;
-- no refund control;
-- no POST/PATCH/DELETE payment routes;
-- no gp_payments / gp_payment_notifications query required for normal rendering;
-- no provider/API call;
-- no WEBPAY credentials/config added.
+### 15. Current tariff regression
 
-Prototype admin-payments/admin-payment variants remain unchanged.
+Explicitly test both directions:
 
-### 16. Admin home/navigation truthfulness
+- group was created with group.free=false, current owner.free=true -> Stage 9 free extension works;
+- group was created with group.free=true, current owner.free=false -> Stage 9 extension does NOT apply and no payment is created.
 
-Navigation now exposes Payments, Dictionaries, Settings because they have real Stage 8 routes.
+The historical gp_groups.free value must remain unchanged in both cases.
 
-Do not add Applications until Stage 10.
+### 16. Paid-owner Stage 9 boundary
 
-Admin home may remain the current truthful unavailable work-queue shell unless a simple real link/count is useful.
-Do not fabricate counts.
+For current owner.free=false:
 
-### 17. Confirmation behavior
+- active/expired extension page is informational only;
+- direct POST cannot extend or change status/dates;
+- no gp_payments row;
+- no payment route/redirect/provider request;
+- no extension_price usage is required to create an operation.
 
-Dangerous actions require real confirmation:
-- deactivate item;
-- delete unused item;
-- delete eligible custom empty dictionary;
-- settings save/change.
+Stage 14 will implement paid extension.
 
-Ensure confirmation modal submits the intended real form/data.
+### 17. No email/job boundary
 
-Avoid nested forms and ensure textarea/input values belong to the submitted form.
-If shared confirmation component needs a small extension for “submit existing form”, preserve all prior usages and prototype behavior.
+Hard gate:
 
-### 18. Authorization / IDOR
+- do not create warning mail classes/jobs;
+- do not queue jobs when a group enters warning window;
+- do not set expiry_warning_sent_at due to warning UI/scheduler;
+- do not add SMTP behavior.
 
-All Stage 8 routes require active authenticated admin.
+Stage 12 owns warning email.
 
-Psychologists receive 403.
+Tests should use Mail::fake()/Queue::fake() where useful to prove no warning dispatch.
 
-Nested item routes must not allow:
-- dictionary A + item from dictionary B;
-- editing/activating/deactivating/deleting another dictionary’s item by guessed ID.
+### 18. Admin/list query behavior
 
-Soft-deleted/disabled/rejected admin access continues to be revoked by existing account middleware.
+Real owner/admin lists must remain paginated and no-N+1.
 
-### 19. Tests
+Adding lifecycle presentation must not introduce:
+- one Setting query per group;
+- one owner query per group;
+- payment/application queries.
 
-All tests run on MySQL.
+Read the relevant settings once per request/service calculation and map over loaded rows.
 
-Cover at minimum:
+Admin expired quick filter and owner list query counts should remain constant as row count grows.
 
-#### Dictionary containers
-- admin-only access;
-- list/query count/pagination;
-- create custom dictionary;
-- unique/invalid code validation;
-- code immutable after create;
-- edit name;
-- core dictionary delete forbidden;
-- non-empty custom dictionary delete forbidden;
-- empty custom dictionary delete works after confirmation.
+### 19. Policy / IDOR
 
-#### Dictionary items
-- create;
-- uniqueness scoped to parent;
-- edit name/sort;
-- code immutable;
-- deactivate/reactivate;
-- used item cannot physically delete;
-- unused item can delete;
-- soft-deleted user/group references still count as use;
-- nested dictionary/item IDOR;
-- pagination/order/no N+1.
+Extend GroupPolicy or add a narrow extension ability.
 
-#### Existing-form integration
-- new active education item appears in psychologist create form;
-- inactive education item hidden for new records but retained for existing record;
-- new active format/gender appears in group form;
-- inactive format/gender hidden for new groups but retained for existing group;
-- reactivation restores options.
+Psychologist may access extension routes only for:
+- own group;
+- non-deleted group;
+- group not disabled;
+- status active or expired;
+- normal active account through existing middleware.
 
-#### Settings
-- real values render;
-- nullable price save/display;
-- valid money conversion without float;
-- malformed/negative/overflow price rejected;
-- positive integer validation;
-- warning_days < placement_days rule;
-- known keys only;
-- cache invalidation returns fresh saved value;
-- unchanged settings produce no audit;
-- changed settings produce actor/action/minimal old/new audit;
-- simulated audit failure rolls back DB and cache-visible values.
+Foreign group ID should return 404 through owner-scoped lookup.
 
-#### Placement duration regression
-- existing active group unchanged after setting edit;
-- new activation uses updated duration.
+Admin cannot use psychologist-only extension route because role middleware remains psychologist-only.
 
-#### Payment surface
-- admin GET works and reuses approved view;
-- psychologist 403;
-- no fake payment identifiers/data/actions;
-- no payment detail/mutation routes;
-- rendering issues no gp_payments/gp_payment_notifications queries;
-- settings price updates create no payment rows.
+Paid/free eligibility may be enforced by service/action rather than static policy because it depends on current tariff/settings.
 
-#### Regression
-- Stage 4–7 tests remain green;
-- group creation/edit still uses database dictionaries;
-- all 31 / 249 prototype variants remain;
-- production excludes prototype/foundation routes.
+### 20. Blade integration
 
-### 20. Manual/runtime verification
+Reuse existing views/components:
 
-Through real Docker browser flow:
+- psychologist/groups/index;
+- psychologist/groups/show;
+- psychologist/groups/extension;
+- psychologist/groups/_actions;
+- shared/group-summary;
+- admin/groups/index;
+- admin/groups/show;
+- shared/group-history where needed.
 
-1. Admin logs in.
-2. Open Dictionaries.
-3. Add real synthetic/local test values to:
-   - group_format;
-   - gender;
-   - education_type.
-4. Confirm those values immediately appear in psychologist/group forms.
-5. Deactivate one used value and confirm:
-   - it disappears for new records;
-   - an existing record still displays/retains it.
-6. Reactivate it.
-7. Open Settings.
-8. Configure placement/extension prices and timing values.
-9. Confirm saved values round-trip correctly.
-10. Activate a new approved group after changing placement duration and verify the new duration is used, while an older active group remains unchanged.
-11. Open Payments and verify only truthful pre-WEBPAY informational state is shown.
-12. Verify psychologist role cannot access any Stage 8 admin route.
-13. Check representative 1440/1024/390 rendering for dictionaries/items/settings/payment info page.
+Real action behavior:
 
-Use only synthetic/local values; do not treat them as approved production dictionary content.
+- active/expired owner action routes to real extension page when appropriate;
+- expired outside window routes to/create-new behavior as approved;
+- paid owner gets truthful unavailable extension UX, not prototype WEBPAY;
+- real warning text uses configured threshold/remaining data;
+- admin expired filter is real.
 
-### 21. Documentation
+Prototype variants:
+- active/warning/expired/outside-window;
+- free-active/free-expired/paid-active/paid-expired/outside-window/pending
+remain synthetic/no-op and unchanged.
+
+Do not redesign Stage 3.
+
+### 21. Tests
+
+All tests use MySQL.
+
+Add focused coverage for at least:
+
+#### Scheduler/expiration
+- command registered;
+- schedule registered every minute;
+- before expires_at unchanged;
+- exactly at expires_at -> expired;
+- after expires_at -> expired;
+- history system actor;
+- repeated command no duplicate history;
+- non-active/null-expires/soft-deleted ignored;
+- disabled active still expires;
+- candidate re-check/locking prevents duplicate transition.
+
+#### Remaining/warning
+- active remaining_days computed deterministically;
+- no negative display;
+- warning starts at configured threshold;
+- outside threshold no warning;
+- changing expiry_warning_days affects presentation immediately;
+- page render does not change expiry_warning_sent_at;
+- no mail/job queued.
+
+#### Active free extension
+- current owner.free=true required;
+- extends by group.placement_days, not current global placement duration;
+- published_at/placement_days unchanged;
+- expiry_warning_sent_at reset;
+- status remains active;
+- no payment/history transition;
+- no mail/job;
+- direct IDOR blocked.
+
+#### Expired free extension
+- inside window -> approved;
+- history expired -> approved with system actor;
+- no moderation/payment;
+- exact boundary allowed;
+- after boundary rejected;
+- old dates remain until activation;
+- outside-window UI has no effective extension action.
+
+#### Current tariff
+- historical group.free=false + current owner.free=true -> free extension works;
+- historical group.free=true + current owner.free=false -> no extension;
+- group.free never changed by extension.
+
+#### Re-publication
+- expired free extension -> approved appears in admin approved filter;
+- activation recalculates fresh dates using current placement_duration_days;
+- new placement_days may differ from previous snapshot;
+- public_uuid unchanged.
+
+#### Paid boundary
+- paid owner extension GET informational only;
+- direct POST rejected;
+- gp_payments count unchanged;
+- no WEBPAY/payment route/action/link.
+
+#### Admin expired filter
+- quick=expired selects expired only;
+- pagination/sort works;
+- real UI reminder for manual unpublication;
+- no payment/application queries.
+
+#### Access/regression
+- foreign owner group 404;
+- admin 403 on psychologist extension;
+- revoked account middleware remains;
+- Stage 4–8 suites remain green;
+- all 31/249 prototype variants remain;
+- production route isolation remains.
+
+### 22. Runtime/manual verification
+
+Using real Docker HTTP/browser:
+
+1. Create/activate a free-owner group.
+2. Verify active dates and remaining-time display.
+3. Move time / prepare a near-expiry group and verify warning UI only, no email.
+4. Run groups:expire before expiry -> no change.
+5. Run at/after expiry -> status expired once.
+6. Verify admin “Снять с публикации” quick filter.
+7. Free active extension -> expiry shifts by stored placement_days.
+8. Free expired extension inside window -> approved.
+9. Admin republishes/activates -> new dates use current setting.
+10. Change current owner tariff after group creation and verify current tariff, not group.free, selects behavior.
+11. Paid current owner sees unavailable paid-extension state and cannot POST around it.
+12. Verify zero new gp_payments and zero queued warning-email jobs.
+13. Check representative active/warning/expired/extension/admin pages at 1440/1024/390.
+
+### 23. Documentation
 
 Update:
-- docs/architecture.md — dictionary lifecycle/usage protection and typed settings write/audit/cache boundary;
-- docs/development.md — how to populate local dictionaries and configure settings through UI;
-- docs/project-status.md — Stage 8 completed and Stage 9+ pending;
-- docs/ui-pages.md — real Stage 8 route wiring while preserving prototype catalogue.
+
+- docs/architecture.md — lifecycle scheduler/locking, warning calculation, current-tariff extension boundary;
+- docs/development.md — groups:expire command, scheduler local verification, free-extension manual scenarios;
+- docs/project-status.md — Stage 9 completed and Stage 10+ pending;
+- docs/ui-pages.md — real extension/expired/warning route wiring while preserving prototypes.
+
+Document production requirement for normal Laravel schedule:run cron, but do not implement deployment.
 
 Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
 ## Explicit Out Of Scope
 
 Do not implement:
-- WEBPAY config/credentials/provider requests;
-- real payment list/detail data;
-- payment creation/status/refund;
-- payment notifications;
-- applications;
-- Stage 9 expiration scheduler;
-- free/paid extension;
-- expiry warning email/jobs;
-- public API;
-- HMAC integration;
-- email/password onboarding;
-- psychologist self-edit;
+
+- warning email/job;
+- SMTP;
+- password/email onboarding;
+- WEBPAY;
+- placement payments;
+- paid extension payments;
+- payment notifications/recovery polling;
+- refund behavior;
+- applications/counters;
+- public API/HMAC;
+- automatic public-site publish/unpublish;
+- Stage 10 retention cleanup;
 - production deployment.
 
-Do not create active real routes/actions for these future stages.
+Do not create active routes/actions for these future-stage behaviors.
 
 ## Constraints
 
 - Follow WORKFLOW.md and AGENTS.md.
-- Reuse accepted Stage 3 views/components.
-- Preserve Stage 4–7 auth/admin/group/document behavior.
-- Dictionary codes are stable.
-- Core dictionary containers cannot be deleted.
-- Used dictionary items are deactivated, not physically deleted.
-- Settings writes go through SettingService.
-- Audit changed business settings.
-- Money stored only as integer minor units; never float.
-- No payment/provider behavior in Stage 8.
+- Reuse accepted Stage 3 views.
+- Use GroupStatusTransitionService for active -> expired and expired -> approved.
+- Use current gp_users.free for extension eligibility.
+- Never use gp_groups.free to choose extension tariff.
+- Active free extension uses stored group.placement_days.
+- Re-publication activation uses current placement_duration_days.
+- Use current expired_extension_window_days at extension time.
+- Scheduler correctness must be transactional/lock-safe and idempotent.
+- No email or payment side effects.
 - Tests remain MySQL-only.
 - Preserve all 249 prototype variants.
-- No Node/npm/Vite or frontend framework.
-- No secrets or real production dictionary/personal/payment data.
+- No Node/npm/Vite.
+- No secrets/real data.
 - Do not alter .ai/task.md.
 
 ## Acceptance Criteria
 
-1. Real admin navigation exposes Payments, Dictionaries and Settings.
-2. Only active admins can access Stage 8 routes.
-3. Admin can create/edit dictionary containers without source changes.
-4. Dictionary/container codes are immutable after creation.
-5. Core containers education_type/group_format/gender cannot be deleted.
-6. Admin can add/edit/reorder dictionary items.
-7. Item codes are unique per dictionary and immutable.
-8. Admin can deactivate/reactivate items.
-9. Used items cannot be physically deleted.
-10. Unused items can be deleted after confirmation.
-11. Nested dictionary/item IDOR is blocked.
-12. Active items appear immediately in real Stage 5/7 forms.
-13. Deactivated item disappears from new forms.
-14. Existing records retain/display a referenced inactive item.
-15. Real Settings page reads all seven values through typed SettingService.
-16. Admin can update all seven defined values; arbitrary keys cannot be created.
-17. Prices support nullable human BYN input and persist as integer minor units without float.
-18. Integer settings and warning<placement validation work.
-19. Setting caches are invalidated only after successful commit and reads return fresh values.
-20. Changed settings generate minimal setting.updated audit entries with current admin actor.
-21. Unchanged values generate no audit entry.
-22. Audit failure rolls back settings and does not expose stale/rolled-back cache values.
-23. Existing active placement dates remain unchanged after placement duration setting change.
-24. Later activation uses the new placement duration.
-25. Saving prices creates no payment/provider behavior.
-26. Real /admin/payments reuses approved payment-list Blade in truthful pre-WEBPAY mode.
-27. Real payment page shows no fake orders/transactions/actions.
-28. No real payment detail or payment mutation route exists.
-29. Normal payment informational rendering does not query payment tables.
-30. No WEBPAY config/credential/provider code is introduced.
-31. Stage 4–7 regression remains green.
-32. All 31 page groups / 249 prototype variants remain green.
-33. Full MySQL suite passes.
-34. Pint passes.
-35. Larastan passes.
-36. composer check-platform-reqs passes.
-37. Blade compilation passes.
-38. Representative real Stage 8 pages work at 1440/1024/390.
-39. Documentation reflects actual Stage 8 state.
-40. Final diff is limited to Stage 8 dictionaries/settings/payment-info UI, necessary shared integration, tests/docs, and .ai/report.md.
+1. groups:expire exists and is scheduled every minute.
+2. Active group remains active before expires_at.
+3. At/after expires_at active -> expired through domain transition service.
+4. Expiration history has system actor and is created once.
+5. Repeated/concurrent lifecycle processing does not duplicate transition/history.
+6. Soft-deleted/non-active/null-expiry records are ignored.
+7. Disabled active group still expires.
+8. Active real UI shows correct remaining/expiry state.
+9. Warning uses current expiry_warning_days and is not hardcoded.
+10. Warning UI does not queue email or set expiry_warning_sent_at.
+11. Real admin quick=expired filter lists groups requiring manual unpublication.
+12. Free active extension uses current owner.free=true and stored placement_days.
+13. Active extension keeps status/published_at/placement_days and resets expiry_warning_sent_at.
+14. Free expired extension inside current extension window transitions expired -> approved.
+15. expired -> approved history uses system actor.
+16. Exact extension-window boundary is allowed; after it direct POST is rejected.
+17. Expired extension does not run moderation or create payment.
+18. Old expired period dates remain until reactivation.
+19. Re-publication activation recalculates dates using current placement_duration_days.
+20. Current owner tariff, not gp_groups.free, controls extension mode.
+21. Historical gp_groups.free remains unchanged.
+22. Paid current owner cannot extend in Stage 9 and gets truthful unavailable UX.
+23. Paid direct POST creates no state/date/payment changes.
+24. No Stage 9 flow creates gp_payments or uses WEBPAY.
+25. No warning mail/job is introduced or queued.
+26. Foreign group IDOR is blocked; admin cannot use psychologist extension routes.
+27. Real UI uses existing Stage 3 group/extension/admin views.
+28. Prototype warning/extension variants and all 31/249 entries remain green.
+29. Stage 4–8 regression remains green.
+30. Full MySQL suite passes.
+31. Pint passes.
+32. Larastan passes.
+33. composer check-platform-reqs passes.
+34. Blade compilation passes.
+35. Representative pages work at 1440/1024/390.
+36. Documentation reflects actual Stage 9 behavior.
+37. Final diff is limited to lifecycle/extension/scheduler/UI integration/tests/docs and .ai/report.md.
 
 ## Verification Commands
 
@@ -618,24 +678,25 @@ Run and report exact results.
 
 1. Confirm Docker services healthy.
 2. Migrate/seed without destructive reset.
-3. Verify real admin dictionary create/edit/item/deactivate/reactivate/delete flows.
-4. Verify real Stage 5/7 forms react immediately to dictionary changes.
-5. Verify settings update, validation, audit and cache behavior.
-6. Verify old active group dates are unchanged and later activation uses the new duration.
-7. Verify /admin/payments is informational only and performs no payment table query/provider action.
-8. Verify psychologist gets 403 for Stage 8 routes.
-9. Run:
+3. Inspect scheduler list and confirm groups:expire cadence/overlap guard.
+4. Run groups:expire against before/due/after fixtures.
+5. Verify repeated execution creates one expiration history only.
+6. Verify active/expired free extension real browser flows.
+7. Verify paid current tariff cannot create payment/extension effect.
+8. Verify current-tariff changes override historical group.free for extension decision.
+9. Verify expired quick filter/manual-unpublish reminder.
+10. Verify no Mail/Queue warning dispatch and no gp_payments changes.
+11. Run:
    - docker compose exec -T php php artisan test
    - docker compose exec -T php ./vendor/bin/pint --test
    - docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
    - docker compose exec -T php composer check-platform-reqs
    - docker compose exec -T php php artisan view:cache
-10. Inspect route list and production route isolation.
-11. Inspect audit rows for setting updates.
-12. Inspect query counts for dictionary/item/payment-info lists.
-13. Inspect representative UI at 1440/1024/390.
-14. Inspect git diff/status/staged files.
-15. Confirm no secrets, real personal/payment data, screenshots, browser artifacts, or unrelated files are staged.
+12. Inspect route list and production isolation.
+13. Inspect group status history/dates around expiration/extension/republication.
+14. Inspect representative UI at 1440/1024/390.
+15. Inspect git diff/status/staged files.
+16. Confirm no secrets, real data, browser artifacts, screenshots or unrelated files are staged.
 
 ## Hard Workflow Gate
 
@@ -644,27 +705,28 @@ Before changing files:
 - read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
 - run git log --oneline -5;
 - run git status --short;
-- confirm base commit 1f5182039fadcfe53bb737c30748104c2535308c;
-- inspect existing dictionary/settings/payment prototype views and SettingService/AuditService;
+- confirm base commit 28aabaab3bcc84622959f9e81088d0844c90fc5f;
+- inspect GroupWorkflow, GroupStatusTransitionService, SettingService, GroupPolicy and existing extension/group views;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- stay strictly in Stage 8;
-- do not begin Stage 9 lifecycle or Stage 10 applications;
-- do not add WEBPAY/provider behavior;
-- preserve accepted views/prototypes;
-- keep dictionary/settings changes transactional and explicit;
+- stay strictly in Stage 9;
+- do not implement Stage 10 applications;
+- do not implement Stage 12 email warning jobs;
+- do not implement Stage 13/14 WEBPAY/payment extension;
+- use domain transitions and row locks;
+- preserve prototype behavior/accepted design;
 - do not alter .ai/task.md;
 - do not change governance/spec files.
 
 Before commit:
 
 - run all required checks;
-- perform real browser/admin Stage 8 smoke verification;
-- update .ai/report.md with routes/controllers/requests/services, dictionary lifecycle, settings audit/cache behavior, payment-info evidence, tests/runtime checks, facts/assumptions/unknowns;
+- perform real browser/command lifecycle smoke verification;
+- update .ai/report.md with command/schedule, locking/idempotency, warning UI calculation, extension rules/current tariff, no-email/no-payment evidence, tests/runtime checks, facts/assumptions/unknowns;
 - inspect full diff and staged files;
-- stage only Stage 8 files plus .ai/report.md;
+- stage only Stage 9 files plus .ai/report.md;
 - ensure no runtime/test artifacts are staged.
 
 Completion:
@@ -673,6 +735,6 @@ Completion:
 - otherwise use partial, blocked, or failed;
 - if complete, commit with:
 
-codex: TASK-2026-09-21-06 implement dictionaries settings admin
+codex: TASK-2026-09-21-07 implement group lifecycle free extension
 
 - do not create an accept commit.
