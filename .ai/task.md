@@ -1,758 +1,731 @@
-# Task: TASK-2026-09-21-08
+# Task: TASK-2026-09-21-09
 
 Status: planned
-Created from: 96b64c9323ba78ff434e35f2bdeadf15c623e344 (main)
+Created from: e96ce0a8c41282827513f9b3fb6fea3f140dacce (main)
 
 ## Title
 
-Stage 10 — Implement internal participant application lists, ownership/IDOR, counters, processing state, phone search, and retention cleanup
+Global UI/UX audit and refactor after Stage 10
+
+## Executor
+
+Claude Code.
+
+The product owner explicitly authorizes a substantial UI/UX refactor in this task.
+
+This is NOT audit-only: audit the interface and immediately fix the problems you find.
 
 ## Goal
 
-Implement Stage 10 from SPEC.md using the accepted Stage 3 psychologist/admin application Blade views.
-
-This milestone makes participant applications fully usable **inside the cabinet** using synthetic/factory data, while deliberately not implementing the external public-site API yet.
-
-After this task:
-
-- a psychologist sees applications only for groups they own;
-- a psychologist can open an application of their own group;
-- a psychologist can mark it processed and return it to unprocessed;
-- group list/detail counters show real new/processed/all counts;
-- an administrator can see/search/filter all applications across all groups/psychologists;
-- an administrator can open any application read-only;
-- application lists are paginated and no-N+1;
-- phone search uses normalized phone data;
-- a scheduled cleanup command permanently deletes applications strictly older than the configured retention period;
-- all real application UI uses approved Stage 3 views.
+Bring the real cabinet UI to a coherent, production-quality state now that Stages 1–10 are working.
+
+Audit and improve both roles:
+
+- psychologist cabinet;
+- administrator cabinet.
+
+The current Stage 3 visual baseline is no longer a constraint. It may be significantly reworked where necessary.
+
+The task should result in a cabinet that feels like one deliberate product rather than a collection of prototype pages wired to backend flows.
+
+## Hard Boundary
+
+You may change the UI layer substantially.
+
+### Allowed
+
+- Blade layouts;
+- Blade pages;
+- shared Blade partials/components;
+- UI component structure;
+- navigation structure/presentation;
+- information hierarchy;
+- page composition;
+- tables/cards/lists;
+- forms;
+- filters;
+- statuses;
+- alerts;
+- confirmations;
+- empty states;
+- responsive behavior;
+- typography;
+- spacing;
+- borders/radii/shadows;
+- colors/tokens within the existing brand direction;
+- `application/public/ui.css`;
+- `application/public/ui.js` when needed for UI behavior;
+- minor view-presenter changes only when needed to expose already-existing data in a cleaner way;
+- UI-focused tests that must change because markup/labels/navigation changed;
+- `.ai/report.md`;
+- UI documentation only if it is now materially inaccurate.
+
+### Forbidden
+
+Do NOT change:
+
+- database schema/migrations;
+- business rules;
+- status transitions;
+- authorization semantics;
+- policies except a purely UI-unblocking bug discovered during the work, and only if explicitly documented;
+- payment behavior;
+- scheduler behavior;
+- retention behavior;
+- group lifecycle behavior;
+- application processing semantics;
+- document security;
+- authentication/session behavior;
+- external/public API;
+- WEBPAY;
+- email;
+- Stage 11+ functionality;
+- dependencies/framework;
+- routes unless a UI restructuring absolutely requires a harmless navigation alias; default is no route changes;
+- `SPEC.md`, `WORKFLOW.md`, `AGENTS.md`;
+- `.ai/task.md`.
+
+Do not use this task as an excuse for backend cleanup.
+
+If a backend issue is discovered but is not required to complete the UI refactor, report it in `.ai/report.md` and leave it untouched.
+
+## Product Intent
+
+The product owner expects that many current interface decisions are weak and is open to a near-complete visual/compositional rethink.
+
+Prioritize:
+
+1. clarity;
+2. visual hierarchy;
+3. fast scanning;
+4. obvious next action;
+5. lower cognitive load;
+6. predictable patterns;
+7. responsive behavior;
+8. consistency between psychologist/admin;
+9. restrained, professional aesthetics;
+10. usability over preserving old markup.
+
+Avoid:
+
+- excessive cards/panels;
+- repeated status explanations;
+- duplicated information;
+- oversized headings;
+- unnecessary borders;
+- excessive rounded containers;
+- giant empty spaces;
+- weak action hierarchy;
+- multiple equally-prominent buttons;
+- verbose helper text everywhere;
+- desktop-first layouts that merely stack badly on mobile;
+- “prototype/demo” visual language in real UI;
+- accidental visual differences between similar CRUD pages.
 
-External /api/v1 intake, HMAC, request idempotency and public-site integration remain Stage 11.
+## Token / Context Efficiency
+
+Do NOT read the whole repository.
+
+Do NOT inspect all backend services/tests.
+
+Do NOT browse all 249 prototype variants.
+
+Do NOT read the full SPEC.
+
+Use the focused path below.
+
+### First read only
+
+1. `WORKFLOW.md`
+   - only the planner/executor/report/commit rules.
+
+2. this `.ai/task.md`.
+
+3. `docs/project-status.md`
+   - Stage 5–10 sections;
+   - Intentionally not implemented.
+
+4. `docs/ui-pages.md`
+   - headings + real wiring sections;
+   - do not read every prototype URL line.
 
-## Facts
+5. `SPEC.md`
+   Search only:
+   - `24.2`;
+   - `24.5`;
+   - `# 25. Responsive`.
+   The current task supersedes the old Stage 3 “do not redesign” rule because this is an explicit UI redesign task.
 
-- Stages 1–9 are accepted through commit 96b64c9323ba78ff434e35f2bdeadf15c623e344.
-- gp_group_applications already exists with:
-  - id;
-  - group_id;
-  - last_name;
-  - first_name;
-  - phone;
-  - phone_normalized;
-  - processed_at;
-  - timestamps.
-- Indexes already exist on:
-  - group_id;
-  - processed_at;
-  - (group_id, processed_at);
-  - created_at.
-- GroupApplication model already belongsTo Group.
-- Group belongsTo owner User.
-- SettingService already exposes participantApplicationRetentionMonths().
-- Default retention setting is 12 months.
-- Stage 7/9 psychologist group list/detail currently use placeholder zero/unavailable application data.
-- Stage 3 approved views already exist:
-  - psychologist/applications/index.blade.php;
-  - psychologist/applications/show.blade.php;
-  - admin/applications/index.blade.php;
-  - admin/applications/show.blade.php;
-  - shared/application-list.blade.php;
-  - shared/application-detail.blade.php;
-  - shared/application-counters.blade.php.
-- Prototype catalogue includes real-looking application states but they remain synthetic/no-op.
-- Stage 11 will later create applications from the public site by group public_uuid.
-- Stage 10 must not expose a cabinet form/action that creates participant applications.
+6. `application/routes/web.php`
+   - only to map current real pages.
 
-## Product / Architecture Decisions
+### Visual foundation files
 
-### No real application creation route in Stage 10
+Read these first:
 
-Stage 10 is internal read/update UI only.
+- `application/public/ui.css`
+- `application/public/ui.js`
+- `application/resources/views/layouts/surface.blade.php`
+- `application/resources/views/layouts/app.blade.php`
+- `application/resources/views/layouts/admin.blade.php`
+- `application/resources/views/layouts/psychologist.blade.php`
 
-Do not add POST /applications create behavior.
-Do not add public API routes.
-Do not add a psychologist/admin “create application” action.
+### Core components
 
-Tests use model factories.
-Manual/local verification may create synthetic fixture records directly/factory/script, but no production UI endpoint is introduced.
+Prioritize:
 
-### Processing state
+- `components/navbar.blade.php`
+- `components/sidebar.blade.php`
+- `components/page-header.blade.php`
+- `components/panel.blade.php`
+- `components/button.blade.php`
+- `components/status.blade.php`
+- `components/alert.blade.php`
+- `components/empty.blade.php`
+- `components/table.blade.php`
+- `components/cell.blade.php`
+- `components/pagination.blade.php`
+- `components/input.blade.php`
+- `components/select.blade.php`
+- `components/textarea.blade.php`
+- `components/checkbox.blade.php`
+- `components/confirmation.blade.php`
+- `components/validation-summary.blade.php`
 
-processed_at is the only source of truth:
+Do not inspect every component unless a visible issue requires it.
 
-- processed_at = null -> new/unprocessed;
-- processed_at != null -> processed.
+### Shared product partials
 
-Mark processed:
-- set processed_at to current UTC time.
+- `resources/views/shared/group-form.blade.php`
+- `resources/views/shared/group-data.blade.php`
+- `resources/views/shared/group-summary.blade.php`
+- `resources/views/shared/group-history.blade.php`
+- `resources/views/shared/application-list.blade.php`
+- `resources/views/shared/application-detail.blade.php`
+- `resources/views/shared/application-counters.blade.php`
+- `resources/views/shared/profile-data.blade.php`
+- `resources/views/shared/documents.blade.php`
 
-Return to unprocessed:
-- set processed_at = null.
+### Psychologist pages
 
-Repeated action should be safe/idempotent:
-- marking an already processed application does not keep changing its timestamp;
-- returning an already unprocessed application remains null.
+- `psychologist/groups/index.blade.php`
+- `psychologist/groups/form.blade.php`
+- `psychologist/groups/show.blade.php`
+- `psychologist/groups/extension.blade.php`
+- `psychologist/applications/index.blade.php`
+- `psychologist/applications/show.blade.php`
+- `psychologist/profile/show.blade.php`
 
-No separate status column.
+### Admin pages
 
-### Phone normalization boundary
+- `admin/home.blade.php`
+- `admin/users/index.blade.php`
+- `admin/users/show.blade.php`
+- `admin/users/form.blade.php`
+- `admin/users/documents.blade.php`
+- `admin/groups/index.blade.php`
+- `admin/groups/show.blade.php`
+- `admin/groups/form.blade.php`
+- `admin/applications/index.blade.php`
+- `admin/applications/show.blade.php`
+- `admin/dictionaries/index.blade.php`
+- `admin/dictionaries/items.blade.php`
+- `admin/settings/index.blade.php`
+- `admin/payments/index.blade.php`
 
-Stage 10 needs reusable normalization for storage/search, but must not invent a default country for ambiguous local numbers.
+### Only inspect presenters if needed
 
-Add a small reusable PhoneNormalizer suitable for Stage 11:
+Use only these unless absolutely necessary:
 
-- trim whitespace;
-- remove formatting separators such as spaces, parentheses, hyphens and dots;
-- accept an international + followed by digits;
-- convert 00-prefixed international notation to +;
-- a bare number already beginning with country digits may be canonicalized to +digits only when it is unambiguous under the implemented rule;
-- do not silently assume a country for arbitrary local numbers;
-- normalized storage value should be canonical +digits where an international number is available;
-- search normalization should compare digits independent of display punctuation.
+- `App\Support\GroupPages`
+- `App\Support\ApplicationPages`
+- `App\Support\PsychologistPages`
+- `App\Support\PsychologistCabinetPages`
 
-Synthetic Stage 10 fixtures should use explicit international phone numbers.
+Do not wander into domain services/controllers/tests unless required to understand a visible state.
 
-If the existing SPEC does not define enough information to convert an ambiguous local number to international form, do not guess. Stage 11 API validation may tighten accepted input when integration requirements are known.
+## Local Access
 
-### Retention cutoff
+Base URL:
 
-Use current SettingService::participantApplicationRetentionMonths() at command run time.
+`http://localhost:8080/cabinet`
 
-Delete applications where:
+Accounts:
 
-created_at < current UTC time minus configured retention months
+- admin: `admin@gruppa.test` / `password`
+- psychologist: `psychologist@gruppa.test` / `password`
 
-Exact cutoff equality is retained; only strictly older rows are removed.
+Use existing local synthetic data.
 
-Deletion is physical/permanent, because gp_group_applications currently has no soft-delete column and SPEC explicitly requires permanent retention cleanup.
+Do not mutate business data just to create every rare state.
 
-Applications belonging to soft-deleted groups are still subject to retention cleanup.
+Use prototypes only for hard-to-reproduce states.
 
-## Scope
+## Audit + Fix Workflow
 
-### 1. Model / factory foundation
+Work in system-level passes, not random page patches.
 
-Improve GroupApplication model typing/relationships as needed.
+### Pass 1 — global shell
 
-Add GroupApplicationFactory for tests and local synthetic setup.
+Audit and immediately fix:
 
-Factory should:
-- require/associate a Group;
-- create clearly synthetic names/phones;
-- populate phone and phone_normalized consistently through the reusable normalizer or a centralized creation invariant;
-- support processed/unprocessed states.
+- page width;
+- navigation;
+- desktop/tablet/mobile layout;
+- page header;
+- global spacing scale;
+- typography hierarchy;
+- backgrounds/surfaces;
+- primary/secondary/destructive action styling;
+- status badges;
+- alert density;
+- focus states;
+- modal/confirmation behavior.
 
-Do not seed fake production applications in production.
+Do this before page-specific polish.
 
-Do not commit real personal data.
+### Pass 2 — reusable patterns
 
-### 2. Reusable phone normalizer
+Audit and fix shared patterns:
 
-Add a small support/service class, not controller-specific parsing.
+- list/table/card pattern;
+- form pattern;
+- detail/read-only pattern;
+- search/filter bar;
+- counters/metrics;
+- empty state;
+- timeline/history;
+- document list;
+- pagination;
+- validation state;
+- dangerous action confirmation.
 
-It should provide at least:
-- normalizeForStorage(string): canonical normalized value or explicit validation/error for unsupported ambiguous input;
-- digitsForSearch(string): digits-only comparable search key.
+Prefer one coherent pattern over page-specific exceptions.
 
-Tests must cover:
-- +375 (29) 123-45-67;
-- 00375 29 123 45 67;
-- already normalized international input;
-- punctuation/whitespace;
-- malformed non-phone text;
-- ambiguous local numbers are not silently assigned a country.
+### Pass 3 — psychologist flows
 
-Do not add a third-party phone package in this stage.
+Fix the full user journey:
 
-Stage 11 must be able to reuse the same normalization service.
+1. groups list;
+2. create/edit group;
+3. group detail/status/history;
+4. extension;
+5. applications list/detail/process action;
+6. profile/documents.
 
-### 3. Psychologist group counters
+Focus on:
+- next action clarity;
+- status comprehension;
+- action priority;
+- reducing redundant blocks;
+- mobile usability.
 
-Replace Stage 7 placeholder counters with real counts on psychologist group list/detail.
+### Pass 4 — admin flows
 
-For every listed group expose:
-- new_count = applications where processed_at is null;
-- processed_count = applications where processed_at is not null;
-- all_count = total applications.
+Fix:
 
-Use Eloquent withCount/subqueries in the main group query.
-No per-group application query.
+1. admin home;
+2. psychologists list/detail/form/documents;
+3. groups list/detail/form/moderation;
+4. applications list/detail;
+5. dictionaries/items;
+6. settings;
+7. payments informational state.
 
-Group list:
-- display real shared.application-counters;
-- active link “Открыть заявки” to that group’s real application list.
+Admin must remain dense enough for work, but not visually noisy.
 
-Group detail:
-- display real counters;
-- show truthful empty/latest snippet as appropriate without a per-group N+1;
-- active link “Все заявки группы”.
+### Pass 5 — responsive polish
 
-Do not restrict viewing existing applications based on current group lifecycle status; owners may still need historical applications after expiry. Ownership is the access boundary.
+Validate and fix at:
 
-### 4. Owner application routes
+- 1440;
+- 1024;
+- 390.
 
-Under account + role:psychologist add nested owner routes, recommended:
+Do not just stack desktop UI.
+Make deliberate mobile decisions.
 
-GET /groups/{group}/applications
-GET /groups/{group}/applications/{application}
-POST /groups/{group}/applications/{application}/processed
-POST /groups/{group}/applications/{application}/unprocessed
+## Real Browser Pages to Use
 
-Names under psychologist.applications.* or psychologist.groups.applications.* are acceptable if consistent.
+### Psychologist
 
-Use owner-scoped lookup:
-- group.owner_id = authenticated user id;
-- application.group_id = resolved group id.
+- `/cabinet/`
+- `/cabinet/profile`
+- one `/cabinet/groups/{id}`
+- one `/cabinet/groups/{id}/edit`
+- one `/cabinet/groups/{id}/extension`
+- one `/cabinet/groups/{id}/applications`
+- one `/cabinet/groups/{id}/applications/{application}`
 
-Foreign group/application combinations return 404 without leaking data.
+### Admin
 
-Do not globally bind an application and trust only policy afterward.
+- `/cabinet/admin`
+- `/cabinet/admin/psychologists`
+- one psychologist detail/edit/documents
+- `/cabinet/admin/groups`
+- one group detail/edit
+- `/cabinet/admin/applications`
+- one application detail
+- `/cabinet/admin/dictionaries`
+- one dictionary items page
+- `/cabinet/admin/settings`
+- `/cabinet/admin/payments`
 
-### 5. Psychologist application list
+## Prototype Pages — only representative rare states
 
-Connect psychologist.applications.index to real data.
+Do not browse the full catalogue.
 
-Requirements:
-- only one owned group selected by route;
-- real group title/counters;
-- filter processed:
-  - all;
-  - new;
-  - processed;
-- pagination 20;
-- newest first with deterministic id DESC tie-break;
-- query-string preservation;
-- real empty/no-results state;
-- no prototype links/actions;
-- no search field is required for psychologist list unless the approved view naturally supports it;
-- no N+1.
+Use only if real data does not already show the state:
 
-Application rows show:
-- participant full name from last_name + first_name;
-- phone;
-- created_at;
-- processed/new status;
-- open;
-- mark processed / return unprocessed.
+### Psychologist
 
-### 6. Psychologist application detail
+- `/_prototype/groups/revision`
+- `/_prototype/groups/rejected`
+- `/_prototype/groups/warning`
+- `/_prototype/groups/expired`
+- `/_prototype/groups/outside-window`
+- `/_prototype/group-form/validation`
+- `/_prototype/group-form/long`
+- `/_prototype/applications/long`
 
-Connect psychologist.applications.show to real data.
+### Admin
 
-Show:
-- participant name;
-- phone;
-- group link;
-- received date;
-- updated date;
-- processed date/status;
-- real process/unprocess action;
-- back link to the group’s application list.
+- `/_prototype/admin-group/moderation`
+- `/_prototype/admin-group/validation`
+- `/_prototype/admin-group/paid-delete-blocked`
+- `/_prototype/admin-groups/long`
+- `/_prototype/admin-applications/long`
+- `/_prototype/admin-user-form/validation`
+- `/_prototype/admin-documents/long`
+- `/_prototype/admin-settings/validation`
 
-Do not expose:
-- group owner ID as editable data;
-- phone_normalized as a hidden internal field unless needed for search/debug;
-- unrelated participant/application rows.
+If a shared issue is already obvious, skip redundant prototype browsing.
 
-### 7. Process / unprocess workflow
+## Viewport Checklist
 
-Add a small ApplicationWorkflow/ApplicationService or equivalent explicit service.
+### 1440
 
-Within transaction/row lock:
-- re-resolve application under owned group;
-- authorize owner access;
-- mark processed only if currently null;
-- unprocess only if currently non-null;
-- repeated same-state action returns success without changing processed_at again.
+Must inspect:
+- psychologist groups;
+- group form;
+- admin psychologists;
+- admin group detail;
+- admin applications;
+- settings.
 
-Use current UTC time.
-No audit is required by SPEC for participant processing state.
-No email/job/API side effect.
+### 1024
 
-Do not allow administrator mutation in Stage 10; admin application detail is read-only.
+Must inspect:
+- psychologist group detail;
+- psychologist applications;
+- admin groups;
+- admin psychologist detail;
+- dictionaries.
 
-### 8. Application policy / IDOR
+### 390
 
-Add GroupApplicationPolicy or equivalent.
+Must inspect:
+- psychologist groups;
+- group form;
+- application list;
+- application detail;
+- profile;
+- admin psychologists;
+- admin group detail;
+- admin applications;
+- settings;
+- at least one confirmation modal.
+
+## What to Improve
+
+### Information hierarchy
+
+Make it obvious:
+
+- where the user is;
+- what the current status is;
+- what requires attention;
+- what the primary action is;
+- what is historical/secondary.
+
+Avoid showing the same status explanation in multiple places.
+
+### Navigation
+
+Psychologist navigation should feel simple and lightweight.
+
+Admin navigation has many sections; improve grouping/scannability/responsiveness without changing route semantics.
+
+### Lists
+
+Lists should support fast scanning.
+
+Pay attention to:
+
+- column/card density;
+- primary identifier;
+- status placement;
+- metadata hierarchy;
+- action placement;
+- empty/no-result behavior;
+- long content;
+- mobile conversion.
+
+### Forms
+
+Improve:
+
+- grouping;
+- labels;
+- help text density;
+- field widths;
+- required indicators;
+- error location;
+- save vs submit hierarchy;
+- cancel/back behavior;
+- sticky/action area only if actually useful.
+
+Do not alter validation/business requirements.
+
+### Detail pages
+
+Avoid “stack of identical panels”.
+
+Create stronger sections and reduce repetitive chrome.
+
+Emphasize:
+- identity/title;
+- status;
+- primary next action;
+- important dates;
+- critical warnings;
+- contextual history.
+
+### Admin moderation
+
+This is a high-priority workflow.
+
+Make moderation state and actions extremely clear:
+- approve;
+- revision;
+- reject;
+- activation;
+- public_uuid copy/manual publication reminder.
+
+Do not alter any moderation rules.
+
+### Applications
+
+Make phone/name/state/action scannable.
+
+Owner processing action should be clear but not dominate every row.
+
+### Settings/dictionaries
+
+Make internal administrative tools compact and predictable.
+
+Dangerous actions must remain clearly destructive.
+
+### Mobile
+
+At 390px:
+- no page-level horizontal overflow;
+- no tiny cramped action clusters;
+- no unreadable tables;
+- no modal overflow;
+- controls have sensible touch targets;
+- primary actions remain obvious;
+- content order must make sense after stacking.
+
+## Accessibility / Interaction
+
+Fix obvious UI accessibility problems encountered during the refactor:
+
+- semantic heading hierarchy;
+- form labels;
+- focus visibility;
+- button/link misuse;
+- disabled state clarity;
+- modal focus/close behavior;
+- aria-current;
+- color contrast where clearly weak.
+
+Do not turn this into a formal WCAG certification project.
+
+## Technical Rules
+
+- Blade + Bootstrap 5 + project CSS + minimal Vanilla JS only.
+- No npm/Vite.
+- No frontend framework.
+- No new dependency.
+- Keep Montserrat local.
+- Keep base path-safe Laravel helpers.
+- Keep production/prototype isolation.
+- Do not hardcode `/cabinet` paths in Blade.
+- Preserve CSRF/method spoofing/forms.
+- Preserve all business form field names and submitted values.
+- Preserve route names and controller contracts by default.
+
+## Prototype Strategy
+
+The prototype catalogue remains useful for rare visual states, but this refactor may change their appearance.
+
+Do not preserve old screenshots/markup for its own sake.
+
+Required:
+- all prototype routes still render;
+- no prototype route becomes a real business action;
+- no prototype leaks into production;
+- representative variants remain usable after shared component changes.
+
+You do not need to visually inspect all 249 variants.
+
+## Tests / Verification
+
+Do not rerun expensive checks after every small change.
+
+During iteration:
+- use browser;
+- use targeted UI/feature tests for changed shared views/components;
+- use `php artisan view:cache` when appropriate.
+
+Before commit run:
+
+1. `docker compose exec -T php php artisan test`
+2. `docker compose exec -T php ./vendor/bin/pint --test`
+3. `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
+4. `docker compose exec -T php composer check-platform-reqs`
+5. `docker compose exec -T php php artisan view:cache`
+
+Also verify:
+
+- no real route/business behavior changed unintentionally;
+- 31/249 prototype catalogue still renders/tests green;
+- production has no prototype routes;
+- no horizontal overflow on representative 390px pages;
+- browser console has no new JS errors.
+
+## Required Report
+
+Update `.ai/report.md` with:
+
+### 1. Status
+
+done / partial / blocked / failed
+
+### 2. UI direction
+
+Concise description of the final visual/system direction.
+
+### 3. System-level changes
+
+What changed in:
+
+- shell/navigation;
+- typography;
+- spacing;
+- panels/surfaces;
+- buttons/actions;
+- status/alerts;
+- forms;
+- lists/tables/cards;
+- responsive behavior.
+
+### 4. Page-level changes
 
 Psychologist:
-- view only if application.group.owner_id == actor.id;
-- process/unprocess only own group applications.
+- groups;
+- group form/detail/extension;
+- applications;
+- profile/documents.
 
-Administrator:
-- can viewAny/view all;
-- no process/unprocess action required in Stage 10.
+Admin:
+- home;
+- psychologists;
+- groups/moderation;
+- applications;
+- dictionaries;
+- settings;
+- payments info.
 
-Still prefer scoped queries/routes for owner endpoints so guessed foreign IDs return 404.
+### 5. Important UX decisions
 
-Revoked psychologist/admin access continues through existing account middleware.
+List deliberate tradeoffs and why.
 
-### 9. Admin navigation
+### 6. Remaining issues
 
-Add real “Заявки” to admin navigation now that Stage 10 routes exist.
+Only things not addressed in this task.
 
-Real admin nav becomes:
-- Главная;
-- Психологи;
-- Группы;
-- Заявки;
-- Платежи;
-- Справочники;
-- Настройки;
-- Выход.
+### 7. Verification
 
-Psychologist navigation remains:
-- Мои группы;
-- Мои данные;
-- Выход.
+Exact test/check/browser results.
 
-No separate global psychologist Applications nav item is required; applications are entered from a group.
+### 8. Files changed
 
-### 10. Admin routes
+Group them by UI foundation/components/pages/support/tests/docs.
 
-Under account + role:admin add:
-
-GET /admin/applications
-GET /admin/applications/{application}
-
-No admin create/update/delete/process routes.
-
-### 11. Admin application list
-
-Connect admin.applications.index to real data.
-
-Implement:
-- search field over:
-  - participant last_name;
-  - participant first_name;
-  - combined participant name where practical;
-  - raw phone;
-  - normalized phone;
-  - group title;
-  - psychologist full name/email;
-- processed filter:
-  - all;
-  - new;
-  - processed;
-- pagination 20;
-- newest first with deterministic id DESC;
-- query preservation;
-- eager-load group + owner;
-- no N+1.
-
-Phone search:
-- normalize user-entered phone-like query to digits and match normalized phone;
-- textual search still searches participant/group/psychologist fields;
-- do not make phone normalization cause SQL errors for arbitrary text.
-
-Rows show:
-- participant;
-- phone;
-- group with real admin group link;
-- psychologist with real Stage 5 profile link;
-- created date;
-- status;
-- open detail.
-
-### 12. Admin application detail
-
-Connect admin.applications.show to real data.
-
-Show:
-- participant;
-- phone;
-- group;
-- psychologist;
-- received/updated/processed times;
-- status.
-
-Real links:
-- group -> admin.groups.show;
-- psychologist -> admin.psychologists.show;
-- back -> admin.applications.index.
-
-No admin processed/unprocessed action in Stage 10.
-
-### 13. Group/application counters in admin context
-
-At minimum, psychologist group surfaces must have real counters per SPEC.
-
-If existing admin group detail naturally contains application counters, connect them truthfully too, with a link to admin applications filtered by group where practical.
-
-Do not add expensive per-row admin counter queries.
-
-### 14. Retention cleanup service
-
-Add a small ApplicationRetentionService or equivalent.
-
-Use current SettingService::participantApplicationRetentionMonths() once per run.
-
-Behavior:
-- cutoff calculated in UTC;
-- delete only created_at < cutoff;
-- exact cutoff retained;
-- permanent physical DELETE;
-- process in bounded chunks;
-- application/group status does not exempt records;
-- records for soft-deleted groups are included;
-- do not delete groups/users;
-- do not log participant names/phones.
-
-Return only aggregate deleted count.
-
-### 15. Retention command
-
-Add an Artisan command such as:
-
-php artisan applications:cleanup
-
-Output/log only aggregate count, e.g.:
-Deleted applications: N
-
-No participant PII.
-
-Repeated run after deletion should report 0.
-
-### 16. Scheduler registration
-
-Schedule applications:cleanup once daily with withoutOverlapping.
-
-Use Laravel Scheduler; exact wall-clock minute is not a product requirement, so standard daily() in app timezone/UTC is sufficient.
-
-Keep existing groups:expire every-minute schedule unchanged.
-
-Do not add Stage 11 API or Stage 12 warning-mail schedules.
-
-### 17. Retention race / boundary safety
-
-Tests must cover:
-- record one second older than cutoff deleted;
-- exact cutoff retained;
-- one second newer retained;
-- retention setting change affects next run;
-- processed and unprocessed old applications both deleted;
-- application attached to soft-deleted group still deleted;
-- repeated command idempotent;
-- cleanup never deletes groups/users;
-- aggregate output contains no PII.
-
-Use transaction/chunk strategy safe for normal scheduler concurrency.
-Command-level withoutOverlapping is required; DB-level duplicate deletion is naturally safe but avoid chunk pagination bugs while deleting.
-
-### 18. No external intake boundary
-
-Hard gate:
-
-- no /api/v1 application endpoint;
-- no HMAC;
-- no X-Timestamp;
-- no X-Request-Id;
-- no public-site secret;
-- no rate limit specific to integration;
-- no browser/public application form inside cabinet;
-- no create route for participant applications.
-
-Stage 11 will create incoming applications.
-
-### 19. No payment/email side effects
-
-Stage 10 application read/process/cleanup must not:
-- create/update payments;
-- invoke WEBPAY;
-- send/queue email;
-- alter group lifecycle.
-
-Add regression assertions where useful.
-
-### 20. Blade integration
-
-Reuse existing:
-- psychologist/applications/index;
-- psychologist/applications/show;
-- admin/applications/index;
-- admin/applications/show;
-- shared/application-list;
-- shared/application-detail;
-- shared/application-counters;
-- psychologist/groups/index/show;
-- group action/link surfaces as needed.
-
-Adapt shared application partials with explicit real URLs/actions/capabilities rather than role guessing when practical.
-
-Prototype modes remain:
-- synthetic;
-- no-op;
-- all existing variants unchanged.
-
-Do not redesign Stage 3.
-A global UI/UX audit is intentionally planned after Stage 10 as a separate task.
-
-### 21. Pagination and query performance
-
-All application lists paginate 20.
-
-Tests must verify constant query counts as rows/groups grow.
-
-Psychologist group list:
-- counters via withCount/subqueries;
-- no application query per group.
-
-Application lists:
-- no group/owner query per row.
-
-No payment queries should be introduced by application surfaces.
-
-### 22. Tests
-
-All tests run on MySQL.
-
-Add focused coverage for at least:
-
-#### Factory / normalization
-- factory creates valid synthetic application;
-- phone normalization canonical cases;
-- formatted phone search matches normalized record;
-- invalid/ambiguous phone normalization handled explicitly;
-- no real personal data.
-
-#### Psychologist counters
-- 0/new/processed/all counts correct;
-- counts update immediately after process/unprocess;
-- multiple groups do not create N+1;
-- group detail/list link to correct application list.
-
-#### Owner application list/detail
-- only own group applications;
-- all/new/processed filters;
-- pagination/query preservation;
-- deterministic ordering;
-- empty state;
-- owner can open own;
-- foreign group/application IDOR returns 404;
-- cross-group application substitution returns 404.
-
-#### Process/unprocess
-- new -> processed sets processed_at once;
-- repeated processed action keeps original timestamp;
-- processed -> unprocessed sets null;
-- repeated unprocessed remains null;
-- unauthorized actor cannot mutate;
-- admin has no mutation route.
-
-#### Admin list/detail
-- sees all groups’ applications;
-- search participant name;
-- search raw/formatted phone;
-- search normalized phone digits;
-- search group title;
-- search psychologist name/email;
-- processed filters;
-- pagination/query preservation;
-- real group/profile links;
-- constant query count/no N+1.
-
-#### Retention
-- command exists;
-- daily schedule + withoutOverlapping;
-- older than cutoff deleted;
-- exact cutoff retained;
-- newer retained;
-- current retention setting used;
-- processed/unprocessed both covered;
-- soft-deleted group application covered;
-- repeated run zero;
-- group/user records preserved;
-- output contains aggregate only/no participant PII.
-
-#### Boundaries/regression
-- psychologist cannot use admin application routes;
-- admin cannot use psychologist owner routes;
-- disabled/rejected/deleted access revoked;
-- no API/create application route;
-- no payment/email/group lifecycle side effects;
-- Stage 4–9 suites remain green;
-- all 31/249 prototype variants remain green;
-- production prototype isolation remains.
-
-### 23. Runtime/manual verification
-
-Using real Docker/browser with synthetic fixture rows:
-
-1. Create or identify two approved psychologists with separate groups.
-2. Insert synthetic applications through factory/local fixture setup only.
-3. Login as psychologist A:
-   - group counters correct;
-   - open applications for own group;
-   - filter new/processed;
-   - open detail;
-   - mark processed;
-   - return unprocessed.
-4. Guess psychologist B group/application IDs -> no data/404.
-5. Login admin:
-   - Applications nav appears;
-   - global list includes both owners;
-   - search by name/phone/group/psychologist;
-   - filters/pagination;
-   - detail links to group and psychologist.
-6. Create retention boundary fixtures and run applications:cleanup.
-7. Confirm only strictly older rows were deleted.
-8. Confirm groups/users/payments/lifecycle unchanged.
-9. Verify no mail/queue work.
-10. Check representative group-with-counters/application-list/detail/admin pages at 1440/1024/390.
-
-Keep all synthetic data clearly non-production and clean up smoke-only fixtures where practical.
-
-### 24. Documentation
-
-Update:
-
-- docs/architecture.md — application ownership/policy, processing state, phone normalization boundary, retention cleanup;
-- docs/development.md — creating synthetic application fixtures and manual Stage 10 verification;
-- docs/project-status.md — Stage 10 complete; Stage 11 incoming integration pending;
-- docs/ui-pages.md — real application route wiring while preserving prototype catalogue.
-
-Document that the global UI/UX audit is the recommended next separate product task before Stage 11 if requested by product owner.
-
-Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
-
-## Explicit Out Of Scope
-
-Do not implement:
-
-- public /api/v1;
-- HMAC/signature/timestamp/idempotency integration;
-- public-site application intake;
-- participant application create form in cabinet;
-- email;
-- password onboarding;
-- WEBPAY/payment changes;
-- group moderation/lifecycle changes beyond reading counters;
-- automatic public-site behavior;
-- global UI redesign/audit in this task;
-- production deployment.
-
-## Constraints
-
-- Follow WORKFLOW.md and AGENTS.md.
-- Reuse accepted Stage 3 views.
-- Owner access is derived from application.group.owner_id.
-- Owner routes must use scoped lookup for 404-style IDOR protection.
-- processed_at is the processing source of truth.
-- Search normalization must not invent a country code for ambiguous local numbers.
-- Retention uses current typed setting.
-- Cleanup is permanent and PII-safe in output/logs.
-- Tests remain MySQL-only.
-- Preserve all 249 prototype variants.
-- No Node/npm/Vite.
-- No secrets/real participant data.
-- Do not alter .ai/task.md.
+Do not write a huge narrative diary.
 
 ## Acceptance Criteria
 
-1. Real psychologist group list/detail show correct application counters.
-2. Counters use aggregate queries/no N+1.
-3. Owner can open real application list for own group.
-4. Owner list supports all/new/processed filters and pagination.
-5. Owner can open only own group application detail.
-6. Foreign/cross-group IDs return no application data.
-7. Owner can mark new application processed.
-8. Repeated process action does not change original processed_at again.
-9. Owner can return processed application to unprocessed.
-10. Repeated unprocess is idempotent.
-11. Admin Applications navigation and real global list exist.
-12. Admin sees applications across psychologists.
-13. Admin search works for participant/group/psychologist and normalized phone.
-14. Admin processed filters/pagination work.
-15. Admin detail links to real group and psychologist.
-16. Admin has no application mutation route in Stage 10.
-17. Phone normalization/search is centralized and reusable for Stage 11.
-18. Ambiguous local phone numbers are not silently assigned a country.
-19. applications:cleanup exists and uses current retention setting.
-20. Cleanup physically deletes only rows strictly older than cutoff.
-21. Exact cutoff/newer records remain.
-22. Processed/unprocessed and soft-deleted-parent records are covered.
-23. Cleanup output/log is aggregate-only and contains no participant PII.
-24. Cleanup is scheduled daily with overlap protection.
-25. Groups/users are never removed by retention cleanup.
-26. No real application creation/public API route exists.
-27. No payment/email/group-lifecycle side effects are introduced.
-28. Psychologist/admin role boundaries and revoked-account behavior remain.
-29. Real application/group pages reuse Stage 3 Blade views/components.
-30. Representative real pages work at 1440/1024/390.
-31. All 31 page groups / 249 prototype variants remain green.
-32. Stage 4–9 regression remains green.
-33. Full MySQL suite passes.
-34. Pint passes.
-35. Larastan passes.
-36. composer check-platform-reqs passes.
-37. Blade compilation passes.
-38. Production route isolation remains correct.
-39. Documentation reflects actual Stage 10 behavior.
-40. Final diff is limited to Stage 10 applications/counters/normalization/cleanup/UI integration/tests/docs and .ai/report.md.
-
-## Verification Commands
-
-Run and report exact results.
-
-1. Confirm Docker services healthy.
-2. Migrate/seed without destructive reset.
-3. Inspect application routes: no create/API route.
-4. Inspect scheduler list: groups:expire unchanged + applications:cleanup daily overlap-protected.
-5. Create synthetic application fixtures via factory/local setup.
-6. Verify owner counters/list/detail/process/unprocess and cross-owner IDOR.
-7. Verify admin list/search/filter/detail.
-8. Verify phone search with formatted and normalized input.
-9. Run retention cutoff fixtures and applications:cleanup twice.
-10. Confirm groups/users remain and no PII appears in command output.
-11. Confirm no payments/mail/jobs/lifecycle changes.
-12. Run:
-   - docker compose exec -T php php artisan test
-   - docker compose exec -T php ./vendor/bin/pint --test
-   - docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
-   - docker compose exec -T php composer check-platform-reqs
-   - docker compose exec -T php php artisan view:cache
-13. Inspect route list and production isolation.
-14. Inspect query counts for group counters and application lists.
-15. Inspect representative UI at 1440/1024/390.
-16. Inspect git diff/status/staged files.
-17. Confirm no secrets, real participant data, screenshots, browser artifacts or unrelated files are staged.
+1. Cabinet has one coherent UI system across psychologist/admin.
+2. Global navigation is clear and responsive.
+3. Page titles/actions/statuses have consistent hierarchy.
+4. Excessive nested panels/cards are reduced.
+5. Primary vs secondary vs destructive actions are visually obvious.
+6. Lists are faster to scan.
+7. Forms have coherent grouping and action hierarchy.
+8. Group lifecycle/status UX is easier to understand.
+9. Moderation actions are unambiguous.
+10. Applications are easy to scan/process.
+11. Profile/documents are readable without visual clutter.
+12. Dictionaries/settings are compact and work-oriented.
+13. Empty/error/validation states remain usable.
+14. Long values wrap safely.
+15. 390px representative pages have no page-level horizontal overflow.
+16. Confirmation modals fit mobile viewport.
+17. Touch targets and focus states remain usable.
+18. Real business actions/forms/routes continue working.
+19. No domain/business/auth/payment/lifecycle behavior changed.
+20. No Stage 11+ functionality introduced.
+21. Prototype catalogue remains functional.
+22. Production prototype isolation remains.
+23. Full MySQL suite passes.
+24. Pint passes.
+25. Larastan passes.
+26. Composer platform check passes.
+27. Blade compilation passes.
+28. `.ai/report.md` clearly documents the refactor and remaining issues.
+29. Final diff contains only justified UI-layer changes, minimal presenter/test/doc updates, and report.
+30. No secrets, real personal data, browser artifacts or screenshots are committed.
 
 ## Hard Workflow Gate
 
-Before changing files:
+Before editing:
 
-- read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
-- run git log --oneline -5;
-- run git status --short;
-- confirm base commit 96b64c9323ba78ff434e35f2bdeadf15c623e344;
-- inspect GroupApplication, Group/owner relations, GroupPages, application prototype/shared views, current scheduler and SettingService;
+- confirm HEAD/base `e96ce0a8c41282827513f9b3fb6fea3f140dacce`;
+- `git status --short` must be reviewed;
+- inspect only the focused files listed above;
 - do not overwrite unknown local changes.
 
-During implementation:
+During work:
 
-- stay strictly in Stage 10;
-- do not begin Stage 11 external API/HMAC;
-- do not add application creation UI;
-- do not implement email/WEBPAY;
-- use scoped owner access and aggregate counters;
-- preserve prototype behavior/accepted design;
-- do not alter .ai/task.md;
-- do not change governance/spec files.
+- audit and fix immediately;
+- prefer system-level fixes over per-page hacks;
+- do not change backend rules;
+- do not implement Stage 11;
+- do not edit this task.
 
 Before commit:
 
-- run all required checks;
-- perform real browser/command Stage 10 smoke verification;
-- update .ai/report.md with routes/policies/services, counters/query behavior, processing idempotency, phone normalization, retention command/schedule, no-API/no-PII evidence, tests/runtime checks, facts/assumptions/unknowns;
-- inspect full diff and staged files;
-- stage only Stage 10 files plus .ai/report.md;
-- ensure no runtime/test artifacts are staged.
+- inspect complete diff;
+- remove temporary debug/browser artifacts;
+- update `.ai/report.md`;
+- run required checks;
+- stage only justified files.
 
-Completion:
+If complete, commit with:
 
-- use Status: done only if all acceptance criteria are satisfied;
-- otherwise use partial, blocked, or failed;
-- if complete, commit with:
+`claude: TASK-2026-09-21-09 refactor cabinet UI UX`
 
-codex: TASK-2026-09-21-08 implement internal applications workflow
-
-- do not create an accept commit.
+Do not create an `accept:` commit.
