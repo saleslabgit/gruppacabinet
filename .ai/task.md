@@ -1,632 +1,630 @@
-# Task: TASK-2026-09-21-02
+# Task: TASK-2026-09-21-03
 
 Status: planned
-Created from: 04395636b1eb34d9754b5b3eae2198f77120f913 (main)
+Created from: 2fdf26b751c27ec6e0a60e419085d5ecab2a43cc (main)
 
 ## Title
 
-Stage 4 — Implement session authentication, role boundaries, access revocation, and authenticated application entry points
+Stage 5 — Implement real administrator CRUD for psychologists, moderation actions, tariff/access management, private documents, audit, and session revocation
 
 ## Goal
 
-Implement the complete Stage 4 authentication/access foundation from `SPEC.md` on top of the accepted Stage 2 domain model and accepted Stage 3 Blade interface.
+Implement the complete Stage 5 psychologist-administration milestone from SPEC.md using the accepted Stage 3 Blade views and the Stage 4 authentication/access foundation.
 
-This task must provide:
+An authenticated administrator must be able to:
 
-- real Laravel session authentication on guard `web`;
-- the real login/logout flow using the approved Stage 3 login/navigation UI;
-- protected psychologist and administrator entry points;
-- per-request account-state validation;
-- role boundaries;
-- database-session invalidation support for later administrative actions;
-- login throttling;
-- local/testing credentials for one approved psychologist in addition to the existing development administrator.
+- list psychologists with search, filters, and pagination;
+- open a psychologist profile with all stored questionnaire fields;
+- create and edit psychologists;
+- approve or reject pending psychologists through the existing domain transition service;
+- change free/paid tariff;
+- enable or disable cabinet access;
+- soft-delete psychologists;
+- upload, list, securely view/download, and delete private psychologist documents;
+- see relevant business-audit history;
+- have disable/reject/delete revoke all sessions immediately.
 
-This is an authentication/access milestone only. Do not start psychologist/admin CRUD, group CRUD, password invitation email, public API, or WEBPAY work.
+This stage is only administrator management of psychologists and their documents. Do not implement psychologist self-service, invitation/password email delivery, group CRUD, public questionnaire intake, or later payment/API workflows.
 
 ## Facts
 
-- Stage 2 domain foundation is complete.
-- Stage 3 frontend and its visual revision are accepted by the product owner as the baseline for backend integration.
-- Current HEAD is `04395636b1eb34d9754b5b3eae2198f77120f913`.
-- The application uses Laravel 12 / PHP 8.2 / MySQL.
-- The default auth guard is already the Laravel session guard `web` backed by `App\Models\User`.
-- `gp_users` contains:
-  - nullable password;
-  - `remember_token`;
-  - lifecycle `status`;
-  - independent `disabled`;
-  - independent `admin`;
-  - soft delete.
-- User status values are `pending`, `approved`, and `rejected`.
-- Only an active, non-deleted, `approved`, `disabled=false` user may access protected application routes.
-- `admin=true` identifies administrators; approved non-admin users are psychologists.
-- Database session storage and the `sessions` table already exist.
-- Normal local configuration already uses `SESSION_DRIVER=database`.
-- Stage 3 already contains the final login, psychologist, and admin layouts/views. Backend integration must reuse them rather than creating alternative visual implementations.
-- Prototype routes must remain local/testing only and continue to work with synthetic data.
-- The current application root `/` still serves the old Stage 1 diagnostic page and must now become the protected psychologist application root.
-- Production base URL remains `https://gruppa.info/cabinet/`; local base URL remains under `/cabinet/`.
+- Stage 4 is accepted through commit 2fdf26b751c27ec6e0a60e419085d5ecab2a43cc.
+- Real administrator authentication and /admin role protection already exist.
+- Approved final views already exist for admin psychologist list/detail/form/documents.
+- Prototype routes must continue rendering the same final Blade files with synthetic fixtures.
+- gp_users, gp_user_documents, gp_audit_log, database sessions, and required indexes already exist.
+- UserStatusTransitionService already enforces pending -> approved, pending -> rejected, rejected -> pending.
+- approved -> rejected is intentionally not a normal transition; approved users are disabled instead.
+- SessionInvalidator already rotates remember_token and deletes target database sessions.
+- AuditService already writes stable non-sensitive business audit entries.
+- The local filesystem disk root is storage/app/private.
+- status is lifecycle truth; accept is compatibility-only and derived centrally.
+- gp_users.free is the current psychologist tariff; existing gp_groups.free values are historical snapshots and must not change when user tariff changes.
+- Development admin remains admin@gruppa.test / password.
 
-## Product Behavior
+## Assumptions
 
-### Login
+- Administrator management routes operate only on psychologists with admin=false.
+- Administrator accounts must never be editable/deletable through psychologist CRUD.
+- A psychologist manually created by an administrator:
+  - is forced to admin=false;
+  - starts pending;
+  - starts enabled;
+  - has password=null;
+  - receives no email in this stage.
+- On create, administrator may select the initial free/paid tariff.
+- For existing psychologists, status, tariff, and access changes happen only through explicit confirmed actions, not ordinary profile editing.
+- Soft delete is implemented; restore is out of scope.
+- Pagination default is 20 psychologists per page, newest first with deterministic ID tie-break.
+- Product requirements do not specify document max size. Use configurable technical default:
+  PSYCHOLOGIST_DOCUMENT_MAX_KB=10240.
+- Allowed document business types are diploma, certificate, license/membership, state registration certificate.
+- Allowed actual file content types are PDF, JPEG, PNG.
 
-Real login page:
+## Unknowns
 
-`GET /login`
-
-Real login submission:
-
-`POST /login`
-
-Use the existing `resources/views/auth/login.blade.php`.
-
-The production login form must:
-
-- submit to the Laravel login endpoint;
-- include CSRF protection;
-- use server-side validation;
-- use the existing approved field/error/alert areas;
-- not create a parallel login template.
-
-Authentication identifier is email.
-
-A successful login redirects:
-
-- administrator → `/admin`;
-- psychologist → `/`.
-
-Do not add a “remember me” option in this stage because it is not part of the approved UI/spec.
-
-### Generic login failure
-
-Pre-authentication failures must not disclose whether an email exists or whether an account is pending/rejected/disabled.
-
-Use the same generic authentication failure message for:
-
-- nonexistent email;
-- wrong password;
-- `pending`;
-- `rejected`;
-- `disabled=true`;
-- soft-deleted account.
-
-The existing prototype-specific disabled/error variants may remain for visual catalog coverage, but the real login flow must not reveal account state before authentication.
-
-### Psychologist entry point
-
-The real application route:
-
-`GET /`
-
-is psychologist-only and corresponds to:
-
-`https://gruppa.info/cabinet/`
-
-in production.
-
-At Stage 4 it must reuse the approved psychologist layout/view and provide a truthful authenticated shell without inventing later functionality.
-
-Use the approved “Мои группы” view as the psychologist landing surface.
-
-Because group CRUD is Stage 7:
-
-- do not query or implement the real group workflow yet;
-- render the approved empty-state form of the page;
-- do not present an active “Добавить группу” action that points to an unimplemented or prototype-only route;
-- adapt the existing view through explicit availability data/props rather than creating a new alternative page.
-
-The Stage 6 task will connect real psychologist profile/documents; Stage 7 will connect real groups/create actions.
-
-### Administrator entry point
-
-Real admin route:
-
-`GET /admin`
-
-is administrator-only and corresponds to:
-
-`https://gruppa.info/cabinet/admin`
-
-in production.
-
-Reuse the approved admin layout and `admin.home` view.
-
-Do not fabricate business work-queue counts or link production users to prototype routes.
-
-If the actual Stage 5+ work-queue data is not yet implemented, adapt the existing admin home view to render a truthful Stage 4 authenticated-shell state using injected data/state, while preserving the prototype catalog’s synthetic work-queue version.
-
-Do not create a parallel admin dashboard.
-
-### Logout
-
-Real logout:
-
-`POST /logout`
-
-Requirements:
-
-- POST only;
-- normal Laravel CSRF protection;
-- call Laravel logout;
-- invalidate the current session;
-- regenerate the CSRF token;
-- redirect to the login page;
-- `GET /logout` must not perform logout.
-
-Use the existing approved navigation components.
-
-Prototype navigation must remain no-op.
-
-Real authenticated navigation must render a real POST logout form/control without duplicating the navigation layout.
+- Approved education dictionary item values remain unavailable. Load real active DB items; do not invent values.
+- Password invitation/resend email remains Stage 11–12.
+- Restore of soft-deleted psychologists is not part of Stage 5.
 
 ## Scope
 
-### 1. Authentication controller/request foundation
+### 1. Real admin routes and navigation
 
-Implement a small conventional Laravel authentication layer.
+Add real routes under /admin/psychologists for:
 
-Prefer:
+- index;
+- create/store;
+- show;
+- edit/update;
+- approve;
+- reject;
+- enable/disable;
+- tariff change;
+- soft delete;
+- documents list/upload/view/download/delete.
 
-- one session/auth controller;
-- one dedicated login Form Request or equivalent explicit request class;
-- normal Laravel `Auth` / guard APIs.
+All routes stay behind the existing active-admin middleware.
 
-Do not install Breeze, Jetstream, Fortify, or another auth package merely for this task.
+Update real admin navigation so Psychologists links to the real list.
+Never route real production actions into /_prototype.
+Prototype navigation remains synthetic/no-op.
 
-The login request must validate at least:
+### 2. Policies and IDOR protection
 
+Use Laravel policies.
+
+Psychologist management policy must require an authenticated administrator and target admin=false.
+
+Administrator accounts must not be returned/manipulated by changing an ID.
+
+Document access must require:
+- active administrator;
+- parent psychologist admin=false;
+- document belongs to that psychologist.
+
+Use nested scoped binding or an equally explicit ownership check.
+Cross-psychologist user/document ID substitution must fail safely.
+Do not add a permissions package.
+
+### 3. Psychologist list
+
+Connect the approved admin users index to real data.
+
+Show:
+- safe full name from nullable name parts;
 - email;
-- password.
+- phone;
+- status;
+- free/paid;
+- enabled/disabled;
+- registration date.
 
-Do not add registration fields.
+Implement:
+- search across name parts, email, phone;
+- status filter;
+- free/paid filter;
+- pagination;
+- empty/no-results state;
+- filter persistence across pages.
 
-### 2. Login throttle
+Exclude admin=true and soft-deleted records.
+Order by created_at desc then id desc.
+No per-row queries/N+1.
+Add a query-count regression test.
 
-Add an explicit login rate limit.
+### 4. Psychologist detail
 
-Use a simple deterministic policy:
+Connect the approved detail view to real data.
 
-- maximum 5 failed attempts per 60 seconds;
-- key by normalized email + client IP;
-- clear the throttle counter after successful authentication.
+Show all relevant questionnaire fields from SPEC section 6, including education/license, confirmations, consent, status, tariff, access state, registration date.
 
-When throttled:
+Also show:
+- real document count and document management link;
+- relevant audit history;
+- group count/basic summary if safely available.
 
-- do not attempt authentication;
-- do not create a session;
-- render/redirect to the approved login UI with the rate-limit state/message;
-- do not disclose whether the account exists.
+Do not create Stage 7 production group-management links.
 
-Cover the threshold and reset behavior with tests.
+Never expose password or remember token.
 
-### 3. Credential/access check
+### 5. Create psychologist
 
-A successful credential check requires all of:
+Connect approved form to POST + CSRF + Form Request.
 
-- active non-soft-deleted User;
-- valid password;
-- `status=approved`;
-- `disabled=false`.
+Server must force:
+- admin=false;
+- status=pending;
+- disabled=false;
+- password=null.
 
-The authentication response must not distinguish which precondition failed.
+Request must not be able to set:
+- admin;
+- status;
+- accept;
+- password;
+- remember_token;
+- deleted_at.
 
-Do not use compatibility `accept` as an auth condition.
+Email is required.
+Profile fields follow nullable schema.
+Allow initial free/paid tariff.
+Validate active-email uniqueness and retain DB constraint as race protection.
+Do not send mail.
+Redirect to real detail with success notice.
 
-Use `status` as the lifecycle truth.
+### 6. Edit psychologist profile
 
-### 4. Session security
+Connect approved edit form to real update.
 
-On successful login:
+Ordinary profile update may edit questionnaire/profile fields and email only.
 
-- regenerate the session ID;
-- clear the login throttle key;
-- establish the authenticated guard session.
+It must not directly write:
+- status;
+- accept;
+- admin;
+- password;
+- remember_token;
+- deleted_at;
+- free;
+- disabled.
 
-On logout:
+Tariff/access/status are dedicated actions.
 
-- logout;
-- invalidate session;
-- regenerate CSRF token.
+Use Form Request validation and active-email uniqueness.
 
-Add tests proving session fixation protection / session ID regeneration.
+### 7. Education dictionary data
 
-### 5. Per-request account access middleware
+Load education_type dictionary from DB.
 
-Add reusable middleware that runs on every protected psychologist/admin request after authentication.
+Offer active items only.
+If an existing psychologist references an inactive item, preserve/display it while editing so data is not silently lost.
+Do not invent dictionary values.
+Do not implement dictionary CRUD.
 
-It must verify the authenticated User is still:
+### 8. Approve
 
-- present/active;
-- `status=approved`;
-- `disabled=false`.
-
-If an already-authenticated account becomes ineligible:
-
-- revoke access immediately on the next protected request;
-- terminate the current authenticated session;
-- redirect to login with a safe message that access is no longer available;
-- do not continue rendering protected content.
-
-A pre-auth login failure remains generic; the revoked-session message is allowed because the user had already authenticated previously.
-
-### 6. Role middleware / boundaries
-
-Add explicit role boundaries.
-
-Psychologist routes:
-
-- require authenticated active approved user;
-- require `admin=false`.
-
-Admin routes:
-
-- require authenticated active approved user;
-- require `admin=true`.
-
-Expected behavior:
-
-- psychologist requesting `/admin` → HTTP 403;
-- administrator requesting psychologist-only `/` → HTTP 403;
-- guest requesting either protected route → redirect to login.
-
-Do not introduce a general roles/permissions package.
-
-### 7. Reusable SessionInvalidator
-
-Implement a small reusable service for immediate access revocation in later admin tasks.
-
-It must accept a user and:
-
-- delete all database session records belonging to that user;
-- rotate/invalidate the user’s `remember_token` so existing recaller credentials cannot remain valid;
-- not delete sessions for other users.
-
-This service will be reused by Stage 5 when disabling/rejecting/deleting psychologists.
-
-Do not wire Stage 5 admin actions in this task.
-
-Add direct MySQL-backed tests proving:
-
-- all sessions for target user are removed;
-- sessions for another user remain;
-- remember token changes/is invalidated.
-
-### 8. Access-state revocation tests
-
-Cover existing authenticated sessions when the user changes state.
-
-At minimum test:
-
-- `approved → disabled=true`: next protected request loses access;
-- approved account changed to `rejected` directly for test setup: next protected request loses access;
-- soft-deleted account: next protected request does not receive protected content;
-- normal approved account continues to work.
-
-Do not add an invalid `approved → rejected` domain transition to the state machine; tests may update persistence directly to simulate externally changed access state because that transition is intentionally not a normal product workflow.
-
-### 9. Routes
-
-Implement stable named routes for real auth/access:
-
-- `GET /login` — `login`;
-- `POST /login` — a clear login submission route name;
-- `POST /logout` — `logout`;
-- `GET /` — psychologist home;
-- `GET /admin` — admin home.
-
-The auth middleware’s guest redirect must resolve correctly through the application base path.
-
-All generated real URLs/actions must include `/cabinet` under the configured base URL.
-
-Do not expose production routes that point into `/_prototype`.
-
-### 10. Stage 1 diagnostic route cleanup
-
-The root `/` can no longer be the public Stage 1 foundation page.
-
-Preserve the diagnostic only if still useful by moving it to a clearly technical route available only in `local`/`testing`, for example:
-
-- `/_foundation`.
-
-The old diagnostic and redirect-check routes must not conflict with real production auth routes.
-
-Update affected Stage 1 tests accordingly.
-
-Do not expose a database-connectivity diagnostic publicly in production.
-
-### 11. Approved Stage 3 UI integration
-
-Reuse existing UI files.
-
-#### Login view
-
-Adapt the existing login view so:
-
-- prototype requests remain no-op;
-- real requests use POST + CSRF;
-- real validation/auth/rate-limit errors appear in the approved UI;
-- there is still one shared login markup structure.
-
-#### Button component
-
-If required, extend the existing button component to support semantic button types such as `submit` without breaking prototype buttons.
-
-#### Navbar/sidebar
-
-Adapt existing shared navigation so:
-
-- prototypes keep the existing no-op “Выход” control;
-- authenticated production views use the real POST logout action;
-- no second production navigation template is introduced.
-
-#### Psychologist home
-
-Reuse `psychologist.groups.index`.
-
-Make later-stage actions explicitly unavailable rather than linking authenticated users into prototype routes.
-
-#### Admin home
-
-Reuse `admin.home`.
-
-Prototype fixture mode must retain its full synthetic work queue.
-
-Real Stage 4 mode must not show fake counts or prototype URLs.
-
-Do not perform a new visual redesign during backend integration.
-
-### 12. Local/testing psychologist seed
-
-The existing development administrator remains:
-
-- email: `admin@gruppa.test`;
-- password: `password`.
-
-Add one idempotent local/testing psychologist:
-
-- email: `psychologist@gruppa.test`;
-- password: `password`;
-- `status=approved`;
-- `admin=false`;
-- `disabled=false`.
+Explicit confirmation action for pending -> approved.
 
 Requirements:
+- use UserStatusTransitionService;
+- no direct status assignment in controller;
+- AuditService action user.approved;
+- current admin as actor;
+- only minimal old/new status metadata;
+- transition + audit coordinated transactionally;
+- no email;
+- no password assignment.
 
-- use normal Laravel password hashing;
-- do not set compatibility `accept` manually;
-- let existing status mapping derive it;
-- do not create known-password users in production;
-- repeated seeding must not duplicate the account.
+Invalid transition must not partially write audit/state.
 
-Do not add product passwords for manually created real users; that belongs to later onboarding stages.
+### 9. Reject
 
-### 13. Documentation
+Explicit confirmation action for pending -> rejected.
 
-Update actual-state documentation:
+Requirements:
+- use UserStatusTransitionService;
+- audit user.rejected;
+- call SessionInvalidator;
+- coordinate transition/audit/session invalidation safely;
+- no email.
 
-- `docs/architecture.md` — auth/access middleware boundary and session invalidator;
-- `docs/development.md` — local login URLs and development credentials;
-- `docs/project-status.md` — Stage 4 implemented state and remaining Stage 5+ scope.
+Do not add approved -> rejected.
 
-Update `docs/ui-pages.md` only if required to explain real-route wiring; avoid unrelated design churn.
+### 10. Enable / disable
+
+Dedicated confirmed actions.
+
+Disable:
+- set disabled=true;
+- SessionInvalidator immediately;
+- audit user.disabled with old/new values.
+
+Enable:
+- set disabled=false;
+- audit user.enabled;
+- do not create session.
+
+Repeated actions must be safely idempotent or clearly rejected without misleading duplicate state changes.
+
+### 11. Free / paid
+
+Dedicated confirmed tariff action.
+
+Requirements:
+- update gp_users.free;
+- audit user.tariff_changed with minimal old/new value;
+- do not update existing gp_groups.free;
+- explicitly test existing group snapshot remains unchanged;
+- no payment behavior.
+
+### 12. Soft delete
+
+Dedicated destructive confirmed action.
+
+Requirements:
+- only admin=false psychologist;
+- soft delete only;
+- SessionInvalidator immediately;
+- audit user.deleted;
+- preserve related historical/payment data;
+- redirect list with success notice.
+
+Restore is out of scope.
+
+### 13. Audit presentation
+
+Mandatory Stage 5 audit actions:
+- user.approved;
+- user.rejected;
+- user.enabled;
+- user.disabled;
+- user.tariff_changed;
+- user.deleted.
+
+Do not place full questionnaire/document data in metadata.
+
+Psychologist detail should show a human-readable chronological audit list with date, action, actor, and minimal state change where useful.
+Do not dump raw JSON.
+
+### 14. Private document configuration
+
+Add small config for:
+- private disk;
+- max KB;
+- allowed document type codes;
+- allowed file/content types.
+
+Add to .env.example:
+PSYCHOLOGIST_DOCUMENT_MAX_KB=10240
+
+Document the value as a configurable technical ceiling, not a business price/setting.
+
+### 15. Upload private documents
+
+Connect real admin document upload.
+
+Validate:
+- allowed document type;
+- configured max size;
+- actual content/file type limited to PDF/JPEG/PNG;
+- do not trust only extension.
+
+Store on private disk rooted at storage/app/private.
+Use application-generated random filename/path.
+Original filename is DB metadata only.
+Persist MIME and byte size.
+Never copy to public or storage/app/public.
+Never expose a direct public storage URL.
+
+If DB persistence fails after writing a file, remove orphaned file.
+
+### 16. View / download private documents
+
+Serve only through authorized controller endpoints.
+
+View:
+- authorize admin + nested ownership;
+- inline safe response for supported files;
+- safe Content-Type;
+- no filesystem path exposure.
+
+Download:
+- authorize;
+- stream/download through Laravel;
+- safe original filename;
+- no private storage URL.
+
+Do not use Storage::temporaryUrl as a replacement for controller authorization.
+
+Test that guessed /storage paths do not expose private documents.
+
+### 17. Delete document
+
+Confirmed delete action.
+
+Requirements:
+- authorize nested ownership;
+- delete DB row and private file;
+- cross-user document ID substitution fails;
+- success notice after real deletion.
+
+Handle storage failure deliberately; do not silently claim success with file left behind.
+
+### 18. Reuse approved Blade views
+
+All real pages must reuse existing Stage 3 views and components.
+
+Each relevant view must support both:
+- prototype fixture mode;
+- real backend mode.
+
+Real list/detail/forms/documents use real routes, CSRF, validation, old input, real DB options/actions.
+Prototype mode remains no-op and retains all variants.
+
+Existing prototype "Resend password setup" may remain for catalog coverage.
+Real Stage 5 detail must not offer a working resend-email action; hide it or mark it unavailable until email stage.
+
+Do not redesign the accepted Stage 3 interface.
+
+### 19. Admin navigation/home
+
+Real admin navigation should expose:
+- Home;
+- Psychologists;
+- Logout.
+
+Do not add real group/payment/dictionary/settings routes yet.
+
+Admin home may show a real pending-psychologist count/link if simple.
+Other future work-queue items must not use fixture counts.
+
+### 20. Transaction/orchestration
+
+Use a small explicit service for multi-effect psychologist actions if helpful.
+
+Coordinate transactionally where possible:
+- status + audit;
+- disable + token/session invalidation + audit;
+- reject + invalidation + audit;
+- tariff + audit;
+- soft delete + invalidation + audit.
+
+Do not build a generic workflow framework.
+
+Filesystem writes require explicit compensation/cleanup because filesystem and MySQL are not one transaction.
+
+### 21. Tests
+
+All tests run on MySQL.
+
+Cover at minimum:
+
+#### List
+- admin-only access;
+- no admin accounts in psychologist list;
+- name/email/phone search;
+- status filter;
+- free/paid filter;
+- pagination/query preservation;
+- no N+1/per-row query pattern.
+
+#### Create/update
+- successful create;
+- forced pending/admin=false/disabled=false/password=null;
+- initial tariff;
+- active-email uniqueness;
+- validation errors;
+- profile update;
+- protected fields cannot be mass-written;
+- prototype form still no-op.
+
+#### State/actions
+- approve through domain transition;
+- reject through domain transition;
+- invalid transition no partial write;
+- enable/disable;
+- tariff change;
+- soft delete;
+- correct audit actor/action/minimal metadata;
+- no email dispatch;
+- existing group tariff snapshot unchanged.
+
+#### Session invalidation
+- disable removes target sessions;
+- reject removes target sessions;
+- delete removes target sessions;
+- other users' sessions remain;
+- remember token rotates.
+
+#### Authorization/IDOR
+- psychologist cannot access admin CRUD;
+- admin cannot manage another admin via psychologist routes;
+- soft-deleted psychologist is not exposed by normal route;
+- cross-psychologist document IDs fail safely.
+
+#### Documents
+- valid PDF/JPEG/PNG;
+- invalid text/executable content rejected;
+- max size enforced;
+- generated storage name;
+- original filename DB metadata only;
+- private physical storage;
+- no public direct URL;
+- authorized view/download;
+- cross-owner access denied;
+- delete removes DB row + file;
+- orphan cleanup on failed persistence where reasonably testable.
+
+#### Regression
+- Stage 4 auth/access remains green;
+- 31 prototype groups / 249 variants remain;
+- production excludes prototype/foundation routes;
+- no Stage 6/7+ implementation.
+
+### 22. Documentation
+
+Update:
+- docs/architecture.md;
+- docs/development.md;
+- docs/project-status.md;
+- docs/ui-pages.md only where real route wiring needs documentation.
+
+Document private storage and configurable document max size.
 
 ## Explicit Out Of Scope
 
 Do not implement:
-
-- public registration;
-- external psychologist questionnaire intake;
-- password invitation/setup broker flow;
-- password reset;
-- SMTP/email;
-- admin psychologist CRUD;
-- approve/reject UI actions;
-- tariff changes;
-- document upload/download;
-- “Мои данные” real backend;
-- psychologist profile route/data;
-- real group list or group create/edit;
-- group moderation;
+- public questionnaire API/registration;
+- invitation/password email;
+- resend password email;
+- SMTP;
+- temporary/product password assignment;
+- psychologist self-service profile/documents;
+- group CRUD/moderation;
 - applications;
-- dictionary/settings mutations;
-- public-site API;
-- scheduler/jobs business logic;
+- payments;
+- dictionary/settings CRUD;
+- scheduler business jobs;
 - WEBPAY;
-- production deployment.
+- production deployment;
+- user restore.
 
-Do not add temporary product passwords beyond the documented local/testing seed accounts.
-
-Do not create production links to unimplemented Stage 5–7 actions.
-
-Do not change `SPEC.md`, `WORKFLOW.md`, or `AGENTS.md`.
+Do not create real links to unimplemented stages.
 
 ## Constraints
 
-- Follow `WORKFLOW.md` and `AGENTS.md`.
-- Use the accepted Stage 3 views/components; no parallel auth/admin/psychologist UI.
-- Keep authentication conventional Laravel session auth.
-- Use database sessions.
-- Keep authorization simple; no permissions framework.
-- `status`, not `accept`, is the access lifecycle source of truth.
-- Never reveal account existence/status through login failure messages.
-- Preserve prototype routes and all 249 Stage 3 variants.
-- Preserve the accepted Stage 3 visual design.
-- Preserve `/cabinet` base-path compatibility.
-- Tests remain on MySQL in Docker.
-- No Node/npm/Vite.
-- No new external authentication package.
-- No secrets or production credentials.
-- Do not alter `.ai/task.md`.
+- Follow WORKFLOW.md and AGENTS.md.
+- Reuse accepted Stage 3 UI.
+- Stay behind Stage 4 admin access.
+- Use Laravel policies and Form Requests.
+- Use UserStatusTransitionService for approve/reject.
+- Use SessionInvalidator for disable/reject/delete.
+- Use AuditService for mandatory audit.
+- status, not accept, drives lifecycle.
+- Profile request cannot directly write protected workflow/access fields.
+- Documents remain private outside public web root.
+- Never log/audit document bodies or full questionnaires.
+- Never send email in Stage 5.
+- Preserve all 249 prototype variants.
+- Tests use MySQL only.
+- No new frontend framework/build pipeline.
+- No secrets/real personal data.
+- Do not alter .ai/task.md.
 
 ## Acceptance Criteria
 
-1. `GET /login` renders the approved login Blade UI.
-2. Valid development psychologist credentials authenticate and redirect to `/`.
-3. Valid development administrator credentials authenticate and redirect to `/admin`.
-4. Successful login regenerates the session ID.
-5. Invalid email/password creates no authenticated session and shows the same generic failure.
-6. `pending`, `rejected`, `disabled`, and soft-deleted accounts cannot log in and receive no account-existence/status disclosure.
-7. Login is throttled after 5 failed attempts per email+IP within 60 seconds.
-8. Successful login clears the relevant throttle counter.
-9. Guest access to `/` and `/admin` redirects to the real login route inside the cabinet base path.
-10. Psychologist access to `/admin` returns 403.
-11. Administrator access to psychologist-only `/` returns 403.
-12. An approved enabled psychologist can access `/`.
-13. An approved enabled administrator can access `/admin`.
-14. If an authenticated user becomes disabled, rejected, or soft-deleted, the next protected request no longer renders protected content.
-15. The reusable SessionInvalidator deletes all database sessions for the target user and leaves other users’ sessions intact.
-16. SessionInvalidator invalidates/rotates the target user’s remember token.
-17. `POST /logout` logs out, invalidates the current session, regenerates CSRF token, and redirects to login.
-18. `GET /logout` does not log the user out and is not an allowed logout endpoint.
-19. The real psychologist root reuses the approved “Мои группы” view in a truthful Stage 4 empty/unavailable-action state.
-20. The real admin root reuses the approved admin home/layout without fake counts and without prototype URLs.
-21. Real navigation uses POST logout; prototype navigation remains no-op.
-22. Existing `/_prototype` catalog and all 249 variants still render.
-23. Prototype routes remain absent in production.
-24. The old Stage 1 root diagnostic no longer occupies `/`; any retained diagnostic is local/testing only.
-25. Development/testing seed creates exactly one approved psychologist and the existing admin, with known credentials only outside production.
-26. No Stage 5+ CRUD/profile/group/payment/email/API behavior is introduced.
-27. Existing Stage 1–3 tests remain green after necessary route/test updates.
-28. Full MySQL test suite passes.
-29. Pint passes.
-30. Larastan passes.
-31. `composer check-platform-reqs` passes.
-32. Blade compilation passes.
-33. Documentation reflects the actual Stage 4 implementation.
-34. Final diff is limited to auth/access foundation, necessary approved-view integration, tests/docs, and `.ai/report.md`.
-
-## Required Tests
-
-Add focused feature/integration coverage for at least:
-
-### Authentication
-
-- psychologist successful login;
-- admin successful login;
-- session ID regeneration;
-- wrong password;
-- unknown email;
-- pending user;
-- rejected user;
-- disabled user;
-- soft-deleted user;
-- generic identical auth failure semantics;
-- rate-limit threshold;
-- rate-limit clear after success.
-
-### Route boundaries
-
-- guest → login for `/`;
-- guest → login for `/admin`;
-- psychologist → `/` 200;
-- psychologist → `/admin` 403;
-- admin → `/admin` 200;
-- admin → `/` 403.
-
-### Access revocation
-
-- authenticated then disabled;
-- authenticated then rejected;
-- authenticated then soft-deleted;
-- approved/enabled unchanged remains authenticated.
-
-### Session invalidation
-
-Use the real MySQL `sessions` table to prove target-user sessions are deleted without deleting another user’s rows and that remember token is invalidated.
-
-### Logout
-
-- POST logout;
-- guest state after logout;
-- current session invalidated;
-- GET logout not accepted.
-
-### UI / base path
-
-- login form uses real POST action in non-prototype mode;
-- prototype login remains no-op;
-- real navigation renders a POST logout form;
-- prototype navigation remains no-op;
-- generated login/logout/home/admin URLs respect `/cabinet`;
-- psychologist Stage 4 root does not expose an active create-group link to a prototype/unimplemented route;
-- admin Stage 4 root contains no prototype URL/fake fixture count.
-
-### Regression
-
-- 31 prototype groups / 249 variants remain;
-- production has no prototype routes;
-- existing domain/MySQL tests remain green.
+1. Real admin navigation reaches real psychologist list.
+2. Only active authenticated admins access Stage 5 routes.
+3. Psychologists receive 403 for Stage 5 routes.
+4. Index contains only non-deleted admin=false psychologists.
+5. Search works for name/email/phone.
+6. Status and free/paid filters work.
+7. Pagination works and preserves filters.
+8. List has no N+1/per-row query pattern.
+9. Admin creates psychologist using approved Blade form.
+10. Created psychologist is forced pending/admin=false/disabled=false/password=null with chosen initial tariff.
+11. Profile editing cannot bypass protected status/tariff/access fields.
+12. Active-email uniqueness is enforced by validation and DB.
+13. Detail shows all relevant questionnaire data without password/token.
+14. Approve uses UserStatusTransitionService.
+15. Reject uses UserStatusTransitionService.
+16. Invalid transition cannot partially write state/audit.
+17. Approve/reject audit actor/action/metadata are correct and non-sensitive.
+18. Disable immediately invalidates target sessions and audits.
+19. Enable restores access eligibility and audits.
+20. Tariff action audits and does not mutate existing group snapshots.
+21. Soft delete invalidates sessions, audits, and preserves historical relations.
+22. Admin accounts cannot be manipulated through psychologist routes.
+23. Documents exist only on private disk.
+24. Upload enforces max size and actual allowed file type.
+25. Storage filename/path is application-generated.
+26. Authorized admin views/downloads documents only through controller.
+27. Cross-psychologist document IDOR is blocked.
+28. Private documents have no direct public URL.
+29. Delete removes DB row and private file.
+30. Existing real/prototype Blade files are reused.
+31. Real Stage 5 UI has no working resend-password-email action.
+32. No mail is sent by create/approve.
+33. Stage 4 auth/access remains green.
+34. All 31/249 prototype variants remain green.
+35. Full MySQL suite passes.
+36. Pint passes.
+37. Larastan passes.
+38. composer check-platform-reqs passes.
+39. Blade compilation passes.
+40. Documentation matches implementation.
+41. Final diff is limited to Stage 5 admin psychologist/document functionality, necessary UI integration, tests/docs/config, and .ai/report.md.
 
 ## Verification Commands
 
 Run and report exact results.
 
-1. Ensure Docker services are healthy.
-2. Seed local/testing development accounts idempotently.
-3. Verify both real login flows manually through the real Docker HTTP runtime:
-   - psychologist login → `/cabinet/`;
-   - admin login → `/cabinet/admin`.
-4. Verify logout through the real UI.
-5. Verify denied role boundary in browser or equivalent HTTP runtime.
-6. Run:
-   - `docker compose exec -T php php artisan test`
-   - `docker compose exec -T php ./vendor/bin/pint --test`
-   - `docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress`
-   - `docker compose exec -T php composer check-platform-reqs`
-   - `docker compose exec -T php php artisan view:cache`
-7. Inspect route list and confirm:
-   - real auth routes exist;
-   - logout is POST-only;
-   - protected routes have intended middleware;
-   - production route list has no `_prototype`;
-   - production route list has no public Stage 1 DB diagnostic.
-8. Verify database-session invalidator against MySQL.
-9. Verify no login response distinguishes nonexistent/pending/rejected/disabled users.
-10. Verify no Stage 5+ routes/controllers/actions were added.
-11. Inspect `git diff`, `git status --short`, and staged files.
-12. Confirm no secrets, real user data, temporary browser files, or unrelated changes are staged.
+1. Confirm Docker services and real admin login.
+2. Migrate/seed without destructive reset of normal development DB.
+3. Verify through real Docker HTTP runtime:
+   - list/search/filter;
+   - create/edit;
+   - approve/reject;
+   - tariff change;
+   - enable/disable;
+   - soft delete;
+   - document upload/view/download/delete.
+4. Verify psychologist role receives 403.
+5. Verify admin-account ID substitution fails.
+6. Verify cross-psychologist document ID substitution fails.
+7. Verify guessed public storage path does not expose private file.
+8. Verify no email/job is emitted by create/approve.
+9. Verify disable/reject/delete remove target database sessions.
+10. Run:
+   - docker compose exec -T php php artisan test
+   - docker compose exec -T php ./vendor/bin/pint --test
+   - docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
+   - docker compose exec -T php composer check-platform-reqs
+   - docker compose exec -T php php artisan view:cache
+11. Inspect real route list and production route isolation.
+12. Inspect private/public storage tree.
+13. Inspect representative audit rows for sensitive data.
+14. Inspect query count for populated psychologist index.
+15. Inspect git diff/status/staged files.
+16. Confirm no uploaded test files, .env, real user data, secrets, browser artifacts, or unrelated files are staged.
 
 ## Hard Workflow Gate
 
 Before changing files:
 
-- read `WORKFLOW.md`, `AGENTS.md`, `SPEC.md`, `docs/project-status.md`, `docs/ui-pages.md`, and this `.ai/task.md`;
-- run `git log --oneline -5`;
-- run `git status --short`;
-- confirm the current planner task is based on `04395636b1eb34d9754b5b3eae2198f77120f913`;
-- inspect the approved Stage 3 login/layout/navigation/psychologist/admin views before modifying them;
+- read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
+- run git log --oneline -5;
+- run git status --short;
+- confirm base commit 2fdf26b751c27ec6e0a60e419085d5ecab2a43cc;
+- inspect existing Stage 3 psychologist/document views and Stage 4 auth/session services;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- implement only authentication/access foundation;
-- reuse approved views;
-- do not redesign Stage 3;
-- do not start Stage 5–7 functionality;
-- keep prototype behavior intact;
-- do not alter `.ai/task.md`;
-- do not change governance/spec files;
-- do not add auth packages or frontend build tooling.
+- stay strictly in Stage 5;
+- do not implement email/onboarding or Stage 6/7 flows;
+- keep protected fields out of ordinary profile mass assignment;
+- keep documents private;
+- preserve prototype behavior and accepted design;
+- do not alter .ai/task.md;
+- do not change governance/spec files.
 
 Before commit:
 
 - run all required checks;
-- manually verify the real psychologist/admin login/logout flows under `/cabinet`;
-- update `.ai/report.md` with exact implementation, routes, middleware, tests, runtime checks, facts, assumptions, unknowns, and next step;
-- inspect full diff and staged files;
-- stage only task-related files plus `.ai/report.md`;
-- confirm no secrets or unrelated artifacts are staged.
+- perform real HTTP CRUD/document smoke verification;
+- update .ai/report.md with routes/controllers/requests/policies/services, list/filter/pagination, audit/session behavior, document storage/security, checks, facts/assumptions/unknowns;
+- inspect complete diff and staged files;
+- stage only Stage 5 files plus .ai/report.md;
+- confirm no private uploads, secrets, runtime artifacts, or unrelated files are staged.
 
 Completion:
 
-- use `Status: done` only if the authentication/access acceptance criteria are fully satisfied;
-- otherwise use `partial`, `blocked`, or `failed`;
+- use Status: done only if all Stage 5 acceptance criteria are satisfied;
+- otherwise use partial, blocked, or failed;
 - if complete, commit with:
 
-```text
-codex: TASK-2026-09-21-02 implement authentication access foundation
-```
+codex: TASK-2026-09-21-03 implement psychologist admin CRUD
 
-- do not create an `accept:` commit.
+- do not create an accept commit.
