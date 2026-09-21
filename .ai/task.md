@@ -1,809 +1,616 @@
-# Task: TASK-2026-09-21-05
+# Task: TASK-2026-09-21-06
 
 Status: planned
-Created from: 2b9ff579d91c69cc2d7a6ecae6438415f93f06e1 (main)
+Created from: 1f5182039fadcfe53bb737c30748104c2535308c (main)
 
 ## Title
 
-Stage 7 — Implement real group CRUD, owner workflow, administrator moderation, history, and manual activation without payments
+Stage 8 — Implement real dictionary administration, typed business settings, and pre-WEBPAY payment surface
 
 ## Goal
 
-Implement the complete Stage 7 internal group workflow from SPEC.md using the accepted Stage 3 Blade views and the Stage 4–6 authentication/access foundations.
+Implement Stage 8 from SPEC.md using the accepted Stage 3 admin Blade views.
 
-This milestone must make groups fully usable inside the cabinet without WEBPAY:
+After this milestone an authenticated administrator must be able to manage the reusable dictionary values and all defined business-setting values entirely through the cabinet, without direct MySQL access or source edits.
 
-- psychologist creates and owns groups;
-- psychologist saves/edits draft or revision groups;
-- psychologist submits draft/revision to moderation;
-- psychologist sees own group list/detail and status history;
-- psychologist can soft-delete permitted own groups;
-- administrator lists/searches/filters/sorts groups;
-- administrator creates/views/edits groups;
-- administrator moderates moderation -> approved/revision/rejected;
-- revision and rejection require comments/reasons;
-- administrator manually activates approved groups and placement dates are calculated;
-- administrator sees immutable public_uuid as “ID группы для gruppa.info” and can copy it;
-- administrator can delete abandoned drafts;
-- all owner/admin/IDOR/status boundaries are enforced.
+Also expose the approved admin Payments page as a truthful pre-WEBPAY informational surface only. It must not create, mutate, verify, simulate, or otherwise behave like a payment integration.
 
-Stage 7 deliberately has no payment flow. Even when owner free=false and the group snapshots free=false, the group starts at draft and may proceed through moderation. No gp_payments row is created and awaiting_payment is unreachable through real Stage 7 UI/actions.
+This milestone must unblock realistic manual group/profile testing by allowing real values for:
+- education_type;
+- group_format;
+- gender;
+and real configuration of placement/extension prices and lifecycle timing settings.
 
 ## Facts
 
-- Stage 6 is accepted through commit 2b9ff579d91c69cc2d7a6ecae6438415f93f06e1.
-- Group model already:
-  - generates immutable UUID v4 public_uuid;
-  - snapshots current owner gp_users.free into gp_groups.free at creation;
-  - derives compatibility accept centrally from status;
-  - uses soft deletes.
-- GroupStatus enum and GroupStatusTransitionService already enforce and record:
-  - awaiting_payment -> draft;
-  - draft -> moderation;
-  - moderation -> approved/revision/rejected;
-  - revision -> moderation;
-  - approved -> active;
-  - active -> expired;
-  - expired -> approved.
-- GroupStatusTransitionService locks the group, validates the transition, updates status, and writes gp_group_status_history transactionally.
-- Stage 7 must use only the subset reachable in this stage:
-  draft -> moderation -> revision/rejected/approved -> active,
-  with revision -> moderation.
-- active -> expired belongs to Stage 9 scheduler.
-- expired -> approved belongs to Stage 9/14 extension flows.
-- awaiting_payment belongs to later WEBPAY placement flow and is not reachable in Stage 7.
-- SettingService already exposes placementDurationDays().
-- Default placement duration seed is 30 days.
-- Database timestamps are UTC; display/input conventions use Europe/Minsk.
-- Group form fields already exist in approved Stage 3 views:
-  title, description, schedule, format_id, meeting_duration_minutes,
-  participant_capacity, gender_id, meeting_price.
-- meeting_price is stored as integer minor units; float must not be used.
-- Dictionaries format/group_format and gender exist as containers, but approved display items may be empty.
-- Stage 3 final views already exist for:
-  psychologist group list/form/detail,
-  admin group list/form/detail,
-  shared group data/history/actions.
-- Stage 10 applications are not implemented yet.
-- Stage 13/14 WEBPAY placement/extension behavior is not implemented yet.
+- Stages 1–7 are accepted through commit 1f5182039fadcfe53bb737c30748104c2535308c.
+- gp_dictionaries and gp_dictionary_items already exist.
+- Seeded dictionary containers are:
+  - education_type;
+  - group_format;
+  - gender.
+- No approved item display values are currently seeded; this is intentional.
+- Stage 5 psychologist forms already query education_type active items and preserve a current inactive selection.
+- Stage 7 group forms already query group_format/gender active items and preserve current inactive selections.
+- gp_settings already contains the seven typed integer settings:
+  - placement_price_minor_units, nullable;
+  - extension_price_minor_units, nullable;
+  - placement_duration_days;
+  - expiry_warning_days;
+  - expired_extension_window_days;
+  - participant_application_retention_months;
+  - password_setup_link_ttl_hours.
+- SettingService is already the typed cached read boundary.
+- Stage 7 activation reads SettingService::placementDurationDays().
+- Existing active groups snapshot placement_days and expires_at when activated.
+- AuditService and gp_audit_log already exist.
+- SPEC requires audit of critical business-setting changes.
+- Approved Stage 3 views already exist:
+  - admin/dictionaries/index.blade.php;
+  - admin/dictionaries/items.blade.php;
+  - admin/settings/index.blade.php;
+  - admin/payments/index.blade.php;
+  - admin/payments/show.blade.php prototype.
+- Stage 13 is the first real WEBPAY integration stage.
+- No real payment record is created by Stages 1–8.
 
-## Product Assumptions
+## Product / Architecture Decisions
 
-- For Stage 7, both free=true and free=false psychologists create groups directly in draft.
-  The group free snapshot remains correct historical data; it does not gate this temporary no-payment workflow.
-- No real route/action may transition a Stage 7 group into awaiting_payment.
-- No real Stage 7 route/action may create gp_payments.
-- A psychologist group owner is immutable after creation.
-- Administrator chooses the owner when creating a group; owner reassignment of an existing group is not implemented in Stage 7 because it would change ownership semantics and conflict with historical tariff snapshot meaning.
-- Admin create owner options are non-admin, non-deleted, approved psychologists. Disabled psychologists may remain visible only if needed to edit an existing association, but new groups should be created for currently enabled approved psychologists.
-- “Abandoned draft” threshold is not specified by a business setting. For the Stage 7 admin quick filter, use a technical constant/configuration of 30 days. This is only an administrative cleanup threshold and is not placement duration. Document it clearly; do not add it to gp_settings in this stage.
-- Administrator manual deletion in Stage 7 is limited to abandoned draft groups matching that threshold. Do not add general deletion of active/moderated/published groups.
-- Rejection reason minimum length: use 10 characters as a technical validation minimum because SPEC requires a minimum but does not specify the exact number.
-- Revision comment is required and non-blank; use the same 10-character minimum for consistent moderator feedback quality.
-- Psychologist may soft-delete only draft or rejected own groups with no successful non-refunded payment. Stage 7 itself creates no payments, but preserve this safety check for existing/historical rows.
+### Stable dictionary codes
+
+Dictionary and dictionary-item codes are stable identifiers.
+
+- Code is supplied when creating a dictionary/item.
+- Code is immutable after creation.
+- Editing changes display name and other mutable presentation fields, not code.
+- The core dictionary container codes education_type, group_format, gender must not be deleted or renamed because application forms depend on them.
+- Custom dictionary containers may be created.
+- A custom dictionary container may be physically deleted only when it contains no items and is not referenced by application data.
+
+### Dictionary item removal
+
+- Used dictionary items are never physically deleted.
+- Used items are deactivated instead.
+- Deactivated items disappear from new forms but remain visible in existing records/edit forms that already reference them.
+- Unused items may be physically deleted through an explicit confirmation action.
+- Inactive items may be reactivated.
+
+### Settings keys
+
+The seven setting keys are application-defined typed configuration keys, not user-defined records.
+
+- Admin may edit their values.
+- Admin must not create arbitrary new setting keys through UI.
+- Admin must not rename or delete required setting keys.
+- All reads/writes go through the typed SettingService boundary.
+- gp_settings remains the source of business-setting values.
+
+### Payment surface
+
+Stage 8 adds a real admin route to the approved Payments index view only.
+
+The real page is informational/pre-WEBPAY:
+- explains that WEBPAY is not connected yet;
+- contains no synthetic payment rows;
+- contains no provider actions;
+- contains no refund actions;
+- does not expose a real payment-detail route;
+- does not query or mutate gp_payments for the normal page.
+
+Prototype payment list/detail variants remain unchanged and synthetic.
 
 ## Scope
 
-### 1. Real psychologist group routes
-
-Under existing account + role:psychologist protection, add stable real routes for:
-
-- list/home at existing /
-- create draft action
-- group detail
-- group edit form
-- group update/save
-- submit to moderation
-- soft delete
-
-Recommended route shape:
-
-POST /groups
-GET /groups/{group}
-GET /groups/{group}/edit
-PUT /groups/{group}
-POST /groups/{group}/submit
-DELETE /groups/{group}
-
-Use route names under psychologist.groups.* or another clear existing convention.
-
-“Добавить группу” on the real root should perform a CSRF-protected POST that creates a draft and redirects to its real edit form. Do not introduce a GET side effect.
-
-No psychologist route accepts owner_id.
-
-### 2. Create draft
-
-Creating a psychologist group must:
-
-- use authenticated psychologist as owner_id;
-- create status=draft;
-- let Group model generate public_uuid;
-- let Group model snapshot current owner free value;
-- never create a payment;
-- never create awaiting_payment;
-- create an initial gp_group_status_history entry:
-  from_status = null,
-  to_status = draft,
-  actor_id = psychologist id,
-  actor_type = user,
-  comment = null.
-
-Create group + initial history atomically.
-
-The blank draft may have nullable form fields until saved.
-
-After creation, redirect to edit.
-
-### 3. Real psychologist group list
-
-Connect approved psychologist/groups/index Blade to real owned groups.
-
-Requirements:
-
-- only current owner groups;
-- no soft-deleted groups;
-- newest first with deterministic ID tie-break;
-- pagination, 20 per page;
-- eager-load only needed dictionary relations;
-- no N+1;
-- show real status/free snapshot/dates/format;
-- Stage 10 application counters must be truthful without querying applications:
-  render unavailable/zero state and do not link to unimplemented application routes;
-- real action URLs only;
-- no prototype links;
-- “Добавить группу” becomes enabled.
-
-Do not query gp_payments or gp_group_applications in the Stage 7 real list.
-
-### 4. Psychologist detail
-
-Connect approved psychologist group detail to real owned group.
-
-Show:
-
-- all group fields;
-- lifecycle status;
-- disabled flag if present;
-- historical free snapshot;
-- created/published/expires dates;
-- moderation/rejection current message where applicable;
-- real status history;
-- only actions allowed for current state.
-
-The psychologist must never see or edit public_uuid in a writable field.
-It may be omitted from psychologist UI entirely.
-
-Applications section remains unavailable/empty until Stage 10 and must not link to prototype/future routes.
-
-Payment section/actions must not appear in real Stage 7 psychologist UI.
-
-### 5. Psychologist edit/save
-
-Psychologist may edit only own groups in:
-
-- draft;
-- revision.
-
-Editing must be blocked server-side in:
-
-- moderation;
-- approved;
-- active;
-- expired;
-- awaiting_payment;
-- rejected.
-
-Rejected groups are view/delete only; no resubmission path.
-
-Use policy + explicit status checks.
-
-Editable fields are only the group questionnaire fields:
-- title;
-- description;
-- schedule;
-- format_id;
-- meeting_duration_minutes;
-- participant_capacity;
-- gender_id;
-- meeting_price.
-
-Request must not write:
-- owner_id;
-- status;
-- accept;
-- free;
-- public_uuid;
-- disabled;
-- published_at;
-- expires_at;
-- placement_days;
-- expiry_warning_sent_at;
-- moderator_comment;
-- rejection_reason;
-- deleted_at.
-
-### 6. Group validation
-
-Use Form Request validation.
-
-At minimum:
-
-- title required string max 255;
-- description required string with sensible text limit matching DB text;
-- schedule required string with sensible text limit;
-- format_id required and must belong to group_format dictionary;
-- gender_id required and must belong to gender dictionary;
-- meeting_duration_minutes required positive integer;
-- participant_capacity required positive integer;
-- meeting_price required non-negative money input.
-
-For dictionary selection:
-
-- new forms offer active items only;
-- edit keeps current inactive referenced item available so existing data is not lost;
-- do not invent dictionary item values.
-
-Money:
-
-- accept normal BYN human input such as 35,00 or 35.00;
-- convert to integer minor units without float;
-- reject malformed values or >2 decimal places;
-- display through existing money conventions;
-- never store decimal/float in gp_groups.meeting_price.
-
-### 7. Save vs submit
-
-The real approved group form must support separate actions:
-
-- Save draft/changes: update editable fields, keep status unchanged.
-- Submit to moderation:
-  - validate the complete form;
-  - persist editable data;
-  - transition via GroupStatusTransitionService:
-    draft -> moderation, or revision -> moderation;
-  - actor is current psychologist;
-  - actor_type user.
-
-Do not assign status directly.
-
-A failed validation or failed transition must not partially save a state change/history row.
-
-### 8. Revision flow
-
-Administrator moderation -> revision requires moderator_comment.
-
-Requirements:
-
-- minimum 10 characters after trimming;
-- store latest moderator_comment on group for current-state presentation;
-- transition moderation -> revision via GroupStatusTransitionService;
-- pass comment to transition service so a history row preserves the comment;
-- actor = current admin;
-- actor_type = user.
-
-Psychologist in revision:
-
-- sees current comment prominently;
-- sees complete historical comments/history;
-- may edit group;
-- may save changes without status transition;
-- may resubmit revision -> moderation through transition service.
-
-Previous history comments must never be overwritten/deleted.
-
-### 9. Rejection flow
-
-Administrator moderation -> rejected requires rejection_reason.
-
-Requirements:
-
-- minimum 10 characters after trimming;
-- store current rejection_reason on group;
-- transition via GroupStatusTransitionService with comment/history;
-- actor current admin;
-- rejected group cannot be edited/resubmitted by psychologist in Stage 7;
-- psychologist can view reason/history and may delete group if deletion rules allow.
-
-Do not introduce refund/payment behavior in real Stage 7 UI, even when group.free=false.
-
-### 10. Approve flow
-
-Administrator moderation -> approved:
-
-- explicit confirmed action;
-- use GroupStatusTransitionService;
-- actor current admin;
-- no payment prerequisite in Stage 7;
-- no date placement calculation yet;
-- published_at/expires_at remain null until activation.
-
-Invalid or repeated action must be safely rejected without duplicate history.
-
-### 11. Manual activation
-
-Administrator approved -> active:
-
-- explicit confirmation;
-- before action, admin detail visibly shows “Интеграция с gruppa.info”,
-  “ID группы для gruppa.info”, immutable public_uuid, copy action, and reminder to save it on the public site;
-- use current SettingService::placementDurationDays();
-- within one coordinated transaction:
-  - lock current group;
-  - require status approved;
-  - published_at = current UTC time;
-  - placement_days = current configured duration;
-  - expires_at = published_at + placement_days;
-  - expiry_warning_sent_at = null;
-  - transition approved -> active through domain transition service with admin actor.
-
-Do not calculate from approval time.
-Do not create/update a public-site record automatically.
-Do not store a second public-site ID.
-Do not call external services.
-
-A duplicate activation attempt must fail and must not change dates/history twice.
-
-### 12. Real status history
-
-Replace fixture history on real pages with gp_group_status_history.
-
-Show chronological history with:
-
-- from/to human labels;
-- actor identity where actor exists;
-- actor type/system where relevant;
-- comment/reason when present;
-- created_at formatted through project date/time helpers.
-
-Initial draft history row must appear.
-
-Revision/rejection history must preserve each comment independently.
-
-Avoid N+1 when loading actor/history.
-
-Prototype history stays synthetic.
-
-### 13. Psychologist delete
-
-Allow psychologist soft delete only when:
-
-- current user owns group;
-- status is draft or rejected;
-- group.disabled=false if existing UX requires it;
-- no succeeded payment exists that has not been refunded.
-
-Even though Stage 7 creates no payments, preserve historical payment safety by querying only for deletion authorization when needed.
-
-Use explicit confirmation.
-Soft delete only.
-Do not physically delete status history/payments/applications.
-After deletion, list no longer shows group.
-IDOR must be impossible.
-
-### 14. Group policy / IDOR
-
-Add a GroupPolicy or equivalent clear policy.
-
-At minimum cover:
-
-- owner view;
-- owner update only draft/revision;
-- owner submit only draft/revision;
-- owner delete only permitted states/conditions;
-- admin view/manage;
-- admin moderation;
-- admin edit;
-- admin abandoned-delete.
-
-Psychologist A must receive 404 or 403 without data leakage when guessing psychologist B group ID.
-Prefer owner-scoped lookup for psychologist routes so foreign group IDs return 404.
-
-Administrator routes may use normal group binding plus policy.
-
-### 15. Admin real group routes
-
-Under account + role:admin add real routes for:
-
-- group index;
-- create/store;
-- show;
-- edit/update;
-- approve;
-- revision;
-- reject;
+### 1. Admin navigation and routes
+
+Under existing account + role:admin protection add real routes for:
+
+#### Dictionaries
+- list/create;
+- edit/update dictionary metadata;
+- delete eligible custom empty dictionary;
+- item list/create;
+- item edit/update;
 - activate;
-- delete abandoned draft.
+- deactivate;
+- delete eligible unused item.
 
-Recommended prefix /admin/groups and names admin.groups.*.
+Use stable names under admin.dictionaries.*.
 
-Do not add payment/refund/extension/application routes.
+#### Settings
+- GET /admin/settings;
+- PUT/PATCH /admin/settings.
 
-### 16. Admin group list
+#### Payments
+- GET /admin/payments only.
 
-Connect approved admin/groups/index to real data.
-
-Show real:
-
-- internal ID;
-- title;
-- psychologist;
-- status;
-- free/paid historical snapshot;
-- created_at;
-- published_at;
-- expires_at.
-
-Implement:
-
-- search by numeric ID, title, psychologist name/email;
-- status filter;
-- free/paid filter;
-- sorting by created_at, published_at, expires_at with safe allowlist;
-- pagination 20;
-- query preservation;
-- no N+1, eager load owner and needed dictionary values.
-
-Real Stage 7 UI must not offer successful-payment filter because payment flow is not connected.
-Prototype retains its existing payment filter state.
-
-Quick filters in real UI:
-
-- approved — awaiting manual publication;
-- abandoned — draft older than 30 days;
-- expired may be visible only as ordinary status if historical data exists, but Stage 9 owns expiry/unpublish workflow.
-
-Do not query gp_payments for normal Stage 7 list/filter behavior.
-
-### 17. Admin create/edit
-
-Administrator can create a group for an eligible psychologist and edit group content regardless lifecycle status.
-
-Create:
-
-- choose owner from real eligible psychologists;
-- create status=draft;
-- Group model snapshots owner free and generates public_uuid;
-- create initial null -> draft history with admin actor;
-- no payment;
-- redirect to edit/detail.
-
-Admin edit:
-
-- may edit questionnaire fields regardless group status;
-- owner cannot be changed after creation;
-- public_uuid cannot be changed;
-- free snapshot cannot be changed;
-- lifecycle fields cannot be edited directly.
-
-Show the existing approved warning that published group changes need manual synchronization to the public catalogue.
-
-### 18. Admin detail/moderation
-
-Connect approved admin/groups/show to real data.
-
-Show:
-
-- psychologist with link to real Stage 5 psychologist detail;
-- group content/status/history;
-- public_uuid integration block;
-- real allowed moderation actions by status;
-- activation action only when approved;
-- admin edit action;
-- abandoned-delete only when allowed.
-
-Real Stage 7 page must not show fabricated payment data, WEBPAY refund warning, order numbers, or payment links.
-
-For free=false groups, historical tariff can be displayed but it must not imply that payment is required in this stage.
-
-### 19. Abandoned draft deletion
-
-Use a technical config value such as GROUP_ABANDONED_DRAFT_DAYS=30 or equivalent project configuration.
-
-Add the value to .env.example if using env.
-
-Admin quick filter selects:
-
-- status=draft;
-- created_at <= now - threshold.
-
-Admin delete action is allowed only for a draft meeting the same threshold.
-
-Soft delete only.
-Do not delete history/related records.
-Do not broaden this to arbitrary group deletion.
-
-### 20. Applications remain Stage 10
-
-No real application list/detail/counters in Stage 7.
-
-On group list/detail:
-
-- do not query gp_group_applications;
-- render counters as zero/unavailable in a truthful way;
-- do not provide active production links to application pages.
-
-Prototype application/counter variants remain unchanged.
-
-### 21. Payments remain later
-
-Hard gate:
-
-- no gp_payments create/update/delete in Stage 7;
-- no Payment service/controller integration;
-- no WEBPAY routes/requests;
-- no placement page in real workflow;
-- no payment-success requirement for free=false;
-- no transition into awaiting_payment;
-- no extension behavior.
-
-Add tests that a free=false psychologist creates a group in draft and can complete Stage 7 moderation/activation with zero gp_payments rows.
-
-### 22. Preserve immutable public_uuid
-
-Real forms must never contain editable public_uuid.
-
-Tests must prove:
-
-- UUID generated at creation;
-- submitted public_uuid value is ignored/rejected;
-- psychologist cannot mutate it;
-- admin edit cannot mutate it;
-- repeated save/status changes keep same UUID;
-- admin detail copy control uses exact UUID.
-
-Reuse existing copy JS/component behavior.
-
-### 23. Transactions / workflow service
-
-Prefer a small explicit GroupWorkflow service/orchestrator that composes:
-
-- Group creation + initial history;
-- GroupStatusTransitionService;
-- moderator current fields;
-- activation date changes;
-- deletion eligibility where appropriate.
-
-Do not duplicate status writes in controllers.
-Do not create a generic workflow framework.
-
-Where multiple DB effects belong to one action, coordinate them transactionally with row locking.
-
-Be careful not to nest conflicting lock/query patterns around GroupStatusTransitionService; refactor the existing transition service only if necessary and preserve its accepted behavior/tests.
-
-### 24. Blade integration
-
-Reuse accepted views, not parallel templates.
-
-Adapt existing views/components to support prototype and real modes:
-
-- psychologist/groups/index;
-- psychologist/groups/show;
-- shared/group-form;
-- shared/group-data;
-- shared/group-summary;
-- shared/group-history;
-- psychologist/groups/_actions;
-- shared/group-delete;
-- admin/groups/index;
-- admin/groups/show;
-- admin/groups/form.
-
-Real forms must use:
-- real methods/actions;
-- CSRF;
-- server validation;
-- old input;
-- real dictionaries;
-- real confirmation forms.
-
-Prototype remains no-op and preserves all variants.
-
-Do not redesign Stage 3.
-
-### 25. Navigation
-
-Psychologist navigation remains:
-- Мои группы;
-- Мои данные;
-- Выход.
-
-Admin navigation adds real “Группы” alongside:
+Update real admin navigation to:
 - Главная;
 - Психологи;
 - Группы;
+- Платежи;
+- Справочники;
+- Настройки;
 - Выход.
 
-Do not add applications/payments/dictionaries/settings real navigation yet.
+Do not add real Applications navigation until Stage 10.
+Do not add a real payment detail route in Stage 8.
 
-### 26. Tests
+### 2. Real dictionary list
 
-All tests use MySQL.
+Connect admin/dictionaries/index.blade.php to gp_dictionaries.
 
-Add focused coverage for at least:
+Display:
+- stable code;
+- name;
+- item count;
+- active item count;
+- actions.
 
-#### Psychologist create/list/detail
-- create draft uses authenticated owner;
-- free=true snapshot;
-- free=false snapshot but status still draft and no payments;
-- initial history row actor;
-- unique immutable public_uuid;
-- list only own non-deleted groups;
-- pagination/no N+1;
-- detail only own group;
-- foreign owner IDOR.
+Requirements:
+- deterministic ordering by code/id;
+- pagination, 20 per page;
+- no N+1;
+- real empty state;
+- create form;
+- edit form using the same approved page/view, not a parallel page;
+- prototype mode remains no-op.
 
-#### Form/update
-- draft edit succeeds;
-- revision edit succeeds;
-- moderation/approved/active/expired edit blocked;
-- protected fields cannot be mass-written;
-- owner/public_uuid/free/status/dates unchanged;
-- dictionary active/inactive behavior;
-- money input converted to minor units without float;
-- malformed money rejected.
+### 3. Dictionary validation
 
-#### Submit/moderation
-- draft -> moderation with psychologist actor history;
-- revision -> moderation with psychologist actor history;
-- invalid transition rejected;
-- no direct status writes.
+Use Form Requests.
 
-#### Admin moderation
-- moderation -> revision requires 10-char comment and history comment;
-- multiple revision cycles preserve earlier comments;
-- moderation -> rejected requires 10-char reason/history;
-- moderation -> approved succeeds;
-- duplicate/invalid moderation actions no partial writes/history.
+Dictionary create:
+- code required;
+- lowercase stable machine code;
+- allow a-z, 0-9 and underscore;
+- max 64;
+- unique;
+- name required string max 255.
 
-#### Activation
-- approved -> active;
-- placement duration read from SettingService;
-- published_at UTC now;
-- placement_days snapshot;
-- expires_at exact plus duration;
-- expiry_warning_sent_at reset;
-- history admin actor;
-- duplicate activation rejected without date/history duplication;
-- public_uuid visible and unchanged.
+Dictionary update:
+- code must not be writable;
+- name may change.
 
-#### Delete
-- psychologist draft/rejected allowed when safe;
-- other statuses blocked;
-- succeeded unrefunded payment blocks deletion if such historical row exists;
-- admin abandoned draft threshold enforced;
-- soft delete preserves history/related rows.
+Do not permit mass assignment of id/timestamps or unrelated fields.
 
-#### Admin list
-- search ID/title/owner;
-- status/free filters;
-- sort allowlist;
-- pagination/query preservation;
-- approved quick filter;
-- abandoned 30-day quick filter;
-- no admin/payment/application N+1 or per-row queries.
+### 4. Core dictionary protection
 
-#### Authorization
-- psychologist cannot use admin group routes;
-- admin can view/edit groups;
-- one psychologist cannot access another’s group;
-- disabled/revoked user middleware regression.
+Protect core containers:
+- education_type;
+- group_format;
+- gender.
 
-#### Hard no-payment gate
-- no gp_payments row for paid owner create/submit/moderate/activate;
-- no real route into awaiting_payment;
-- real group HTML contains no active WEBPAY/payment action.
+For core dictionaries:
+- code immutable;
+- physical delete forbidden.
+
+Their names may be edited.
+
+Custom empty dictionaries may be deleted only after explicit confirmation.
+
+A dictionary with items may not be deleted; admin must manage/deactivate/remove eligible items first.
+
+### 5. Real dictionary item list
+
+Connect admin/dictionaries/items.blade.php to one real parent dictionary.
+
+Display:
+- code;
+- name;
+- sort_order;
+- active/inactive;
+- whether the item is currently used by application data;
+- actions available for that state.
+
+Requirements:
+- parent dictionary identity shown truthfully;
+- order by sort_order then id;
+- pagination, 20 per page;
+- nested ownership/scoping: changing dictionary ID while retaining another dictionary’s item ID must fail safely;
+- no N+1.
+
+### 6. Dictionary item validation / CRUD
+
+Create:
+- stable code required, [a-z0-9_], max 64;
+- code unique within parent dictionary;
+- name required max 255;
+- sort_order non-negative integer;
+- active boolean, default true if omitted.
+
+Update:
+- code immutable;
+- name/sort_order/active mutable, subject to safe lifecycle rules.
+
+Activation/deactivation:
+- explicit actions;
+- deactivation has confirmation;
+- reactivation supported;
+- repeated activation/deactivation must not create misleading state.
+
+Delete:
+- explicit destructive confirmation;
+- unused item may be physically deleted;
+- used item cannot be physically deleted and must instead be deactivated.
+
+Do not silently cascade or rewrite existing users/groups.
+
+### 7. Dictionary usage detection
+
+Usage checks must correctly cover current core references:
+
+- education_type item -> gp_users.education_type_id;
+- group_format item -> gp_groups.format_id;
+- gender item -> gp_groups.gender_id.
+
+Soft-deleted users/groups still count as historical usage and must prevent physical deletion.
+
+Do not infer usage only from current visible records.
+
+For custom dictionaries not referenced by current schema, items are considered unused unless another known relation is introduced.
+
+Keep this logic centralized in a small service/helper rather than scattering raw checks through Blade.
+
+### 8. Integration with existing forms
+
+Prove existing Stage 5/7 behavior with real dictionary mutations:
+
+- active item appears in new psychologist/group forms;
+- deactivated item disappears from new forms;
+- an existing record that references a now-inactive item still shows/preserves it in edit/detail;
+- reactivation restores it to new forms;
+- no source-code change/seed rerun is needed after adding values through admin UI.
+
+This is a core Stage 8 acceptance requirement.
+
+### 9. Real settings page
+
+Connect admin/settings/index.blade.php to real typed values.
+
+Display/edit:
+
+Prices:
+- placement_price_minor_units as human BYN placement_price;
+- extension_price_minor_units as human BYN extension_price;
+- blank means unconfigured/null.
+
+Durations:
+- placement_duration_days;
+- expiry_warning_days;
+- expired_extension_window_days;
+- participant_application_retention_months;
+- password_setup_link_ttl_hours.
+
+Real form:
+- POST method override PUT/PATCH as appropriate;
+- CSRF;
+- server validation;
+- old input;
+- approved validation/error areas;
+- explicit confirmation before committing changes.
+
+Prototype form remains no-op.
+
+### 10. Settings validation
+
+Use a dedicated Form Request.
+
+Prices:
+- nullable;
+- non-negative;
+- normal human input such as 50, 50.0, 50,00;
+- max 2 fractional digits;
+- convert to integer minor units without float;
+- reject negatives, exponent notation, malformed values, >2 decimals, overflow.
+
+Integer settings:
+- required positive integers.
+
+Cross-field:
+- expiry_warning_days must be strictly less than placement_duration_days.
+
+Do not introduce product-specific arbitrary maxima unless required for safe integer/date handling; if technical bounds are required, document them.
+
+### 11. Typed SettingService write boundary
+
+Extend SettingService with an explicit typed write/update API for the known seven settings.
+
+Controllers must not update gp_settings directly.
+
+The write boundary must:
+- accept only known setting keys/typed normalized values;
+- reject unknown keys;
+- keep type=integer;
+- update existing required rows transactionally;
+- not create arbitrary missing keys silently;
+- preserve nullable behavior only for the two price settings;
+- invalidate cached values only after a successful DB commit;
+- expose fresh values immediately after save.
+
+Do not create a generic untyped settings repository.
+
+### 12. Settings audit
+
+Every changed Stage 8 business setting must create gp_audit_log entries using AuditService.
+
+Use a stable action such as:
+- setting.updated
+
+Recommended fields:
+- entity_type = setting;
+- entity_id = gp_settings.id;
+- actor = current administrator;
+- metadata contains only:
+  - key;
+  - old_value;
+  - new_value.
+
+Values should be normalized stored integers/null:
+- prices in minor units;
+- durations/counts in integer units.
+
+Do not audit unchanged values.
+Do not store form payloads or unrelated data.
+
+Settings update + audit must be transactional.
+A failed audit must roll back setting changes.
+Cache invalidation must not expose rolled-back values.
+
+### 13. Placement duration snapshot regression
+
+Explicitly prove:
+
+- an already active group retains its existing placement_days/published_at/expires_at after placement_duration_days is changed;
+- a later activation of another approved group uses the new SettingService placement duration.
+
+Do not retroactively update existing group dates.
+
+### 14. Prices before WEBPAY
+
+Stage 8 may configure placement/extension prices even though WEBPAY is not connected.
+
+Requirements:
+- prices persist as minor units through SettingService;
+- display back correctly as BYN;
+- no payment is created when saving prices;
+- changing price does not alter any existing payment/group record;
+- Stage 7 free=false temporary no-payment group flow remains unchanged until Stage 13.
+
+### 15. Payment informational surface
+
+Add real GET /admin/payments using the existing admin.payments.index Blade.
+
+Real mode must render a truthful pre-WEBPAY state, for example:
+“Платежи ещё не подключены”.
+
+Requirements:
+- no synthetic order number, transaction, amount, status, owner or group;
+- no search/filter controls that imply working payment data unless clearly disabled/unavailable;
+- no real payment detail links;
+- no refund control;
+- no POST/PATCH/DELETE payment routes;
+- no gp_payments / gp_payment_notifications query required for normal rendering;
+- no provider/API call;
+- no WEBPAY credentials/config added.
+
+Prototype admin-payments/admin-payment variants remain unchanged.
+
+### 16. Admin home/navigation truthfulness
+
+Navigation now exposes Payments, Dictionaries, Settings because they have real Stage 8 routes.
+
+Do not add Applications until Stage 10.
+
+Admin home may remain the current truthful unavailable work-queue shell unless a simple real link/count is useful.
+Do not fabricate counts.
+
+### 17. Confirmation behavior
+
+Dangerous actions require real confirmation:
+- deactivate item;
+- delete unused item;
+- delete eligible custom empty dictionary;
+- settings save/change.
+
+Ensure confirmation modal submits the intended real form/data.
+
+Avoid nested forms and ensure textarea/input values belong to the submitted form.
+If shared confirmation component needs a small extension for “submit existing form”, preserve all prior usages and prototype behavior.
+
+### 18. Authorization / IDOR
+
+All Stage 8 routes require active authenticated admin.
+
+Psychologists receive 403.
+
+Nested item routes must not allow:
+- dictionary A + item from dictionary B;
+- editing/activating/deactivating/deleting another dictionary’s item by guessed ID.
+
+Soft-deleted/disabled/rejected admin access continues to be revoked by existing account middleware.
+
+### 19. Tests
+
+All tests run on MySQL.
+
+Cover at minimum:
+
+#### Dictionary containers
+- admin-only access;
+- list/query count/pagination;
+- create custom dictionary;
+- unique/invalid code validation;
+- code immutable after create;
+- edit name;
+- core dictionary delete forbidden;
+- non-empty custom dictionary delete forbidden;
+- empty custom dictionary delete works after confirmation.
+
+#### Dictionary items
+- create;
+- uniqueness scoped to parent;
+- edit name/sort;
+- code immutable;
+- deactivate/reactivate;
+- used item cannot physically delete;
+- unused item can delete;
+- soft-deleted user/group references still count as use;
+- nested dictionary/item IDOR;
+- pagination/order/no N+1.
+
+#### Existing-form integration
+- new active education item appears in psychologist create form;
+- inactive education item hidden for new records but retained for existing record;
+- new active format/gender appears in group form;
+- inactive format/gender hidden for new groups but retained for existing group;
+- reactivation restores options.
+
+#### Settings
+- real values render;
+- nullable price save/display;
+- valid money conversion without float;
+- malformed/negative/overflow price rejected;
+- positive integer validation;
+- warning_days < placement_days rule;
+- known keys only;
+- cache invalidation returns fresh saved value;
+- unchanged settings produce no audit;
+- changed settings produce actor/action/minimal old/new audit;
+- simulated audit failure rolls back DB and cache-visible values.
+
+#### Placement duration regression
+- existing active group unchanged after setting edit;
+- new activation uses updated duration.
+
+#### Payment surface
+- admin GET works and reuses approved view;
+- psychologist 403;
+- no fake payment identifiers/data/actions;
+- no payment detail/mutation routes;
+- rendering issues no gp_payments/gp_payment_notifications queries;
+- settings price updates create no payment rows.
 
 #### Regression
-- Stage 4–6 suites remain green;
-- Stage 5 admin psychologist/documents remain green;
-- 31 prototype groups / 249 variants remain;
+- Stage 4–7 tests remain green;
+- group creation/edit still uses database dictionaries;
+- all 31 / 249 prototype variants remain;
 - production excludes prototype/foundation routes.
 
-### 27. Manual/runtime verification
+### 20. Manual/runtime verification
 
-Through real Docker HTTP/browser flow verify:
+Through real Docker browser flow:
 
-Psychologist:
-1. login;
-2. Add group creates draft;
-3. fill form and save;
-4. submit to moderation;
-5. cannot edit while moderation.
+1. Admin logs in.
+2. Open Dictionaries.
+3. Add real synthetic/local test values to:
+   - group_format;
+   - gender;
+   - education_type.
+4. Confirm those values immediately appear in psychologist/group forms.
+5. Deactivate one used value and confirm:
+   - it disappears for new records;
+   - an existing record still displays/retains it.
+6. Reactivate it.
+7. Open Settings.
+8. Configure placement/extension prices and timing values.
+9. Confirm saved values round-trip correctly.
+10. Activate a new approved group after changing placement duration and verify the new duration is used, while an older active group remains unchanged.
+11. Open Payments and verify only truthful pre-WEBPAY informational state is shown.
+12. Verify psychologist role cannot access any Stage 8 admin route.
+13. Check representative 1440/1024/390 rendering for dictionaries/items/settings/payment info page.
 
-Admin:
-6. open real Groups list;
-7. open moderation group;
-8. send to revision with comment;
-9. psychologist sees comment/history, edits and resubmits;
-10. admin approves;
-11. admin sees/copies public_uuid reminder;
-12. admin activates;
-13. dates appear correctly.
+Use only synthetic/local values; do not treat them as approved production dictionary content.
 
-Also verify rejected path and abandoned-draft deletion.
+### 21. Documentation
 
-Repeat the create/moderate/activate path with a free=false psychologist and confirm no payment screen/row is created.
-
-Check representative 1440/1024/390 rendering for list/form/detail/admin moderation and no horizontal overflow.
-
-### 28. Documentation
-
-Update actual-state docs:
-
-- docs/architecture.md — group policy/workflow/status-history/activation boundary;
-- docs/development.md — manual Stage 7 workflow and abandoned threshold;
-- docs/project-status.md — Stage 7 complete, Stage 8+ pending;
-- docs/ui-pages.md — real group route wiring while retaining prototype catalogue.
-
-Add env/config documentation for abandoned draft threshold if introduced.
+Update:
+- docs/architecture.md — dictionary lifecycle/usage protection and typed settings write/audit/cache boundary;
+- docs/development.md — how to populate local dictionaries and configure settings through UI;
+- docs/project-status.md — Stage 8 completed and Stage 9+ pending;
+- docs/ui-pages.md — real Stage 8 route wiring while preserving prototype catalogue.
 
 Do not modify SPEC.md, WORKFLOW.md, or AGENTS.md.
 
 ## Explicit Out Of Scope
 
 Do not implement:
-
-- WEBPAY or any payment creation/check/return/notify;
-- awaiting_payment real flow;
-- placement/extension payment pages in production flow;
-- scheduler active -> expired;
-- expiry warning jobs/email;
-- free or paid extension;
-- participant application CRUD/counters;
+- WEBPAY config/credentials/provider requests;
+- real payment list/detail data;
+- payment creation/status/refund;
+- payment notifications;
+- applications;
+- Stage 9 expiration scheduler;
+- free/paid extension;
+- expiry warning email/jobs;
 - public API;
 - HMAC integration;
-- dictionary CRUD;
-- settings CRUD;
-- psychologist/profile editing;
 - email/password onboarding;
+- psychologist self-edit;
 - production deployment.
 
-Do not create active real links to these future-stage features.
+Do not create active real routes/actions for these future stages.
+
+## Constraints
+
+- Follow WORKFLOW.md and AGENTS.md.
+- Reuse accepted Stage 3 views/components.
+- Preserve Stage 4–7 auth/admin/group/document behavior.
+- Dictionary codes are stable.
+- Core dictionary containers cannot be deleted.
+- Used dictionary items are deactivated, not physically deleted.
+- Settings writes go through SettingService.
+- Audit changed business settings.
+- Money stored only as integer minor units; never float.
+- No payment/provider behavior in Stage 8.
+- Tests remain MySQL-only.
+- Preserve all 249 prototype variants.
+- No Node/npm/Vite or frontend framework.
+- No secrets or real production dictionary/personal/payment data.
+- Do not alter .ai/task.md.
 
 ## Acceptance Criteria
 
-1. Psychologist can create a draft group from real cabinet.
-2. free=false owner still gets draft, with free=false snapshot and zero payments.
-3. Group public_uuid is generated once and immutable.
-4. Initial draft history exists with correct actor.
-5. Psychologist list contains only own groups.
-6. Psychologist can view only own groups.
-7. Draft/revision can be edited; other lifecycle states cannot.
-8. Save and submit are separate real actions.
-9. Draft -> moderation uses domain transition service and history.
-10. Revision -> moderation uses domain transition service and history.
-11. Admin can list/search/filter/sort/paginate real groups without N+1.
-12. Real admin list has approved and abandoned quick filters.
-13. Real admin list does not expose payment filter/workflow.
-14. Admin can create and edit group content using approved Blade form.
-15. Existing group owner/free/public_uuid/lifecycle fields cannot be mass changed through edit.
-16. moderation -> revision requires valid comment and stores full historical comment.
-17. moderation -> rejected requires valid reason and stores history.
-18. moderation -> approved works through domain service.
-19. Invalid/repeated transitions produce no partial status/history.
-20. approved -> active uses current placement duration and calculates dates from activation time.
-21. Activation resets expiry warning marker.
-22. Admin detail visibly contains immutable “ID группы для gruppa.info” and copy control before activation.
-23. No external/public-site call is made on activation.
-24. Psychologist deletion obeys draft/rejected/payment safety and is soft delete.
-25. Admin deletion only removes abandoned drafts and is soft delete.
-26. Group status history renders real chronological actors/comments.
-27. Group dictionary fields use real active items and preserve current inactive referenced items.
-28. meeting_price is validated/converted to integer minor units without float.
-29. IDOR between psychologists is blocked.
-30. Psychologist cannot access admin group routes.
-31. No Stage 7 real route creates gp_payments or transitions to awaiting_payment.
-32. No real group flow links to WEBPAY/applications/extensions.
-33. Stage 4–6 access/profile/document behavior remains green.
-34. All 31/249 prototype variants remain green.
-35. Full MySQL suite passes.
-36. Pint passes.
-37. Larastan passes.
-38. composer check-platform-reqs passes.
-39. Blade compilation passes.
-40. Real representative pages work at 1440/1024/390.
-41. Documentation reflects actual Stage 7 behavior.
-42. Final diff is limited to Stage 7 group CRUD/moderation/history/activation, necessary shared UI integration/config, tests/docs, and .ai/report.md.
+1. Real admin navigation exposes Payments, Dictionaries and Settings.
+2. Only active admins can access Stage 8 routes.
+3. Admin can create/edit dictionary containers without source changes.
+4. Dictionary/container codes are immutable after creation.
+5. Core containers education_type/group_format/gender cannot be deleted.
+6. Admin can add/edit/reorder dictionary items.
+7. Item codes are unique per dictionary and immutable.
+8. Admin can deactivate/reactivate items.
+9. Used items cannot be physically deleted.
+10. Unused items can be deleted after confirmation.
+11. Nested dictionary/item IDOR is blocked.
+12. Active items appear immediately in real Stage 5/7 forms.
+13. Deactivated item disappears from new forms.
+14. Existing records retain/display a referenced inactive item.
+15. Real Settings page reads all seven values through typed SettingService.
+16. Admin can update all seven defined values; arbitrary keys cannot be created.
+17. Prices support nullable human BYN input and persist as integer minor units without float.
+18. Integer settings and warning<placement validation work.
+19. Setting caches are invalidated only after successful commit and reads return fresh values.
+20. Changed settings generate minimal setting.updated audit entries with current admin actor.
+21. Unchanged values generate no audit entry.
+22. Audit failure rolls back settings and does not expose stale/rolled-back cache values.
+23. Existing active placement dates remain unchanged after placement duration setting change.
+24. Later activation uses the new placement duration.
+25. Saving prices creates no payment/provider behavior.
+26. Real /admin/payments reuses approved payment-list Blade in truthful pre-WEBPAY mode.
+27. Real payment page shows no fake orders/transactions/actions.
+28. No real payment detail or payment mutation route exists.
+29. Normal payment informational rendering does not query payment tables.
+30. No WEBPAY config/credential/provider code is introduced.
+31. Stage 4–7 regression remains green.
+32. All 31 page groups / 249 prototype variants remain green.
+33. Full MySQL suite passes.
+34. Pint passes.
+35. Larastan passes.
+36. composer check-platform-reqs passes.
+37. Blade compilation passes.
+38. Representative real Stage 8 pages work at 1440/1024/390.
+39. Documentation reflects actual Stage 8 state.
+40. Final diff is limited to Stage 8 dictionaries/settings/payment-info UI, necessary shared integration, tests/docs, and .ai/report.md.
 
 ## Verification Commands
 
@@ -811,28 +618,24 @@ Run and report exact results.
 
 1. Confirm Docker services healthy.
 2. Migrate/seed without destructive reset.
-3. Verify real psychologist workflow through Docker HTTP/browser:
-   create draft -> save -> submit.
-4. Verify admin moderation:
-   revision -> psychologist resubmit -> approve -> activate.
-5. Verify rejection path.
-6. Verify paid-owner free=false path creates no payment and no payment redirect.
-7. Verify public_uuid copy and immutability.
-8. Verify IDOR with second psychologist.
-9. Verify admin abandoned filter/delete with records just inside/outside 30-day cutoff.
-10. Verify no real group route queries/creates payment or application data where out of scope.
-11. Run:
-   docker compose exec -T php php artisan test
-   docker compose exec -T php ./vendor/bin/pint --test
-   docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
-   docker compose exec -T php composer check-platform-reqs
-   docker compose exec -T php php artisan view:cache
-12. Inspect route list and production isolation.
-13. Inspect gp_group_status_history after full flow.
-14. Inspect gp_payments remains unchanged/zero for Stage 7 smoke flow.
-15. Inspect representative UI at 1440/1024/390.
-16. Inspect git diff/status/staged files.
-17. Confirm no secrets, real personal data, screenshots, browser artifacts, or unrelated files are staged.
+3. Verify real admin dictionary create/edit/item/deactivate/reactivate/delete flows.
+4. Verify real Stage 5/7 forms react immediately to dictionary changes.
+5. Verify settings update, validation, audit and cache behavior.
+6. Verify old active group dates are unchanged and later activation uses the new duration.
+7. Verify /admin/payments is informational only and performs no payment table query/provider action.
+8. Verify psychologist gets 403 for Stage 8 routes.
+9. Run:
+   - docker compose exec -T php php artisan test
+   - docker compose exec -T php ./vendor/bin/pint --test
+   - docker compose exec -T php ./vendor/bin/phpstan analyse --no-progress
+   - docker compose exec -T php composer check-platform-reqs
+   - docker compose exec -T php php artisan view:cache
+10. Inspect route list and production route isolation.
+11. Inspect audit rows for setting updates.
+12. Inspect query counts for dictionary/item/payment-info lists.
+13. Inspect representative UI at 1440/1024/390.
+14. Inspect git diff/status/staged files.
+15. Confirm no secrets, real personal/payment data, screenshots, browser artifacts, or unrelated files are staged.
 
 ## Hard Workflow Gate
 
@@ -841,30 +644,27 @@ Before changing files:
 - read WORKFLOW.md, AGENTS.md, SPEC.md, docs/project-status.md, docs/ui-pages.md, and this .ai/task.md;
 - run git log --oneline -5;
 - run git status --short;
-- confirm base commit 2b9ff579d91c69cc2d7a6ecae6438415f93f06e1;
-- inspect existing Group model/enums/transition service and all Stage 3 group views;
+- confirm base commit 1f5182039fadcfe53bb737c30748104c2535308c;
+- inspect existing dictionary/settings/payment prototype views and SettingService/AuditService;
 - do not overwrite unknown local changes.
 
 During implementation:
 
-- stay strictly in Stage 7;
-- never create payment/WEBPAY behavior;
-- never make awaiting_payment reachable;
-- use GroupStatusTransitionService for status changes;
-- use owner-scoped psychologist access;
-- preserve immutable public_uuid and free snapshot;
-- preserve prototype fixtures/no-op behavior;
-- preserve accepted design;
+- stay strictly in Stage 8;
+- do not begin Stage 9 lifecycle or Stage 10 applications;
+- do not add WEBPAY/provider behavior;
+- preserve accepted views/prototypes;
+- keep dictionary/settings changes transactional and explicit;
 - do not alter .ai/task.md;
 - do not change governance/spec files.
 
 Before commit:
 
 - run all required checks;
-- perform full real psychologist/admin workflow smoke verification;
-- update .ai/report.md with routes, policies, requests, workflow service, history/activation rules, no-payment evidence, tests/runtime checks, facts/assumptions/unknowns;
+- perform real browser/admin Stage 8 smoke verification;
+- update .ai/report.md with routes/controllers/requests/services, dictionary lifecycle, settings audit/cache behavior, payment-info evidence, tests/runtime checks, facts/assumptions/unknowns;
 - inspect full diff and staged files;
-- stage only Stage 7 files plus .ai/report.md;
+- stage only Stage 8 files plus .ai/report.md;
 - ensure no runtime/test artifacts are staged.
 
 Completion:
@@ -873,6 +673,6 @@ Completion:
 - otherwise use partial, blocked, or failed;
 - if complete, commit with:
 
-codex: TASK-2026-09-21-05 implement group CRUD moderation workflow
+codex: TASK-2026-09-21-06 implement dictionaries settings admin
 
 - do not create an accept commit.
