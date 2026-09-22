@@ -1,640 +1,236 @@
-# Task: TASK-2026-09-21-13
+# Task: TASK-2026-09-21-14
 
 Status: planned
-Created from: 094e94e1734707cdf9c607c989eaa03461da2893 (main)
+Created from: 4e425eb932e4bcbea6aebbc4fe9b9eca11b952be (main)
 
 ## Title
 
-Stage 13 local WEBPAY correction — complete real payment-era admin/group integration and staging prerequisites
+Shared-hosting portability correction — make PCNTL optional without weakening queue safety
 
 ## Goal
 
-Correct the remaining integration gaps found during acceptance review of TASK-2026-09-21-12.
+Fix the one remaining acceptance blocker in TASK-2026-09-21-13.
 
-The core local WEBPAY implementation is structurally sound and must be preserved:
+The shared-hosting baseline is intended for ordinary PHP hosting where the account owner may not be able to install/enable CLI `pcntl`.
 
-- protocol-v2 form/signature;
-- signed notify as the trusted merchant-order binding;
-- standalone get_transaction cannot bind a local payment;
-- lost-notify/no-binding stays pending/manual review;
-- central idempotent confirmation;
-- paid placement and paid extension;
-- bounded trusted-bound recovery;
-- manual refund accounting;
-- current UI design baseline.
+Current implementation makes `pcntl` a hard blocker in `deployment:preflight`.
 
-This correction remains narrow in business behavior. In addition, prepare the application runtime/deployment baseline for ordinary shared PHP hosting without rewriting the payment architecture.
+That is too strict:
+
+- Laravel 12 requires PCNTL to enforce queue worker/job timeouts;
+- Laravel queue workers themselves can still run without PCNTL;
+- on shared hosting we use a finite cron-driven database worker, not a permanent daemon;
+- SMTP and WEBPAY HTTP operations already have explicit transport timeouts;
+- actual hosting cron/process limits are an external staging acceptance fact.
+
+Preserve all current payment, mail, queue, scheduler and database-cache behavior.
+
+Do not change WEBPAY trust architecture.
 
 ## Base
 
 Use exactly:
 
-`094e94e1734707cdf9c607c989eaa03461da2893`
+`4e425eb932e4bcbea6aebbc4fe9b9eca11b952be`
 
-Do not revert the accepted Stage 1–12 behavior or the local WEBPAY implementation.
+## Required Behavior
 
-## Acceptance Review Findings
+### 1. PCNTL must not be a universal hard preflight blocker
 
-### 1. Real abandoned-group workflow does not include awaiting_payment
+Change `deployment:preflight` so:
 
-Paid placement now creates real `awaiting_payment` groups.
+- missing required Composer production extensions remains a hard failure;
+- missing `pcntl` by itself does NOT make the whole preflight fail;
+- output clearly reports whether hard worker timeout support is:
+  - available; or
+  - unavailable.
 
-However current admin behavior still reflects the pre-payment era:
+Use an explicit advisory/warning capability rather than disguising missing PCNTL as PASS.
 
-- quick filter `abandoned` selects only `draft`;
-- admin delete policy allows only old `draft`;
-- therefore an abandoned unpaid `awaiting_payment` group cannot be found through the intended quick filter and cannot be manually soft-deleted by admin.
+Recommended check output concept:
 
-SPEC requires abandoned records to include both:
+- `PASS CLI worker hard timeout (pcntl): available`
+- `WARN CLI worker hard timeout (pcntl): unavailable; verify cron process limit and shared-hosting fallback`
 
-- `awaiting_payment`;
-- `draft`.
+Do not print secrets.
 
-Correction:
+If necessary, extend the preflight check structure from only `ok` to a severity/status model such as:
 
-- admin quick filter `abandoned` must include both statuses, using the existing abandoned age threshold;
-- admin delete eligibility must include old `awaiting_payment` and old `draft`;
-- existing payment safety remains authoritative:
-  - any succeeded unrefunded payment blocks deletion;
-  - refund accounting does not otherwise bypass status/age rules;
-- deletion remains soft delete;
-- historical payments/notifications remain intact.
+- pass;
+- warn;
+- fail.
 
-Do not add automatic cleanup.
+Only fail checks affect process exit status.
 
-### 2. Successful-payment filter is still prototype-only
+### 2. Keep PCNTL path as preferred
 
-Now that `gp_payments` is real, the real admin Groups list must expose the SPEC filter for presence of a successful unrefunded payment.
+If `pcntl` exists:
 
-Current view hides `successful_payment` in real mode and GroupIndexRequest/controller do not implement it.
-
-Correction:
-
-Add real filter:
-
-- `successful_payment=yes`
-- `successful_payment=no`
-
-Definition for this list:
-
-- “yes” = group has at least one payment with status `succeeded` and `refunded_at IS NULL`;
-- “no” = no such payment.
-
-Use `whereHas` / `whereDoesntHave` or equivalent SQL.
-
-Requirements:
-
-- no per-row payment queries;
-- normal group list without this filter should preserve existing constant-query behavior;
-- filter composes correctly with status/free/search/quick/sort/pagination;
-- query string persists through pagination;
-- do not treat `refunded` as successful-unrefunded.
-
-### 3. Real awaiting_payment copy is stale and contradictory
-
-Current real group summary renders:
-
-`Историческая запись. Действия пока недоступны.`
-
-for `awaiting_payment`, while the same screen exposes real payment actions.
-
-That text belonged to the pre-WEBPAY state and is now false.
-
-Correction:
-
-Use truthful current-state wording, for example:
-
-`Ожидается оплата размещения. Заполнение анкеты группы станет доступно после доверенного подтверждения WEBPAY.`
-
-Requirements:
-
-- owner real group show/list must not call awaiting_payment “historical”;
-- payment CTA remains available;
-- do not redesign the page;
-- prototype variants may retain their intended demonstration semantics only if still accurate.
-
-Where practical, from the real group detail link directly to the current/latest placement payment.
-
-Do not introduce a psychologist payment-history section.
-
-### 4. Staging prerequisites omit unsuccessful WEBPAY notifications
-
-Official WEBPAY documentation currently states:
-
-- standard notify is sent after the provider has a result;
-- by default notifications are sent only for successful operations;
-- receiving notifications for unsuccessful payments requires contacting WEBPAY technical support.
-
-The local code safely supports trusted signed provider types:
-
-- 2 -> failed;
-- 8 -> failed;
-- 7 -> cancelled/voided while still pending.
-
-But because browser cancel is untrusted and standalone get_transaction cannot establish merchant-order binding, a merchant configured for success-only notify cannot safely transition a failed/cancelled unbound attempt to a terminal state. Such an attempt intentionally remains pending/manual review and retry stays blocked.
-
-This is not a reason to weaken the trust boundary.
-
-Correction to docs/staging checklist:
-
-- explicitly state that if the product is expected to automatically obtain trusted `failed/cancelled` states and enable normal retry after unsuccessful card attempts, WEBPAY Sandbox/production account must be configured to deliver signed notifications for unsuccessful operations;
-- instruct operator to request this from WEBPAY support and verify it during Sandbox acceptance;
-- if unsuccessful notifications are not enabled/delivered, document the safe fallback:
-  - browser cancel/failed page is not trusted;
-  - standalone get_transaction cannot bind the attempt;
-  - payment remains pending/manual review;
-  - no new retry is allowed merely from browser outcome;
-- do not invent a manual “mark failed/cancelled/succeeded” financial action;
-- do not adopt a different provider API in this correction.
-
-Official source to re-check before implementation:
-
-`https://docs.webpay.by/paymentIntegration/cardIntegration/paymentNotification/`
-
-At review time the documentation says unsuccessful payment notifications can be enabled by contacting `support@webpay.by`.
-
-## Scope
-
-### Admin group index
-
-Update:
-
-- request validation;
-- controller query;
-- real Blade filter;
-- pagination/query persistence.
-
-Implement successful-payment yes/no filter.
-
-Update abandoned quick filter to include both awaiting_payment and draft older than the existing configured threshold.
-
-### Admin group deletion
-
-Update GroupPolicy/admin behavior so old abandoned:
-
-- awaiting_payment;
-- draft;
-
-may be deleted by an authorized admin if no succeeded unrefunded payment blocks deletion.
-
-Preserve psychologist deletion rules unchanged.
-
-### Real owner group UI
-
-Correct awaiting_payment wording.
-
-Verify:
-
-- real list;
-- real detail;
-- payment CTA/navigation;
-- disabled state behavior.
-
-No visual redesign.
-
-### Documentation
-
-Update at minimum:
-
-- `docs/webpay.md`;
-- `docs/deployment.md`;
-- `docs/project-status.md` only if wording needs correction;
-- `docs/development.md` where local/shared-hosting runtime commands differ;
-- `.env.example` for database cache/shared-hosting placeholders;
-- `.ai/report.md`.
-
-Explicitly add unsuccessful-notify provider prerequisite/fallback.
-
-## HostER.by / Shared-Hosting Readiness
-
-The target test/production hosting class is ordinary shared PHP hosting (HostER.by / ispmanager-style environment), not a VPS with Docker/systemd/Supervisor.
-
-Do not hardcode HostER account paths or assume optional panel rights before the real account exists.
-
-At planning time current ispmanager documentation confirms the platform can support:
-
-- Cron jobs that execute shell/PHP CLI commands;
-- selectable installed PHP versions/handlers;
-- optional Shell/SSH access granted per user;
-- optional PHP Composer access granted per user/site.
-
-Exact HostER account capabilities, installed PHP binaries, DB engine/version, symlink permission and cron limits remain deployment-time facts.
-
-The application must therefore be portable to shared hosting with the following architecture.
-
-### A. Database cache and distributed locks
-
-Production/shared-hosting mode must not depend on the local file cache for cross-process locks.
-
-The project currently has Laravel database-cache configuration but no cache tables.
-
-Add the standard Laravel-compatible database cache tables:
-
-- `cache`;
-- `cache_locks`.
-
-Requirements:
-
-- additive migration only;
-- MySQL-compatible;
-- no Redis dependency;
-- preserve local/testing ability to select another cache store when a test explicitly needs it;
-- update `.env.example` so the documented staging/shared-hosting choice is `CACHE_STORE=database`;
-- shared web PHP, scheduler and cron queue workers must see the same cache/lock rows;
-- Stage 12 unique mail/warning locks and Stage 13 WEBPAY recovery locks must remain correct under database cache.
-
-Add tests proving at minimum:
-
-- database cache read/write works;
-- a cache lock acquired in one application/process context prevents a second acquisition;
-- warning/payment unique-lock behavior remains green with database cache.
-
-Do not make Redis a production prerequisite for this project.
-
-### B. Cron-driven queue mode
-
-Do not require a permanently running `queue:work` daemon for shared-hosting deployment.
-
-Keep the database queue.
-
-Document and verify a finite queue-drain mode suitable for cron, for example:
+Use the current finite worker recommendation:
 
 `php artisan queue:work database --stop-when-empty --tries=3 --timeout=45 --max-time=50`
 
-Exact PHP binary/path is deployment-specific.
+Existing Docker/local runtime with pcntl remains valid.
 
-Requirements:
+Do not remove pcntl from the local Docker image.
 
-- jobs remain the same jobs; no synchronous-mail/payment fallback;
-- queue failures still use `failed_jobs`;
-- no business behavior depends on Supervisor/systemd;
-- the existing Docker persistent worker remains valid for local development;
-- add a local verification using the finite `--stop-when-empty` worker and database cache;
-- document that if the host cannot schedule every minute, the actual supported cron frequency must be measured and accepted before production because it affects queue latency and scheduler precision.
+### 3. Document safe no-PCNTL shared-hosting fallback
 
-It is acceptable for multiple database workers to be briefly concurrent; existing idempotency/unique locks must protect duplicate effects.
+If target shared hosting does not expose PCNTL:
 
-Do not introduce an HTTP/web-triggered queue runner.
+- finite database worker remains allowed;
+- Laravel hard job timeout is unavailable;
+- `--stop-when-empty` and finite worker lifetime remain the operating model;
+- explicit provider transport timeouts remain mandatory:
+  - SMTP timeout;
+  - WEBPAY connect/request timeout;
+- MySQL/database operations remain bounded by hosting/database configuration;
+- hosting cron maximum process runtime must be discovered and verified;
+- queue `retry_after` must be comfortably greater than the maximum expected/allowed in-flight job duration;
+- do not allow two workers to process the same still-running job because `retry_after` was too small.
 
-### C. Laravel scheduler on shared hosting
+Do not invent a fixed HostER runtime limit.
 
-Production/shared hosting should use one Cron entry invoking:
+Document an operator decision gate:
 
-`php /absolute/path/to/application/artisan schedule:run`
+- if PCNTL unavailable but HostER provides a bounded cron process runtime compatible with our jobs and retry_after, shared-hosting mode is acceptable;
+- if neither PCNTL nor a safe bounded process runtime is available, hosting is not accepted for this application until the hosting capability changes.
 
-once per minute when the hosting plan allows it.
+Do not fall back to synchronous mail/payment jobs.
 
-The Laravel scheduler remains authoritative for:
+Do not add an HTTP-triggered queue runner.
 
-- group expiry;
-- participant cleanup;
-- expiry-warning queueing;
-- WEBPAY recovery queueing.
+### 4. Shared-hosting queue configuration guidance
 
-Requirements:
+Review `DB_QUEUE_RETRY_AFTER`.
 
-- no duplicate host-level cron entries for each business command;
-- `schedule:list` remains the source of the internal cadence;
-- docs must include the fallback decision gate if HostER's minimum cron interval is greater than one minute: do not silently weaken timing requirements; record the actual limitation during staging acceptance.
+The documentation must explain:
 
-### D. Shared-hosting /cabinet deployment layout
+- with PCNTL, worker timeout must remain below retry_after;
+- without PCNTL, retry_after must exceed the verified maximum reasonable job/process duration with a safety margin;
+- actual value must be finalized during HostER staging discovery.
 
-The application must remain deployable under:
+You may add `DB_QUEUE_RETRY_AFTER` to `.env.example` with a safe documented default if justified, but do not invent hosting-specific values as facts.
 
-`https://gruppa.info/cabinet/`
+Do not change queue semantics merely for tests.
 
-while the main public site occupies the same host.
+### 5. Preflight remains strict on actual hard blockers
 
-Never require the full Laravel source, `.env`, `vendor`, private documents or `storage` to be web-accessible.
+Do not weaken these existing hard checks:
 
-Document two supported layouts:
+- PHP version;
+- required production PHP extensions such as DOM/XML/PDO/etc.;
+- MySQL 8 verified contract;
+- writable directories;
+- database session/queue/cache requirements in deployment;
+- cache/lock tables and lock functionality;
+- HTTPS `/cabinet` APP_URL;
+- APP_DEBUG=false;
+- SMTP configuration presence;
+- integration secret presence;
+- WEBPAY configuration presence;
+- required DB tables.
 
-#### Preferred: symlink/alias allowed
+PCNTL is the only capability being reclassified from universal hard blocker to deployment warning/capability.
 
-- full Laravel application stored outside public web root;
-- public web path `.../public_html/cabinet` points to `application/public` through an allowed symlink/hosting alias;
-- only Laravel public files are reachable.
+### 6. Tests
 
-#### Fallback: symlink unavailable
+Add/update tests for preflight severity behavior.
 
-- application remains outside web root;
-- copy only Laravel public assets/front controller into `public_html/cabinet`;
-- deployment-specific front controller paths reference the private application `vendor/autoload.php` and `bootstrap/app.php`;
-- do not duplicate application source into `public_html`;
-- document exactly which generated/deployment file needs path substitution.
+At minimum:
 
-Do not hardcode `/var/www/...`, account names or HostER-specific home paths in committed application code.
+- a warning does not cause non-zero exit code when all hard checks pass;
+- a hard failure still returns non-zero even when warnings also exist;
+- warning output contains no secrets;
+- current environment with PCNTL still reports available;
+- support layer can deterministically test the missing-PCNTL path without actually uninstalling the extension (inject/provide capability detection cleanly rather than environment hacks);
+- no mail/HTTP/business writes;
+- full database cache/lock tests remain green;
+- finite worker smoke remains green.
 
-Existing URL generation/base-path behavior must remain green with `APP_URL=https://gruppa.info/cabinet`.
+### 7. Documentation
 
-Add/retain automated checks for:
+Update:
 
-- asset URLs under `/cabinet`;
-- routes/redirects under `/cabinet`;
-- WEBPAY return/cancel/notify URLs under `/cabinet`;
-- password setup URLs under `/cabinet`;
-- no prototype routes in production.
+- `docs/deployment.md`;
+- `docs/development.md` only if needed;
+- `docs/project-status.md` if it currently says PCNTL is mandatory;
+- `.ai/report.md`.
 
-### E. Production artifact without server-side Composer dependency
+Docs must clearly distinguish:
 
-Composer may be available in ispmanager, but the application must not require Composer access on the hosting account.
+- PCNTL preferred for Laravel hard job timeout;
+- PCNTL not required for the queue worker to execute jobs;
+- external HostER cron/process-limit acceptance required when PCNTL is unavailable.
 
-Document a supported release preparation flow performed locally/CI:
-
-`composer install --no-dev --prefer-dist --optimize-autoloader`
-
-using the committed `composer.lock`.
-
-Deployment artifact must include `vendor/`.
-
-Requirements:
-
-- no dev dependencies in production artifact;
-- no Node/npm/Vite;
-- `composer check-platform-reqs` must be run against the target hosting PHP before activation when CLI access exists;
-- if Composer is available on HostER it is optional convenience, not an architecture dependency.
-
-### F. Shared-hosting preflight command
-
-Add a read-only Artisan command, recommended:
-
-`php artisan deployment:preflight`
-
-It must print only non-sensitive technical status and exit non-zero on hard blockers.
-
-Check at minimum:
-
-- PHP version satisfies project requirement;
-- required PHP extensions from composer requirements are loaded;
-- DB connection works;
-- DB driver/server identity and version are displayed without credentials;
-- actual DB engine is MySQL-compatible;
-- writable `storage` and `bootstrap/cache`;
-- session driver is database for staging/production;
-- queue connection is database;
-- cache store is database for shared-hosting staging/production;
-- database cache/lock acquisition succeeds;
-- `APP_URL` is HTTPS and contains the expected `/cabinet` base path in staging/production;
-- `APP_DEBUG=false` in staging/production;
-- mail configuration is non-log/non-array for real staging delivery;
-- WEBPAY environment/config presence is reported without printing values/secrets;
-- integration-secret presence is reported as configured/missing only;
-- scheduler/queue tables required by the app exist.
-
-Important:
-
-- never print DB password, APP_KEY, integration secret, WEBPAY keys/passwords or SMTP password;
-- do not make outbound WEBPAY payment/API requests;
-- do not send email;
-- do not mutate business data;
-- DB vendor/version mismatch should be a clear blocker/warning according to current project MySQL contract, not silently treated as equivalent.
-
-Tests must cover redaction and representative pass/fail states.
-
-### G. Target hosting unknowns to record, not guess
-
-Update deployment docs with a HostER/shared-hosting staging discovery checklist.
-
-At first account access determine and record:
-
-- web PHP version;
-- CLI PHP executable/version;
-- enabled required extensions;
-- exact DB engine and version via SQL;
-- SSH/Shell availability;
-- Composer availability;
-- minimum Cron interval;
-- cron maximum runtime;
-- symlink/alias permission;
-- filesystem paths and writable permissions;
-- outbound HTTPS to WEBPAY;
-- outbound SMTP;
-- incoming WEBPAY POST reachability/WAF behavior.
-
-These are external staging facts.
-
-Do not block this local task merely because they are currently unknown.
-
-### H. Documentation
-
-Extend `docs/deployment.md` (or a dedicated shared-hosting section) with:
-
-- HostER.by / ispmanager shared-hosting target;
-- database cache/locks;
-- finite cron-driven database queue;
-- scheduler Cron;
-- preferred/fallback `/cabinet` layouts;
-- production artifact preparation;
-- preflight command;
-- first-login hosting discovery checklist;
-- exact placeholders showing where real absolute PHP/application paths are substituted;
-- rollback/backup steps.
-
-Keep the existing VPS/supervisor-style option documented as an alternative where available; shared hosting becomes the required portable baseline.
-
-### I. Additional shared-hosting verification
-
-Before completing this task also run:
-
-1. migrations including cache tables;
-2. tests with `CACHE_STORE=database`;
-3. finite database worker `--stop-when-empty` processing:
-   - password setup mail job with fake/local SMTP;
-   - expiry warning job;
-   - WEBPAY recovery job fixture where applicable;
-4. `deployment:preflight` in local synthetic shared-hosting configuration;
-5. verify no secret appears in preflight output;
-6. verify `APP_URL=https://gruppa.info/cabinet` URL generation;
-7. existing full MySQL regression.
-
-### J. Additional acceptance criteria
-
-The correction is not complete until all of the following also hold:
-
-27. Standard database cache/cache_locks tables exist through additive migration.
-28. Shared-hosting configuration can use `CACHE_STORE=database`.
-29. Cross-process/database cache locking behavior is tested.
-30. No Redis/Supervisor/systemd dependency is required for production correctness.
-31. Database queue can be drained safely with a finite cron worker.
-32. Local Docker persistent worker remains supported for development.
-33. One host-level scheduler cron is sufficient for Laravel scheduled business commands.
-34. Deployment docs contain preferred and no-symlink `/cabinet` layouts with private application files outside web root.
-35. Production artifact can be built with vendor locally; server-side Composer is optional.
-36. `deployment:preflight` exists and reveals no secrets.
-37. Preflight checks PHP/extensions/DB/writable dirs/session/queue/cache locks/APP_URL/debug/mail/config presence.
-38. Deployment docs explicitly list HostER account facts that must be discovered rather than assumed.
-39. Existing Stage 11/12/WEBPAY idempotency behavior remains green using database cache.
-40. No HostER-specific absolute filesystem path is hardcoded in application code.
+Do not overstate HostER capabilities before the real account is inspected.
 
 ## Out Of Scope
 
-Do NOT change:
+Do NOT modify:
 
-- trusted-binding architecture;
-- standalone get_transaction restriction;
-- notify signature algorithm;
-- payment form signing;
-- payment state machine except where needed for the described admin filters/deletion;
-- recovery schedule;
-- extension semantics;
-- refund API behavior;
-- WEBPAY credentials;
-- real Sandbox network calls;
-- actual deployment/DNS/TLS/account provisioning (deployment readiness changes above are in scope);
-- UI design;
-- Stage 11/12 flows.
-
-Do NOT implement:
-
-- manual “mark paid”;
-- manual “mark failed”;
-- manual “mark cancelled”;
-- automatic refund;
-- alternative WEBPAY APIs;
-- payment-history page for psychologists.
-
-## Tests
-
-Use MySQL.
-
-Add/adjust focused coverage:
-
-### Abandoned workflow
-
-- admin quick abandoned includes old awaiting_payment;
-- admin quick abandoned includes old draft;
-- recent awaiting_payment excluded;
-- recent draft excluded;
-- unrelated statuses excluded;
-- pagination works;
-- admin can soft-delete eligible old awaiting_payment;
-- admin can soft-delete eligible old draft;
-- succeeded unrefunded payment blocks deletion;
-- refunded payment does not by itself block deletion;
-- psychologist deletion rules unchanged.
-
-### Successful-payment filter
-
-- yes includes group with succeeded + refunded_at null;
-- yes excludes refunded;
-- yes excludes pending/failed/cancelled;
-- no is inverse for the relevant groups;
-- composes with status/free/search;
-- pagination keeps filter query;
-- no N+1;
-- normal list query count remains constant and does not add per-row payment queries.
-
-### awaiting_payment real UI
-
-- real owner list/show does not contain `Историческая запись`;
-- truthful awaiting-payment text appears;
-- payment CTA exists;
-- group detail leads to the current placement payment;
-- cross-owner access unchanged.
-
-### WEBPAY staging docs
-
-Automated textual/document check if project conventions support it, otherwise inspect manually:
-
-- default success-only notify behavior documented;
-- support request for unsuccessful notifications documented;
-- safe pending/manual-review fallback documented;
-- no weakening of signed binding/get_transaction rules.
-
-### Regression
-
-Run:
-
-- WebpayTest;
-- WebpayConcurrencyTest;
-- GroupWorkflowTest;
-- group admin/index/policy tests;
-- full MySQL suite;
-- Stage 11/12 focused regression;
-- prototype 31/249;
-- production isolation.
+- WEBPAY signatures/binding/recovery;
+- payment state transitions;
+- group workflows;
+- mail business behavior;
+- scheduler frequencies;
+- cache driver architecture;
+- admin payment/group correction;
+- production deployment;
+- real HostER settings;
+- Docker deployment.
 
 ## Required Checks
 
 Report exact results:
 
-1. `docker compose ps`
-2. non-destructive migrate/seed if needed (no new migration expected)
-3. focused correction tests
-4. existing WEBPAY focused/concurrency tests
-5. full MySQL test suite
-6. Pint
-7. Larastan
-8. composer check-platform-reqs
-9. view:cache
-10. route inspection
-11. `git diff --check`
-12. final staged/secrets/artifact review
-13. database-cache/lock focused tests
-14. finite cron-worker smoke using `--stop-when-empty`
-15. `deployment:preflight` pass/fail/redaction checks
-16. `/cabinet` production URL-generation check
+1. focused preflight tests;
+2. shared-hosting runtime tests;
+3. WEBPAY focused/concurrency regression;
+4. Stage 11/12 focused regression;
+5. full MySQL suite;
+6. Pint;
+7. Larastan;
+8. composer check-platform-reqs;
+9. view:cache;
+10. finite worker smoke;
+11. git diff --check;
+12. final staged/secrets/artifact review.
 
 ## Acceptance Criteria
 
-1. Abandoned quick filter includes both old awaiting_payment and old draft.
-2. Recent awaiting_payment/draft are not classified abandoned.
-3. Authorized admin can soft-delete eligible abandoned awaiting_payment.
-4. Existing succeeded-unrefunded payment protection remains.
-5. Psychologist deletion rules are unchanged.
-6. Real admin group list exposes successful-payment yes/no filter.
-7. Successful-payment filter treats only succeeded + unrefunded as yes.
-8. Refunded/failed/cancelled/pending are not counted as successful-unrefunded.
-9. Filters compose and paginate correctly.
-10. No N+1/per-row payment lookup is introduced.
-11. Real awaiting_payment UI no longer calls the record historical.
-12. Real owner can navigate from awaiting_payment group to its current placement payment.
-13. Current design baseline is preserved.
-14. docs/webpay.md explicitly states WEBPAY default success-only notify behavior.
-15. Staging checklist explicitly says to request/verify unsuccessful signed notifications when automatic failed/cancelled retry behavior is required.
-16. Docs preserve fail-closed behavior when those notifications are unavailable.
-17. Browser cancel remains untrusted.
-18. Standalone get_transaction remains unable to bind local payment.
-19. No manual financial-success/failure override is added.
-20. Existing local WEBPAY focused/concurrency tests remain green.
-21. Stage 11 API remains green.
-22. Stage 12 mail/queue remains green.
-23. Full MySQL suite passes.
-24. Pint/Larastan/composer/view checks pass.
-25. 31/249 prototypes and production isolation remain green.
-26. No credentials/secrets/real financial data/unrelated artifacts are committed.
+1. Missing PCNTL alone does not fail deployment:preflight.
+2. Missing PCNTL is clearly shown as WARN/advisory, not hidden.
+3. Existing hard blockers still fail preflight.
+4. PCNTL-enabled runtime continues to use/enforce the preferred timeout path.
+5. Finite database worker remains the shared-hosting baseline.
+6. Docs explain the no-PCNTL safety gate around host process runtime and retry_after.
+7. No sync/request-driven queue fallback is introduced.
+8. Database cache/locks remain the shared lock backend.
+9. Existing WEBPAY/mail/group behavior is unchanged.
+10. Full MySQL suite and quality checks pass.
+11. No credentials/secrets/unrelated artifacts are committed.
 
 ## Hard Workflow Gate
 
-Before changing files:
+Before editing:
 
 - read WORKFLOW.md;
 - read AGENTS.md;
 - read this task;
-- inspect GroupPolicy, admin GroupController/GroupIndexRequest, real group list/show/_actions, current WEBPAY docs;
-- inspect cache/queue/session config, migrations, compose worker, deployment docs and current `/cabinet` URL handling;
-- re-check official WEBPAY notification documentation;
-- run git log/status;
-- confirm base `094e94e1734707cdf9c607c989eaa03461da2893`;
+- inspect DeploymentPreflight command/support/tests and deployment docs;
+- inspect current Laravel 12 Worker timeout behavior in installed framework source;
+- confirm base `4e425eb932e4bcbea6aebbc4fe9b9eca11b952be`;
+- run git status/log;
 - do not overwrite unknown changes.
 
 During implementation:
 
-- keep payment/business correction narrow; shared-hosting changes must be infrastructure/deployment-only;
-- preserve payment trust architecture;
-- no external provider calls required;
-- no UI redesign;
+- keep change limited to shared-hosting portability/preflight/docs/tests;
 - do not edit `.ai/task.md`, SPEC, WORKFLOW or AGENTS.
-
-Before commit:
-
-- run required checks;
-- update `.ai/report.md`;
-- inspect full diff/staged files;
-- remove temporary artifacts.
 
 If complete, commit with:
 
-`codex: TASK-2026-09-21-13 complete webpay admin integration`
+`codex: TASK-2026-09-21-14 make pcntl optional for shared hosting`
 
 Do not create an accept commit.
