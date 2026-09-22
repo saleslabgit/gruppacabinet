@@ -23,7 +23,7 @@ The core local WEBPAY implementation is structurally sound and must be preserved
 - manual refund accounting;
 - current UI design baseline.
 
-This correction is intentionally narrow. Do not rewrite the payment architecture.
+This correction remains narrow in business behavior. In addition, prepare the application runtime/deployment baseline for ordinary shared PHP hosting without rewriting the payment architecture.
 
 ## Base
 
@@ -199,9 +199,272 @@ Update at minimum:
 - `docs/webpay.md`;
 - `docs/deployment.md`;
 - `docs/project-status.md` only if wording needs correction;
+- `docs/development.md` where local/shared-hosting runtime commands differ;
+- `.env.example` for database cache/shared-hosting placeholders;
 - `.ai/report.md`.
 
 Explicitly add unsuccessful-notify provider prerequisite/fallback.
+
+## HostER.by / Shared-Hosting Readiness
+
+The target test/production hosting class is ordinary shared PHP hosting (HostER.by / ispmanager-style environment), not a VPS with Docker/systemd/Supervisor.
+
+Do not hardcode HostER account paths or assume optional panel rights before the real account exists.
+
+At planning time current ispmanager documentation confirms the platform can support:
+
+- Cron jobs that execute shell/PHP CLI commands;
+- selectable installed PHP versions/handlers;
+- optional Shell/SSH access granted per user;
+- optional PHP Composer access granted per user/site.
+
+Exact HostER account capabilities, installed PHP binaries, DB engine/version, symlink permission and cron limits remain deployment-time facts.
+
+The application must therefore be portable to shared hosting with the following architecture.
+
+### A. Database cache and distributed locks
+
+Production/shared-hosting mode must not depend on the local file cache for cross-process locks.
+
+The project currently has Laravel database-cache configuration but no cache tables.
+
+Add the standard Laravel-compatible database cache tables:
+
+- `cache`;
+- `cache_locks`.
+
+Requirements:
+
+- additive migration only;
+- MySQL-compatible;
+- no Redis dependency;
+- preserve local/testing ability to select another cache store when a test explicitly needs it;
+- update `.env.example` so the documented staging/shared-hosting choice is `CACHE_STORE=database`;
+- shared web PHP, scheduler and cron queue workers must see the same cache/lock rows;
+- Stage 12 unique mail/warning locks and Stage 13 WEBPAY recovery locks must remain correct under database cache.
+
+Add tests proving at minimum:
+
+- database cache read/write works;
+- a cache lock acquired in one application/process context prevents a second acquisition;
+- warning/payment unique-lock behavior remains green with database cache.
+
+Do not make Redis a production prerequisite for this project.
+
+### B. Cron-driven queue mode
+
+Do not require a permanently running `queue:work` daemon for shared-hosting deployment.
+
+Keep the database queue.
+
+Document and verify a finite queue-drain mode suitable for cron, for example:
+
+`php artisan queue:work database --stop-when-empty --tries=3 --timeout=45 --max-time=50`
+
+Exact PHP binary/path is deployment-specific.
+
+Requirements:
+
+- jobs remain the same jobs; no synchronous-mail/payment fallback;
+- queue failures still use `failed_jobs`;
+- no business behavior depends on Supervisor/systemd;
+- the existing Docker persistent worker remains valid for local development;
+- add a local verification using the finite `--stop-when-empty` worker and database cache;
+- document that if the host cannot schedule every minute, the actual supported cron frequency must be measured and accepted before production because it affects queue latency and scheduler precision.
+
+It is acceptable for multiple database workers to be briefly concurrent; existing idempotency/unique locks must protect duplicate effects.
+
+Do not introduce an HTTP/web-triggered queue runner.
+
+### C. Laravel scheduler on shared hosting
+
+Production/shared hosting should use one Cron entry invoking:
+
+`php /absolute/path/to/application/artisan schedule:run`
+
+once per minute when the hosting plan allows it.
+
+The Laravel scheduler remains authoritative for:
+
+- group expiry;
+- participant cleanup;
+- expiry-warning queueing;
+- WEBPAY recovery queueing.
+
+Requirements:
+
+- no duplicate host-level cron entries for each business command;
+- `schedule:list` remains the source of the internal cadence;
+- docs must include the fallback decision gate if HostER's minimum cron interval is greater than one minute: do not silently weaken timing requirements; record the actual limitation during staging acceptance.
+
+### D. Shared-hosting /cabinet deployment layout
+
+The application must remain deployable under:
+
+`https://gruppa.info/cabinet/`
+
+while the main public site occupies the same host.
+
+Never require the full Laravel source, `.env`, `vendor`, private documents or `storage` to be web-accessible.
+
+Document two supported layouts:
+
+#### Preferred: symlink/alias allowed
+
+- full Laravel application stored outside public web root;
+- public web path `.../public_html/cabinet` points to `application/public` through an allowed symlink/hosting alias;
+- only Laravel public files are reachable.
+
+#### Fallback: symlink unavailable
+
+- application remains outside web root;
+- copy only Laravel public assets/front controller into `public_html/cabinet`;
+- deployment-specific front controller paths reference the private application `vendor/autoload.php` and `bootstrap/app.php`;
+- do not duplicate application source into `public_html`;
+- document exactly which generated/deployment file needs path substitution.
+
+Do not hardcode `/var/www/...`, account names or HostER-specific home paths in committed application code.
+
+Existing URL generation/base-path behavior must remain green with `APP_URL=https://gruppa.info/cabinet`.
+
+Add/retain automated checks for:
+
+- asset URLs under `/cabinet`;
+- routes/redirects under `/cabinet`;
+- WEBPAY return/cancel/notify URLs under `/cabinet`;
+- password setup URLs under `/cabinet`;
+- no prototype routes in production.
+
+### E. Production artifact without server-side Composer dependency
+
+Composer may be available in ispmanager, but the application must not require Composer access on the hosting account.
+
+Document a supported release preparation flow performed locally/CI:
+
+`composer install --no-dev --prefer-dist --optimize-autoloader`
+
+using the committed `composer.lock`.
+
+Deployment artifact must include `vendor/`.
+
+Requirements:
+
+- no dev dependencies in production artifact;
+- no Node/npm/Vite;
+- `composer check-platform-reqs` must be run against the target hosting PHP before activation when CLI access exists;
+- if Composer is available on HostER it is optional convenience, not an architecture dependency.
+
+### F. Shared-hosting preflight command
+
+Add a read-only Artisan command, recommended:
+
+`php artisan deployment:preflight`
+
+It must print only non-sensitive technical status and exit non-zero on hard blockers.
+
+Check at minimum:
+
+- PHP version satisfies project requirement;
+- required PHP extensions from composer requirements are loaded;
+- DB connection works;
+- DB driver/server identity and version are displayed without credentials;
+- actual DB engine is MySQL-compatible;
+- writable `storage` and `bootstrap/cache`;
+- session driver is database for staging/production;
+- queue connection is database;
+- cache store is database for shared-hosting staging/production;
+- database cache/lock acquisition succeeds;
+- `APP_URL` is HTTPS and contains the expected `/cabinet` base path in staging/production;
+- `APP_DEBUG=false` in staging/production;
+- mail configuration is non-log/non-array for real staging delivery;
+- WEBPAY environment/config presence is reported without printing values/secrets;
+- integration-secret presence is reported as configured/missing only;
+- scheduler/queue tables required by the app exist.
+
+Important:
+
+- never print DB password, APP_KEY, integration secret, WEBPAY keys/passwords or SMTP password;
+- do not make outbound WEBPAY payment/API requests;
+- do not send email;
+- do not mutate business data;
+- DB vendor/version mismatch should be a clear blocker/warning according to current project MySQL contract, not silently treated as equivalent.
+
+Tests must cover redaction and representative pass/fail states.
+
+### G. Target hosting unknowns to record, not guess
+
+Update deployment docs with a HostER/shared-hosting staging discovery checklist.
+
+At first account access determine and record:
+
+- web PHP version;
+- CLI PHP executable/version;
+- enabled required extensions;
+- exact DB engine and version via SQL;
+- SSH/Shell availability;
+- Composer availability;
+- minimum Cron interval;
+- cron maximum runtime;
+- symlink/alias permission;
+- filesystem paths and writable permissions;
+- outbound HTTPS to WEBPAY;
+- outbound SMTP;
+- incoming WEBPAY POST reachability/WAF behavior.
+
+These are external staging facts.
+
+Do not block this local task merely because they are currently unknown.
+
+### H. Documentation
+
+Extend `docs/deployment.md` (or a dedicated shared-hosting section) with:
+
+- HostER.by / ispmanager shared-hosting target;
+- database cache/locks;
+- finite cron-driven database queue;
+- scheduler Cron;
+- preferred/fallback `/cabinet` layouts;
+- production artifact preparation;
+- preflight command;
+- first-login hosting discovery checklist;
+- exact placeholders showing where real absolute PHP/application paths are substituted;
+- rollback/backup steps.
+
+Keep the existing VPS/supervisor-style option documented as an alternative where available; shared hosting becomes the required portable baseline.
+
+### I. Additional shared-hosting verification
+
+Before completing this task also run:
+
+1. migrations including cache tables;
+2. tests with `CACHE_STORE=database`;
+3. finite database worker `--stop-when-empty` processing:
+   - password setup mail job with fake/local SMTP;
+   - expiry warning job;
+   - WEBPAY recovery job fixture where applicable;
+4. `deployment:preflight` in local synthetic shared-hosting configuration;
+5. verify no secret appears in preflight output;
+6. verify `APP_URL=https://gruppa.info/cabinet` URL generation;
+7. existing full MySQL regression.
+
+### J. Additional acceptance criteria
+
+The correction is not complete until all of the following also hold:
+
+27. Standard database cache/cache_locks tables exist through additive migration.
+28. Shared-hosting configuration can use `CACHE_STORE=database`.
+29. Cross-process/database cache locking behavior is tested.
+30. No Redis/Supervisor/systemd dependency is required for production correctness.
+31. Database queue can be drained safely with a finite cron worker.
+32. Local Docker persistent worker remains supported for development.
+33. One host-level scheduler cron is sufficient for Laravel scheduled business commands.
+34. Deployment docs contain preferred and no-symlink `/cabinet` layouts with private application files outside web root.
+35. Production artifact can be built with vendor locally; server-side Composer is optional.
+36. `deployment:preflight` exists and reveals no secrets.
+37. Preflight checks PHP/extensions/DB/writable dirs/session/queue/cache locks/APP_URL/debug/mail/config presence.
+38. Deployment docs explicitly list HostER account facts that must be discovered rather than assumed.
+39. Existing Stage 11/12/WEBPAY idempotency behavior remains green using database cache.
+40. No HostER-specific absolute filesystem path is hardcoded in application code.
 
 ## Out Of Scope
 
@@ -217,7 +480,7 @@ Do NOT change:
 - refund API behavior;
 - WEBPAY credentials;
 - real Sandbox network calls;
-- deployment;
+- actual deployment/DNS/TLS/account provisioning (deployment readiness changes above are in scope);
 - UI design;
 - Stage 11/12 flows.
 
@@ -307,6 +570,10 @@ Report exact results:
 10. route inspection
 11. `git diff --check`
 12. final staged/secrets/artifact review
+13. database-cache/lock focused tests
+14. finite cron-worker smoke using `--stop-when-empty`
+15. `deployment:preflight` pass/fail/redaction checks
+16. `/cabinet` production URL-generation check
 
 ## Acceptance Criteria
 
@@ -345,6 +612,7 @@ Before changing files:
 - read AGENTS.md;
 - read this task;
 - inspect GroupPolicy, admin GroupController/GroupIndexRequest, real group list/show/_actions, current WEBPAY docs;
+- inspect cache/queue/session config, migrations, compose worker, deployment docs and current `/cabinet` URL handling;
 - re-check official WEBPAY notification documentation;
 - run git log/status;
 - confirm base `094e94e1734707cdf9c607c989eaa03461da2893`;
@@ -352,7 +620,7 @@ Before changing files:
 
 During implementation:
 
-- keep correction narrow;
+- keep payment/business correction narrow; shared-hosting changes must be infrastructure/deployment-only;
 - preserve payment trust architecture;
 - no external provider calls required;
 - no UI redesign;
