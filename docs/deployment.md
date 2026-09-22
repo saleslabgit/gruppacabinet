@@ -8,8 +8,8 @@ discovery and acceptance gate, not a statement of a hosting plan's capabilities.
 ## Discover before activation
 
 Record the actual account paths and owner, web PHP and CLI PHP versions/binaries,
-CLI access (SSH or panel task), extensions including pdo_mysql and pcntl, memory
-and execution limits, MySQL vendor/version (MariaDB is not the verified MySQL 8
+CLI access (SSH or panel task), required extensions including pdo_mysql, optional
+pcntl capability, memory and execution limits, MySQL vendor/version (MariaDB is not the verified MySQL 8
 contract), database permissions and quotas. Record Composer availability, allowed
 cron interval and maximum process lifetime, overlapping-task policy, symlink or
 alias support, rewrite support and public/private directory boundaries.
@@ -130,14 +130,43 @@ queue worker each minute using verified absolute paths to PHP and artisan:
 * * * * * /ABS/PHP /PRIVATE/application/artisan queue:work database --stop-when-empty --tries=3 --timeout=45 --max-time=50 >> /PRIVATE/logs/queue.log 2>&1
 ```
 
-Create private rotated logs first. The queue worker exits when empty; max-time is
-checked between jobs, so the hosting process limit must accommodate an in-flight
-job after that deadline (allow at least 100 seconds for these limits). pcntl is
-required to enforce the 45-second per-job timeout; database retry_after remains
-90 seconds, greater than the job timeout. If the host kills tasks earlier, obtain
-appropriate limits and verify retries before activation. Concurrent workers use
-database reservation and shared unique locks; jobs remain idempotent. Do not
-switch mail/payment jobs to synchronous delivery or use request-driven polling.
+Create private rotated logs first. PCNTL is preferred and remains enabled in the
+local image: it enforces the 45-second hard job timeout in the command above.
+With PCNTL, keep worker/job timeout below `DB_QUEUE_RETRY_AFTER` (currently 90
+seconds by default). The worker exits when empty; `--max-time=50` is checked
+between jobs and does not interrupt a running job. Allow time for an in-flight
+job after that deadline when agreeing process limits with the host.
+
+Without PCNTL, Laravel still executes database jobs. Keep the finite cron model:
+
+```bash
+/ABS/PHP /PRIVATE/application/artisan queue:work database --stop-when-empty --tries=3 --max-time=50
+```
+
+Neither a job's timeout property nor a `--timeout` argument provides a hard limit
+without PCNTL. `--max-time` is also not a hard process deadline. Explicit transport
+timeouts remain mandatory: SMTP `MAIL_TIMEOUT` defaults to 15 seconds; WEBPAY
+connect timeout is 5 seconds and request timeout `WEBPAY_HTTP_TIMEOUT` defaults
+to 15 seconds (bounded to 1–30 in the adapter). Bound MySQL connection/query/lock
+waits through verified hosting/database configuration as well. Transport timeouts
+alone do not bound the whole job or hung process.
+
+Before accepting a no-PCNTL deployment, verify the host's enforced maximum cron
+process runtime, termination behavior and expected job durations. Set
+`DB_QUEUE_RETRY_AFTER` comfortably above the verified maximum reasonable/allowed
+in-flight job or process duration with a safety margin. Finalize and record the
+actual value during HostER staging discovery; the default 90 seconds is not a
+claim about HostER limits. Otherwise an expired reservation can allow another
+worker to execute the same still-running job. Rebuild config caches and restart
+workers after changing the value; verify retries and overlapping cron runs.
+
+Operator decision gate: no-PCNTL hosting is acceptable only with a verified bounded
+cron process runtime compatible with these jobs and retry_after. If neither PCNTL
+nor a safe enforced process bound is available, do not accept the hosting until
+that capability changes. Preflight reports unavailable PCNTL as WARN and exits
+successfully if all hard checks pass; this is not hosting acceptance. All required
+Composer extensions and other hard deployment checks remain failures when missing.
+Do not switch mail/payment jobs to sync or add an HTTP-triggered queue runner.
 
 Schedules remain: group expiry every minute, application cleanup daily, expiry
 warnings hourly, trusted-bound WEBPAY recovery every five minutes. All use the

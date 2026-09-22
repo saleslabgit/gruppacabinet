@@ -24,8 +24,8 @@ class DeploymentPreflight extends Command
         }
         $failed = false;
         foreach ($checks as $check) {
-            $this->line(($check['ok'] ? 'PASS ' : 'FAIL ').$check['check'].($check['detail'] !== '' ? ': '.$check['detail'] : ''));
-            $failed = $failed || ! $check['ok'];
+            $this->line(strtoupper($check['status']).' '.$check['check'].($check['detail'] !== '' ? ': '.$check['detail'] : ''));
+            $failed = $failed || $check['status'] === 'fail';
         }
         $this->line('No email/provider request/business data change performed. Temporary cache probes are removed.');
         $this->line('Web PHP, cron limits, routing, SMTP/HTTPS reachability and backups require hosting acceptance.');

@@ -497,7 +497,9 @@ or card information in fixtures or local smoke artifacts.
 The example environment now uses database cache; run additive migrations before
 starting jobs. Existing local .env files are not rewritten automatically. Web,
 scheduler and worker must share CACHE_STORE=database, database and CACHE_PREFIX.
-Rebuild the PHP/queue-worker images for pcntl timeout support. Local Compose keeps
+The local PHP/queue-worker images include pcntl for hard timeout support. Missing
+pcntl produces a preflight WARN, not a failure; shared hosting then requires the
+verified process-limit/retry_after fallback in deployment.md. Local Compose keeps
 its persistent worker; shared hosting uses finite cron invocations described in
 `deployment.md` and requires neither Docker nor Supervisor.
 

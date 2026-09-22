@@ -11,12 +11,12 @@ use Throwable;
 
 class DeploymentPreflight
 {
-    /** @return array<int, array{check: string, ok: bool, detail: string}> */
+    /** @return array<int, array{check: string, status: 'pass'|'warn'|'fail', detail: string}> */
     public function checks(): array
     {
         $checks = [];
         $add = function (string $name, bool $ok, string $detail = '') use (&$checks): void {
-            $checks[] = ['check' => $name, 'ok' => $ok, 'detail' => $detail];
+            $checks[] = ['check' => $name, 'status' => $ok ? 'pass' : 'fail', 'detail' => $detail];
         };
         $deployment = app()->environment(['staging', 'production']);
         // The committed project PHP constraint is ^8.2.
@@ -33,7 +33,12 @@ class DeploymentPreflight
             }
         }
         // queue:work timeouts require pcntl, independently of Composer web requirements.
-        $add('CLI worker timeout (pcntl)', extension_loaded('pcntl'));
+        $hardTimeout = $this->supportsHardWorkerTimeout();
+        $checks[] = [
+            'check' => 'CLI worker hard timeout (pcntl)',
+            'status' => $hardTimeout ? 'pass' : 'warn',
+            'detail' => $hardTimeout ? 'available' : 'unavailable; verify cron process limit and shared-hosting fallback',
+        ];
         $add('Writable storage', is_writable(storage_path()) && is_writable(storage_path('framework')) && is_writable(storage_path('logs')));
         $add('Writable bootstrap/cache', is_writable(base_path('bootstrap/cache')));
         $add('APP_KEY presence', $this->configured('app.key'), $this->presence('app.key'));
@@ -118,6 +123,11 @@ class DeploymentPreflight
         }
 
         return $checks;
+    }
+
+    protected function supportsHardWorkerTimeout(): bool
+    {
+        return extension_loaded('pcntl');
     }
 
     private function supportedPhp(string $version): bool

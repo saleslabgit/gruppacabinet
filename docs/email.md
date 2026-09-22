@@ -92,14 +92,15 @@ Neither warning flow mutates placement dates/status/duration nor any payment.
 
 Both jobs use the database queue, three tries, backoff 60/300 seconds and a
 45-second job timeout. SMTP has a 15-second timeout; database retry_after defaults
-to 90 seconds. Use retry_after greater than worker timeout, and enable PCNTL in
-production workers to enforce worker timeouts. Only SMTP transport is accepted
-for these flows: log/failover-to-log cannot expose setup URLs or count as delivery.
+to 90 seconds. With PCNTL, keep retry_after greater than worker/job timeout.
+PCNTL is preferred for hard timeouts; without it, use the verified bounded cron
+process runtime and retry_after safety gate in deployment.md. Only SMTP transport
+is accepted for these flows: log/failover-to-log cannot expose setup URLs or count as delivery.
 Job errors are sanitized without chained transport exceptions. Application
 bootstrap enables `zend.exception_ignore_args` so worker traces cannot expose
 serialized invitation payload arguments. The local PHP
-image does not enable PCNTL; its SMTP socket timeout bounds transport waits,
-while production workers must enable PCNTL for the hard job timeout.
+image enables PCNTL. SMTP socket timeouts remain mandatory in both modes;
+they do not by themselves bound the entire job/process.
 
 Production needs:
 
