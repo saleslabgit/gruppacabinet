@@ -20,7 +20,7 @@ Implement:
 1. paid initial group placement;
 2. paid group extension;
 3. WEBPAY protocol-v2 payment form generation;
-4. trusted server-to-server payment confirmation from notify and get_transaction;
+4. trusted server-to-server payment confirmation from signed notify, with get_transaction limited to verification of an already trusted-bound transaction;
 5. browser return/cancel handling without trusting the browser as payment proof;
 6. idempotent payment effects under races/repeated confirmations;
 7. bounded recovery checks for pending payments;
@@ -82,6 +82,111 @@ At task planning time the current official documentation confirms:
 Before implementation, Codex must re-open/check the current official WEBPAY docs and record the exact provider contract used in `docs/webpay.md`.
 
 Do not switch to a different provider API style merely because a newer JSON API exists; SPEC for this MVP explicitly requires protocol-v2 form + notify + get_transaction behavior.
+
+## Architecture Correction — Trusted WEBPAY transaction binding
+
+This section is authoritative and supersedes any earlier statement in this task that `get_transaction` by itself may confirm a local payment or recover a lost notify.
+
+The implementation was correctly stopped before code changes because current documented WEBPAY `get_transaction` returns a signed transaction response containing provider transaction data such as:
+
+- transaction_id;
+- batch_timestamp;
+- currency_id;
+- amount;
+- payment_method;
+- payment_type;
+- WEBPAY internal order_id;
+- rrn;
+
+but it does **not** return the merchant's `site_order_id` / our `wsb_order_num`.
+
+The standard signed WEBPAY notify does contain both:
+
+- `site_order_id` — our merchant order number;
+- `transaction_id`;
+
+and both are covered by the notify signature.
+
+Therefore the security boundary is:
+
+### Trusted binding
+
+A WEBPAY `transaction_id` becomes trusted-bound to a local `gp_payments` row only when a valid provider-signed message/response cryptographically binds that transaction to our merchant order number.
+
+For the currently documented MVP protocol, the standard signed notify is that binding source because its signature covers both `site_order_id` and `transaction_id`.
+
+Do not establish the binding from:
+
+- browser return parameters;
+- cancel-return parameters;
+- amount/currency equality;
+- payment method/type equality;
+- WEBPAY internal `order_id`;
+- an unsigned transaction-id hint;
+- a standalone `get_transaction` response that lacks our merchant order number.
+
+### Browser return
+
+WEBPAY browser return may contain our order number and `wsb_tid`, but browser parameters are untrusted.
+
+They may be used only to locate/render the owner's local payment and as a diagnostic hint.
+
+They must not:
+
+- populate the authoritative `gp_payments.transaction_id` field;
+- cause `succeeded`, `failed` or `cancelled`;
+- establish a trusted transaction/payment binding;
+- cause a standalone `get_transaction` result to mutate payment/group state.
+
+A malicious user must not be able to pair one local payment with another WEBPAY transaction merely because amount/currency happen to match.
+
+### Role of get_transaction
+
+Implement the documented `get_transaction` adapter and signature verification because it is still useful provider functionality and required for staging diagnostics.
+
+However:
+
+- a standalone `get_transaction` response is **not sufficient** to map a transaction to a local payment;
+- it may mutate payment/group state only when the transaction ID is already trusted-bound to that same local payment by a signed provider message that includes the merchant order;
+- amount/currency/method/type checks remain mandatory but are additional consistency checks, not identity proof;
+- never search/select a local payment by amount or other non-unique financial attributes.
+
+If a future officially documented WEBPAY endpoint returns a signed merchant order identifier together with transaction_id, adopting it as another binding source requires an explicit later architecture decision and tests.
+
+### Lost-notify recovery
+
+With the currently documented `get_transaction` contract, a completely lost standard notify cannot be safely reconstructed into a trusted local success automatically.
+
+Therefore:
+
+- if no trusted transaction/payment binding exists, the payment remains `pending`;
+- after the bounded waiting/recovery window, surface it as requiring manual review;
+- do not guess succeeded/failed/cancelled;
+- do not keep polling indefinitely;
+- administrator resolves the provider status using the WEBPAY cabinet/support during staging/operations;
+- manual review does not itself mark payment succeeded;
+- payment product effects remain blocked until a trusted signed provider binding is obtained.
+
+This is an intentional fail-closed product/security decision and is the accepted limitation of the current WEBPAY protocol.
+
+### Recovery scheduler behavior
+
+Retain a bounded recovery mechanism only where it is meaningful:
+
+1. select old pending attempts according to the documented timing window;
+2. if the payment has a transaction ID already trusted-bound by a signed provider message but still needs a provider status refresh, `get_transaction` may be called and strictly validated;
+3. if no trusted binding exists, do not call `get_transaction` using only browser-supplied hints; leave pending and surface manual review;
+4. after the bounded window/attempt limit, stop automatic checks.
+
+No general polling.
+
+### Central confirmation service
+
+The central confirmation service accepts only a normalized provider result that includes evidence of trusted local-payment binding.
+
+For signed notify this evidence includes the verified `site_order_id + transaction_id` pair.
+
+A normalized standalone get_transaction result without prior trusted binding must be rejected for product-state mutation.
 
 ## External Inputs Explicitly NOT Required For Local Completion
 
@@ -176,7 +281,7 @@ Recommended responsibilities:
 - get_transaction request generation;
 - XML response parsing;
 - get_transaction response signature verification;
-- normalized provider result DTO/value object;
+- explicit trusted-binding evidence in normalized provider result DTO/value object;
 - strict decimal -> minor-unit conversion;
 - safe provider error normalization.
 
@@ -287,16 +392,15 @@ Requirements:
 
 - only the owner can see their payment result page;
 - cross-owner payment access returns 404/denied without leakage;
-- WEBPAY-provided order/transaction identifiers are treated as hints only;
-- successful browser return may trigger a server-to-server get_transaction check;
+- WEBPAY-provided order/transaction identifiers are treated as untrusted hints only;
+- browser return must not populate authoritative payment.transaction_id;
 - cancel return alone never sets `cancelled`;
 - return alone never sets `succeeded`;
-- provider/API unavailable -> stay `pending` and show “Оплата подтверждается WEBPAY”;
-- trusted get_transaction result flows through the same confirmation service used by notify/recovery.
+- a standalone get_transaction response obtained from browser-supplied wsb_tid cannot confirm this local payment because the documented response lacks our site_order_id;
+- provider/API unavailable or no trusted binding -> stay `pending` and show “Оплата подтверждается WEBPAY” / manual-review state as appropriate;
+- get_transaction may flow through the central confirmation service only for a transaction already trusted-bound to the same local payment.
 
-If a transaction ID from browser return must be retained to enable later recovery, treat it as an untrusted provider hint until verified and ensure it cannot cause success without full server-side validation.
-
-Do not let a malicious hint belonging to another payment create cross-payment effects.
+Do not let a malicious hint belonging to another payment create cross-payment effects, even when amount/currency/method/type match.
 
 ## WEBPAY Notify Endpoint
 
@@ -377,28 +481,31 @@ Response:
 - verify provider signature with `hash_equals`;
 - validate transaction_id;
 - validate amount/currency/payment method/payment type;
-- validate available order/provider identifiers against local payment;
+- recognize that documented `order_id` is WEBPAY's internal order identifier, not our `site_order_id` / `wsb_order_num`;
+- never use amount/currency/internal order_id to establish the transaction-to-local-payment identity;
+- only permit state mutation when this transaction ID is already trusted-bound to the same local payment by signed provider evidence containing our merchant order;
 - normalize only safe/necessary response fields into `provider_response`.
 
 Never log raw provider response if it may contain unnecessary financial/card data.
 
-Network timeout/5xx/malformed/untrusted response is not success.
+Network timeout/5xx/malformed/untrusted response is not success. A validly signed get_transaction response without trusted merchant-order binding is also not sufficient for local payment confirmation.
 
 ## Trusted Confirmation Service
 
 Create one central idempotent service used by:
 
-- valid notify;
-- browser-return get_transaction;
-- recovery get_transaction.
+- valid signed notify;
+- get_transaction only when the transaction is already trusted-bound to this payment;
+- bounded recovery only when such trusted binding exists.
 
 Inside one DB transaction with consistent lock ordering:
 
 1. lock payment;
 2. lock related group;
 3. re-check payment/group state;
-4. validate normalized trusted provider result;
-5. apply payment transition/product effect exactly once.
+4. validate normalized trusted provider result and explicit trusted-binding evidence;
+5. reject state mutation if merchant-order binding is absent;
+6. apply payment transition/product effect exactly once.
 
 ### Placement success
 
@@ -503,41 +610,38 @@ Do not soft-delete payment history merely to retry.
 
 ## Recovery of Pending Payments
 
-Implement bounded lost-notification/API recovery.
+Implement bounded fail-closed recovery/manual-review classification.
 
 Recommended architecture:
 
-- command `payments:queue-recovery-checks`;
+- command `payments:queue-recovery-checks` or an equivalent bounded scheduler;
 - scheduled every 5 or 10 minutes with `withoutOverlapping`;
-- unique queued check job per payment;
+- unique queued check job per payment only when an actual provider check is safe;
 - database queue.
 
 No global permanent polling.
 
 Rules:
 
-- first automatic check no earlier than about 20 minutes after attempt starts;
+- first recovery evaluation no earlier than about 20 minutes after attempt starts;
 - only pending payments;
-- if trusted transaction_id hint exists, call get_transaction;
-- if no usable transaction_id exists, do not invent one; eventually surface manual review;
-- use `last_status_check_at` and `status_check_attempts`;
-- bounded retry schedule;
-- automatic attempts stop no later than one hour after first recovery check;
-- after exhaustion keep payment pending;
-- admin UI shows manual review;
-- provider/network failure never converts payment to failed/succeeded by assumption.
+- a browser-return `wsb_tid` is not a trusted binding and must not authorize get_transaction mutation;
+- call get_transaction only when transaction_id is already trusted-bound to this local payment by signed provider evidence;
+- if no trusted binding exists, do not call get_transaction solely from browser hints; keep payment pending and surface manual review;
+- use `last_status_check_at` / `status_check_attempts` only for actual trusted-bound provider checks, or document a separate derived manual-review rule if no call is made;
+- automatic provider checks are finite and stop no later than one hour after the first allowed check;
+- provider/network failure never converts payment to failed/succeeded by assumption;
+- a lost notify with no other signed merchant-order binding remains pending/manual review.
 
-Use a documented finite schedule, e.g. at most four checks over the allowed recovery window.
-
-One payment must never have multiple simultaneous recovery jobs.
+The local task must explicitly test that a valid signed get_transaction response for an arbitrary transaction with matching amount/currency cannot be applied to a payment without trusted binding.
 
 ## Payment Notification / Recovery Races
 
 Tests must cover real MySQL concurrency for at least:
 
 - notify vs same notify;
-- notify vs get_transaction confirmation;
-- recovery job vs return-check.
+- duplicate signed notify vs signed notify;
+- signed notify racing with a trusted-bound get_transaction refresh where such state exists.
 
 Exactly one succeeds in applying payment effect.
 
@@ -694,8 +798,8 @@ Also run a local synthetic smoke:
 6. send a locally generated valid signed notify to the real local notify endpoint;
 7. verify placement becomes succeeded and group becomes draft;
 8. repeat notify -> no duplicate effect;
-9. create paid extension and simulate trusted get_transaction response through fake transport;
-10. verify active and expired extension effects;
+9. verify a standalone signed get_transaction fixture without prior signed merchant-order binding cannot mutate payment/group state;
+10. verify extension success through a valid signed notify; optionally verify get_transaction refresh only after trusted binding;
 11. simulate failed/cancelled/unavailable responses;
 12. verify refund accounting through real admin POST;
 13. inspect admin payment list/detail;
@@ -749,6 +853,7 @@ The final report must explicitly say:
 - real WEBPAY Sandbox payment: NOT VERIFIED unless credentials happen to be supplied by the user;
 - real notify delivery from WEBPAY: NOT VERIFIED locally;
 - real get_transaction: NOT VERIFIED locally;
+- lost-notify automatic confirmation via get_transaction: intentionally unsupported with current documented contract unless a trusted merchant-order binding already exists;
 - manual Sandbox refund: NOT VERIFIED locally.
 
 These are expected external staging checks, not local-task blockers.
@@ -824,7 +929,8 @@ Cover at minimum:
 
 - exact request XML/form and MD5 password handling;
 - TLS verification remains enabled;
-- valid trusted response signature;
+- valid response signature;
+- signed response alone does not establish local payment identity because site_order_id is absent;
 - invalid signature;
 - malformed XML;
 - mismatched transaction;
@@ -839,7 +945,7 @@ Cover at minimum:
 - cancel alone does not cancel;
 - API unavailable -> pending;
 - owner only / IDOR;
-- trusted return check uses central confirmation service.
+- browser-return transaction hint plus even a valid get_transaction response cannot mutate state without prior trusted merchant-order binding.
 
 ### Extension
 
@@ -862,7 +968,9 @@ Cover at minimum:
 - only pending selected;
 - no transaction hint -> no unsafe provider query;
 - network failure leaves pending;
-- trustworthy recovery can confirm;
+- recovery can confirm only when transaction is already trusted-bound to the local payment;
+- lost-notify/no-binding recovery remains pending/manual review;
+- matching amount/currency/method/type without merchant-order binding never confirms;
 - exhausted recovery remains pending/manual review;
 - no permanent polling.
 
@@ -871,8 +979,8 @@ Cover at minimum:
 Use real MySQL concurrency:
 
 - notify vs duplicate notify;
-- notify vs return/API confirm;
-- recovery vs return/API confirm;
+- duplicate signed notify;
+- signed notify vs already-trusted-bound get_transaction refresh;
 - product effect once.
 
 ### Refund
@@ -958,21 +1066,23 @@ Do not edit SPEC.md, WORKFLOW.md or AGENTS.md.
 13. Notify signature uses official algorithm + hash_equals.
 14. Invalid notify cannot mutate product state.
 15. Notification journal excludes secrets/signature/card.
-16. get_transaction request/response protocol is implemented.
+16. get_transaction request/response protocol is implemented, but standalone get_transaction cannot establish local payment identity.
 17. TLS verification is never disabled.
-18. Trusted result validates amount/currency/method/type/transaction.
-19. One central confirmation service handles notify/return/recovery.
-20. Placement product effect applies exactly once.
-21. Race/repeated confirmation cannot duplicate status history/effect.
-22. Current-owner tariff controls each new extension attempt.
-23. Paid active extension mutates expiry only after trusted success.
-24. Paid expired extension returns to approved only after trusted success.
-25. Old historical gp_groups.free does not override extension tariff.
-26. Null extension price cannot create invalid payment.
-27. Out-of-window new extension attempt remains blocked.
-28. Recovery starts no earlier than about 20 minutes.
-29. Recovery is bounded and not permanent polling.
-30. Exhausted uncertain payment stays pending/manual review.
+18. Trusted mutation validates amount/currency/method/type/transaction and cryptographic merchant-order binding.
+19. Signed notify establishes site_order_id + transaction_id binding; browser return does not.
+20. Lost-notify/no-binding recovery remains pending/manual review rather than guessing success.
+21. One central confirmation service enforces trusted-binding evidence for every mutation.
+22. Placement product effect applies exactly once.
+23. Race/repeated confirmation cannot duplicate status history/effect.
+24. Current-owner tariff controls each new extension attempt.
+25. Paid active extension mutates expiry only after trusted success.
+26. Paid expired extension returns to approved only after trusted success.
+27. Old historical gp_groups.free does not override extension tariff.
+28. Null extension price cannot create invalid payment.
+29. Out-of-window new extension attempt remains blocked.
+30. Recovery evaluation starts no earlier than about 20 minutes.
+31. Recovery is bounded and not permanent polling.
+32. Exhausted uncertain or unbound payment stays pending/manual review.
 31. Admin payment list/detail are real.
 32. Normal admin payment pages do not call provider.
 33. Manual refund accounting never calls WEBPAY refund API.
