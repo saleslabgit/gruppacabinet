@@ -232,3 +232,19 @@ action or alternative undocumented provider protocol has been introduced.
 Staging prerequisites and Sandbox/production checklists are in webpay.md and
 deployment.md. Actual prices/credentials/public HTTPS delivery, real payment,
 real get_transaction and manual Sandbox refund are NOT VERIFIED locally.
+
+## WEBPAY admin corrections and shared-hosting baseline
+
+Admin abandoned filtering/deletion includes old awaiting_payment and draft groups,
+with successful-unrefunded payment protection preserved. The real successful
+payment filter composes with other group filters. Awaiting-payment copy describes
+the current payment flow and retains the placement-payment detail link.
+
+Database cache/locks, a read-only deployment preflight (temporary technical cache
+probes only), finite cron-worker verification and /cabinet deployment instructions
+prepare the shared-hosting baseline. Production artifacts include locally built
+vendor dependencies; server Composer and a permanent worker are optional. The
+local PHP image includes pcntl for worker timeouts. Actual HostER account limits,
+web PHP, cron, SMTP, HTTPS and Sandbox acceptance remain unverified external gates.
+See deployment.md and webpay.md, especially success-only notify defaults and the
+support request for unsuccessful signed notifications. No trust rule is relaxed.

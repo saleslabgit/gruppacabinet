@@ -644,3 +644,12 @@ and existing refund confirmation form/modal. Refund wording remains “Отме�
 and rejected paid-group manual-refund guidance. Settings no longer claim payment
 integration is unavailable. No CSS/layout redesign or psychologist history
 section was added; prototype routes retain all demonstration states in local/testing.
+
+### WEBPAY admin correction
+
+The real admin group list exposes the existing successful-payment yes/no control;
+it composes with status, free/paid and search filters. The abandoned quick filter
+covers old awaiting_payment and draft records using the configured threshold.
+Real awaiting-payment summaries explain that editing unlocks after trusted WEBPAY
+confirmation. The existing detail link to the latest placement payment is retained.
+No layout, responsive structure or prototype state catalogue changed.

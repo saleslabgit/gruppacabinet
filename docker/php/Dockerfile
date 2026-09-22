@@ -8,6 +8,7 @@ RUN apk add --no-cache \
 RUN docker-php-ext-install -j2 \
     mbstring \
     pdo_mysql \
+    pcntl \
     zip
 
 COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer

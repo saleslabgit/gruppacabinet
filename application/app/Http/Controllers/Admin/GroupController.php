@@ -41,6 +41,10 @@ class GroupController extends Controller
         if ($free = $filters['free'] ?? null) {
             $query->where('free', $free === 'free');
         }
+        if ($successfulPayment = $filters['successful_payment'] ?? null) {
+            $query->has('payments', $successfulPayment === 'yes' ? '>=' : '<', 1, 'and',
+                fn ($payments) => $payments->withTrashed()->where('status', 'succeeded')->whereNull('refunded_at'));
+        }
         if (($filters['quick'] ?? null) === 'approved') {
             $query->where('status', GroupStatus::Approved);
         }
@@ -48,7 +52,7 @@ class GroupController extends Controller
             $query->where('status', GroupStatus::Expired);
         }
         if (($filters['quick'] ?? null) === 'abandoned') {
-            $query->where('status', GroupStatus::Draft)->where('created_at', '<=', now()->subDays(config('groups.abandoned_draft_days')));
+            $query->whereIn('status', [GroupStatus::AwaitingPayment, GroupStatus::Draft])->where('created_at', '<=', now()->subDays(config('groups.abandoned_draft_days')));
         }
         $paginator = $query->orderByDesc($filters['sort'] ?? 'created_at')->orderByDesc('id')->paginate(20)->withQueryString();
 

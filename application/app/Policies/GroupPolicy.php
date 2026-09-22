@@ -56,7 +56,7 @@ class GroupPolicy
             return false;
         }
         $eligible = $actor->admin
-            ? $group->status === GroupStatus::Draft && $group->created_at->lte(now()->subDays(config('groups.abandoned_draft_days')))
+            ? in_array($group->status, [GroupStatus::AwaitingPayment, GroupStatus::Draft], true) && $group->created_at->lte(now()->subDays(config('groups.abandoned_draft_days')))
             : ! $group->disabled && in_array($group->status, [GroupStatus::Draft, GroupStatus::Rejected], true);
 
         return $eligible && ! $group->payments()->withTrashed()->where('status', 'succeeded')->whereNull('refunded_at')->exists();

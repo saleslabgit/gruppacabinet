@@ -327,7 +327,7 @@ class GroupWorkflowTest extends TestCase
                 $this->actingAs($this->$role);
                 DB::enableQueryLog();
                 DB::flushQueryLog();
-                $response = $this->get($path)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY')->assertDontSee('successful_payment');
+                $response = $this->get($path)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY');
                 $queries = DB::getQueryLog();
                 DB::disableQueryLog();
                 foreach ($queries as $query) {

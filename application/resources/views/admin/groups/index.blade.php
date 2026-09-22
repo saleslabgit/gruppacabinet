@@ -13,11 +13,9 @@
 <div class="col-md-4">
 <x-select name="free" label="Тариф группы" :options="[''=>'Все','free'=>'Бесплатная','paid'=>'Платная']" :value="$filters['free'] ?? $variant" />
 </div>
-@unless($realGroups ?? false)
 <div class="col-md-4">
-<x-select name="successful_payment" label="Успешный платёж" :options="[''=>'Все','yes'=>'Есть','no'=>'Нет']" :value="$variant === 'successful-payment' ? 'yes' : ''" />
+<x-select name="successful_payment" label="Успешный платёж" :options="[''=>'Все','yes'=>'Есть','no'=>'Нет']" :value="$filters['successful_payment'] ?? ($variant === 'successful-payment' ? 'yes' : '')" />
 </div>
-@endunless
 <div class="col-md-4">
 <x-select name="sort" label="Сортировка" :value="$filters['sort'] ?? 'created_at'" :options="['created_at'=>'Дата создания','published_at'=>'Дата публикации','expires_at'=>'Дата окончания']" />
 </div>
@@ -36,7 +34,7 @@
 @endif
 </form>
 <div class="actions quick-filters mt-3">
-@foreach(['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные черновики'] as $state=>$label)
+@foreach(['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные группы'] as $state=>$label)
 <a href="{{ ($realGroups ?? false) ? route('admin.groups.index',['quick'=>$state]) : route('prototype.admin-groups',['variant'=>$state]) }}">{{ $label }}</a>
 @endforeach
 </div>

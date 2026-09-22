@@ -195,6 +195,10 @@ Staging checklist:
 - Obtain Sandbox store/secret/API credentials and enable API access with WEBPAY
   support as needed. Confirm ordinary card notification mode and single-stage
   merchant configuration. Never commit credentials.
+- Request unsuccessful signed notifications from WEBPAY support and verify
+  decline/cancel delivery: only successful notifications are enabled by default.
+  See the notification-mode prerequisite below for the safe pending/manual-review
+  fallback when unsuccessful notifications are unavailable.
 - Use public HTTPS with correct APP_URL/base path and reachable notify route.
 - Configure positive approved test prices, run migrations, queue and scheduler.
 - Inspect v2 form and actual notify delivery; test success, decline, cancel,
@@ -217,3 +221,24 @@ Production switch checklist:
 - Back up DB/files/config, verify scheduler/queue/SMTP/logging/rollback plan,
   and perform separately authorized production acceptance. This task does
   not deploy or make any production transaction.
+
+## Notification-mode prerequisite
+
+[WEBPAY's official card-notification documentation](https://docs.webpay.by/paymentIntegration/cardIntegration/paymentNotification/)
+states that only successful-payment notifications are enabled by default.
+Before staging tests that require automatic failed/cancelled attempts and retry,
+ask WEBPAY support to enable unsuccessful-payment notifications for this store;
+verify actual signed delivery for decline and cancellation, not only success.
+Record the provider's configuration and observed deliveries in staging acceptance.
+
+Without unsuccessful signed notifications, browser cancel remains untrusted and
+an unbound attempt stays pending, then requires manual review. Standalone
+get_transaction cannot establish merchant-order binding and cannot authorize
+success/failure or a retry. Investigate with WEBPAY/support and obtain trusted
+notification delivery; do not manually change financial status or bypass binding.
+This safe fallback applies if the provider cannot enable the requested mode.
+
+Admin abandoned groups include both awaiting_payment and draft at the configured
+age threshold. Successful-unrefunded payment history still prevents deletion.
+The admin successful-payment yes/no filter uses succeeded plus refunded_at null,
+including retained soft-deleted payment history, and composes with other filters.

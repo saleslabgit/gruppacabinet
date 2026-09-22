@@ -491,3 +491,24 @@ Local tests use synthetic config and Http fakes. Real Sandbox payment, delivered
 notify, get_transaction and physical refund are separate external acceptance
 checks, not prerequisites for running the local suite. Never use real financial
 or card information in fixtures or local smoke artifacts.
+
+## Shared-hosting runtime verification
+
+The example environment now uses database cache; run additive migrations before
+starting jobs. Existing local .env files are not rewritten automatically. Web,
+scheduler and worker must share CACHE_STORE=database, database and CACHE_PREFIX.
+Rebuild the PHP/queue-worker images for pcntl timeout support. Local Compose keeps
+its persistent worker; shared hosting uses finite cron invocations described in
+`deployment.md` and requires neither Docker nor Supervisor.
+
+```bash
+docker compose exec -T php php artisan deployment:preflight
+docker compose exec -T php php artisan queue:work database --stop-when-empty --tries=3 --timeout=45 --max-time=50
+docker compose exec -T php php artisan test --filter='PaymentEraGroupsTest|DeploymentPreflightTest|SharedHostingRuntimeTest'
+```
+
+The runtime test uses a dedicated MySQL test database, an independent PHP process
+for lock exclusion and the actual finite worker with fake mail/provider transport.
+Do not run parallel suites sharing that test database. Local preflight tolerates
+missing deployment secrets; staging/production requires their presence and secure
+runtime configuration. A pass does not verify provider credentials or delivery.
