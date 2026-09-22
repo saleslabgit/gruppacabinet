@@ -4,6 +4,8 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 
+Schedule::command('payments:queue-recovery-checks')->everyFiveMinutes()->withoutOverlapping();
+
 Schedule::command('groups:expire')->everyMinute()->withoutOverlapping();
 Schedule::command('applications:cleanup')->daily()->withoutOverlapping();
 Schedule::command('groups:queue-expiry-warnings')->hourly()->withoutOverlapping();

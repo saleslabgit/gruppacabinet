@@ -91,8 +91,9 @@ and session revocation. Stage 7 connects the root to owned groups and draft crea
 ## Stage 7 groups, moderation and activation
 
 Owner and admin group CRUD now use the accepted Blade list/form/detail pages.
-Both tariffs create draft groups without payments, with immutable UUID, owner
-and tariff snapshot plus initial actor history. Owner-scoped lookups and policy
+Free groups start as drafts; the local WEBPAY stage now creates paid groups
+as awaiting_payment with a payment attempt. UUID, owner and tariff snapshot
+plus initial actor history remain protected. Owner-scoped lookups and policy
 checks protect all routes. Owners save/submit draft or revision only; admins
 edit content at any status and moderate with confirmed actions and required
 revision/rejection comments. History retains every comment and actor.
@@ -138,8 +139,9 @@ Confirmed owner-only extension uses the current owner tariff. Free active
 extension adds the stored duration and clears the warning marker; free expired
 extension returns to approved within the current window without moderation.
 Manual re-publication starts a new period using the current duration setting.
-Paid owners receive an informational unavailable state and cannot extend by POST.
-No payments, mail or jobs are created. Approved Blade/prototype structure remains.
+Paid extension is now connected through the local WEBPAY attempt flow below.
+Free extension creates no payment; pending paid extension applies no dates.
+Approved Blade/prototype structure remains.
 
 ## Stage 10 internal participant applications
 
@@ -193,14 +195,14 @@ SMTP. Lifecycle expiration stays independent. Local Mailpit and a dedicated
 worker provide reproducible SMTP/queue verification. Production prerequisites,
 TTL semantics and delivery limits are in `docs/email.md`.
 
-Stage 13 WEBPAY Sandbox remains pending; prices, Sandbox merchant credentials,
-provider contract/configuration and externally reachable callback URLs must be
-resolved for that stage. No payment behavior was introduced by Stage 12.
+Local WEBPAY implementation follows below. Real Sandbox acceptance remains a
+separate external stage; no payment behavior was introduced by Stage 12 itself.
 
 ## Intentionally not implemented
 
-No psychologist profile editing or document mutations, payment CRUD, or WEBPAY
-requests, signatures, credentials, callbacks, and payment effects are present.
+Psychologist profile editing/document mutations and automatic WEBPAY refunds
+remain out of scope. Real Sandbox/production acceptance and deployment have not
+been performed.
 
 ## External prerequisites and unknowns
 
@@ -211,3 +213,22 @@ requests, signatures, credentials, callbacks, and payment effects are present.
   local synthetic examples or approved values through the Stage 8 UI.
 - Production hosting, queue-worker operation, SMTP, public-site integration,
   and WEBPAY remain unverified and belong to later stages.
+
+
+## Local WEBPAY implementation (Stages 13–14 and staging preparation)
+
+Implemented paid placement, current-tariff paid extension, v2 forms, stateless
+signed notify, strict XML API adapter, central idempotent confirmation, finite
+trusted-bound recovery, real admin payment list/detail and manual refund
+accounting. The existing Blade pages and lifecycle transitions are reused.
+Tests cover synthetic provider contracts and real MySQL confirmation races;
+see `.ai/report.md` for actual verification results.
+
+The corrected task accepts that completely lost notify cannot be automatically
+confirmed from standalone get_transaction: no signed merchant order is present
+there. Unbound attempts remain pending/manual review. No manual “mark succeeded”
+action or alternative undocumented provider protocol has been introduced.
+
+Staging prerequisites and Sandbox/production checklists are in webpay.md and
+deployment.md. Actual prices/credentials/public HTTPS delivery, real payment,
+real get_transaction and manual Sandbox refund are NOT VERIFIED locally.

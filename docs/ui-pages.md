@@ -14,7 +14,7 @@
 
 Повторная визуальная правка (архив 20:29): теги имеют единый размер и вес шрифта, доступ выделен голубым, тариф — нейтральным цветом. У законченной группы иконка календаря с отметкой; в списке групп психолога статус расположен под названием. Поле файла имеет кнопку на полную высоту, действия справочников — одинаковую ширину. URL `ui.css` и `ui.js` включают версию по времени изменения файла, чтобы браузер обновлял стили и поведение меню/select после правок.
 
-Действия группы расположены рядом с её названием и статусом, до длинного описания. На карточке нет ссылки «Подробнее» на саму себя. В пустом списке остаётся одна кнопка создания. Фильтрованные пустые заявки отличаются от первого использования. Реальная главная администратора содержит ссылки на доступные разделы без вымышленных счётчиков. Платежи и установка пароля остаются в прежнем режиме прототипов; редизайн не подключает будущие операции.
+Действия группы расположены рядом с её названием и статусом, до длинного описания. На карточке нет ссылки «Подробнее» на саму себя. В пустом списке остаётся одна кнопка создания. Фильтрованные пустые заявки отличаются от первого использования. Реальная главная администратора содержит ссылки на доступные разделы без вымышленных счётчиков. Сам редизайн не подключал платежи и установку пароля; теперь они подключены к реальным маршрутам последующими этапами, как описано ниже.
 
 Состояние permission показывает реальную errors/403 Blade-страницу. Системные ошибки имеют собственные views и не требуют fixtures при штатном рендеринге. Варианты pagination показывают вторую демонстрационную страницу. Validation используется только на формах, empty — в списках; для read-only страниц сохранение/валидация не применяются.
 
@@ -625,3 +625,22 @@ UI/UX-аудит рекомендуется следующей продукто�
 На реальной карточке психолога в меню действий доступна отправка ссылки только
 для approved/enabled/non-admin/password-null аккаунта. История показывает
 повторную отправку. CSS, иерархия действий и 31/249 прототипов сохранены.
+
+
+## Real WEBPAY wiring
+
+Existing psychologist payments/placement and payments/return now show real
+owner-scoped attempts at `/payments/{payment}`, `/return`, `/cancel`; start and
+retry are CSRF POST actions. The same placement panel renders the signed
+provider form after start. Existing groups/extension shows current tariff,
+configured price, unfinished attempt, free extension or paid action. Success
+wording distinguishes active extension and expired/republication via the saved
+effect. Pending/manual-review never claims a completed payment.
+
+Admin payments/index now has working local filters/search/pagination;
+payments/show displays real details, safe notification journal, provider summary
+and existing refund confirmation form/modal. Refund wording remains “Отметить
+возврат выполненным в WEBPAY”. Admin group/moderation shows placement context
+and rejected paid-group manual-refund guidance. Settings no longer claim payment
+integration is unavailable. No CSS/layout redesign or psychologist history
+section was added; prototype routes retain all demonstration states in local/testing.

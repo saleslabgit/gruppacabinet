@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Psychologist;
 
+use App\Enums\GroupStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\GroupActionRequest;
 use App\Http\Requests\GroupRequest;
 use App\Models\Group;
-use App\Services\GroupLifecycleService;
+use App\Models\Payment;
+use App\Payments\PaymentAttempts;
 use App\Services\GroupWorkflow;
+use App\Services\SettingService;
 use App\Support\GroupPages;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -33,6 +36,10 @@ class GroupController extends Controller
     public function store(Request $request, GroupWorkflow $workflow): RedirectResponse
     {
         $group = $workflow->create($request->user(), $request->user());
+
+        if ($group->status === GroupStatus::AwaitingPayment) {
+            return redirect()->route('psychologist.payments.show', $group->payments()->latest('id')->firstOrFail());
+        }
 
         return redirect()->route('psychologist.groups.edit', $group)->with('success', 'Черновик создан.');
     }
@@ -60,12 +67,16 @@ class GroupController extends Controller
         $model = Group::query()->where('owner_id', $request->user()->id)->findOrFail($group);
         Gate::authorize('extend', $model);
 
-        return view('psychologist.groups.extension', array_replace(GroupPages::detail($model, false, false), ['title' => 'Продление размещения']));
+        return view('psychologist.groups.extension', array_replace(GroupPages::detail($model, false, false), ['title' => 'Продление размещения', 'extensionPrice' => app(SettingService::class)->extensionPriceMinorUnits(),
+            'pendingPayment' => $model->payments()->where('type', 'extension')->whereIn('status', ['created', 'pending'])->first()]));
     }
 
-    public function extend(GroupActionRequest $request, GroupLifecycleService $lifecycle): RedirectResponse
+    public function extend(GroupActionRequest $request, PaymentAttempts $attempts): RedirectResponse
     {
-        $group = $lifecycle->extend($request->group(), $request->user());
+        $group = $attempts->extend($request->group(), $request->user());
+        if ($group instanceof Payment) {
+            return redirect()->route('psychologist.payments.show', $group);
+        }
 
         return redirect()->route('psychologist.groups.show', $group)->with('success', 'Продление выполнено.');
     }

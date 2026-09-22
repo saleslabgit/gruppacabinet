@@ -9,6 +9,7 @@ use App\Models\Group;
 use App\Models\Payment;
 use App\Models\Setting;
 use App\Models\User;
+use App\Payments\PaymentAttempts;
 use App\Services\GroupStatusTransitionService;
 use App\Services\GroupWorkflow;
 use App\Services\SettingService;
@@ -16,6 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\WebpayFixture;
 use Tests\TestCase;
 
 class GroupWorkflowTest extends TestCase
@@ -34,6 +36,8 @@ class GroupWorkflowTest extends TestCase
         URL::forceRootUrl('http://localhost');
         $this->owner = User::query()->create(['email' => 'owner@example.test', 'first_name' => 'Owner', 'status' => 'approved', 'free' => false]);
         $this->admin = User::query()->create(['email' => 'admin@example.test', 'status' => 'approved', 'admin' => true]);
+        WebpayFixture::configure();
+        Setting::create(['key' => 'placement_price_minor_units', 'type' => 'integer', 'value' => '5000']);
         $ids = [];
         foreach (['group_format', 'gender'] as $code) {
             $dictionary = Dictionary::query()->create(['code' => $code, 'name' => $code]);
@@ -52,7 +56,10 @@ class GroupWorkflowTest extends TestCase
 
     private function draft(): Group
     {
-        return app(GroupWorkflow::class)->create($this->owner, $this->owner);
+        $group = Group::create(['owner_id' => $this->owner->id]);
+        $group->statusHistory()->create(['from_status' => null, 'to_status' => GroupStatus::Draft, 'actor_id' => $this->owner->id, 'actor_type' => 'user']);
+
+        return $group;
     }
 
     public static function tariffs(): array
@@ -61,7 +68,7 @@ class GroupWorkflowTest extends TestCase
     }
 
     #[DataProvider('tariffs')]
-    public function test_complete_workflow_has_initial_history_comments_immutable_uuid_and_no_payments(bool $free): void
+    public function test_complete_workflow_has_initial_history_comments_immutable_uuid_and_tariff_payment(bool $free): void
     {
         $this->owner->update(['free' => $free]);
         $this->actingAs($this->owner)->post('/groups', ['owner_id' => $this->admin->id, 'status' => 'awaiting_payment', 'public_uuid' => 'forged'])->assertRedirect();
@@ -70,11 +77,16 @@ class GroupWorkflowTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $uuid);
         $this->assertSame($free, $group->free);
         $this->assertSame($this->owner->id, $group->owner_id);
-        $this->assertSame(GroupStatus::Draft, $group->status);
+        $this->assertSame($free ? GroupStatus::Draft : GroupStatus::AwaitingPayment, $group->status);
         $initial = $group->statusHistory()->sole();
         $this->assertNull($initial->from_status);
         $this->assertSame($this->owner->id, $initial->actor_id);
         $this->assertSame('user', $initial->actor_type);
+        if (! $free) {
+            $payment = $group->payments()->sole();
+            app(PaymentAttempts::class)->start($payment);
+            $this->post('/webpay/notify', WebpayFixture::notify($payment))->assertOk();
+        }
         $this->get('/groups/'.$group->id.'/edit')->assertOk()->assertSee('Сохранить изменения')->assertSee('Отправить на модерацию')->assertDontSee('name="public_uuid"', false);
         $this->put('/groups/'.$group->id, $this->fields)->assertRedirect();
         $this->assertSame(GroupStatus::Draft, $group->fresh()->status);
@@ -91,7 +103,7 @@ class GroupWorkflowTest extends TestCase
         $this->actingAs($this->admin)->post('/admin/groups/'.$group->id.'/approve', ['confirmed' => 1])->assertRedirect();
         $this->assertNull($group->fresh()->published_at);
         $this->get('/admin/groups/'.$group->id)->assertOk()->assertSee('ID группы для gruppa.info')->assertSee($uuid)->assertSee('data-copy="public_uuid"', false)
-            ->assertSee('Первое замечание модератора')->assertSee('Второе замечание модератора')->assertDontSee('WEBPAY')->assertDontSee('Оплата размещения');
+            ->assertSee('Первое замечание модератора')->assertSee('Второе замечание модератора')->assertSee('Оплата размещения');
         $this->travelTo(now()->utc()->setDate(2026, 9, 21)->setTime(12, 30));
         $group->update(['expiry_warning_sent_at' => now()->subDay()]);
         $this->post('/admin/groups/'.$group->id.'/activate', ['confirmed' => 1])->assertRedirect();
@@ -111,7 +123,7 @@ class GroupWorkflowTest extends TestCase
         $this->post('/admin/groups/'.$group->id.'/approve', ['confirmed' => 1])->assertForbidden();
         $this->assertSame($before, $group->fresh()->getAttributes());
         $this->assertSame($historyCount, $group->statusHistory()->count());
-        $this->assertDatabaseCount('gp_payments', 0);
+        $this->assertDatabaseCount('gp_payments', $free ? 0 : 1);
         $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertOk()->assertDontSee('_prototype')->assertDontSee('WEBPAY')->assertSee('Продлить размещение')->assertSee('Все заявки группы');
     }
 
@@ -242,7 +254,7 @@ class GroupWorkflowTest extends TestCase
         $this->actingAs($this->admin)->get('/admin/groups/create')->assertOk()->assertSee($this->owner->email);
         $this->post('/admin/groups', $this->fields + ['owner_id' => $this->owner->id, 'public_uuid' => 'forged'])->assertRedirect()->assertSessionHasNoErrors();
         $group = Group::query()->sole();
-        $this->assertSame(GroupStatus::Draft, $group->status);
+        $this->assertSame(GroupStatus::AwaitingPayment, $group->status);
         $this->assertFalse($group->free);
         $this->assertSame($this->admin->id, $group->statusHistory()->sole()->actor_id);
         $this->get('/admin/groups/'.$group->id.'/edit')->assertOk()->assertDontSee('name="owner_id"', false)->assertDontSee('name="public_uuid"', false)->assertSee('вручную перенести в каталог');
@@ -253,7 +265,7 @@ class GroupWorkflowTest extends TestCase
         $this->owner->delete();
         $this->post('/admin/groups', $this->fields + ['owner_id' => $this->owner->id])->assertSessionHasErrors('owner_id');
         $this->assertDatabaseCount('gp_groups', 1);
-        $this->assertDatabaseCount('gp_payments', 0);
+        $this->assertDatabaseCount('gp_payments', 1);
     }
 
     public function test_delete_payment_safety_including_soft_deleted_historical_payment(): void

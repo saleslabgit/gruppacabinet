@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\GroupStatus;
 use App\Models\Group;
 use App\Models\User;
+use App\Payments\PaymentAttempts;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -24,7 +25,11 @@ class GroupWorkflow
             abort_unless(! $owner->admin && ! $owner->disabled && $owner->status->value === 'approved', 403);
             abort_unless($actor->admin || $actor->id === $owner->id, 403);
             $group = Group::query()->create(Arr::only($data, self::FIELDS) + ['owner_id' => $owner->id]);
-            $group->statusHistory()->create(['from_status' => null, 'to_status' => GroupStatus::Draft, 'actor_id' => $actor->id, 'actor_type' => 'user']);
+            if (! $owner->free) {
+                $group->update(['status' => GroupStatus::AwaitingPayment]);
+                app(PaymentAttempts::class)->createPlacement($group);
+            }
+            $group->statusHistory()->create(['from_status' => null, 'to_status' => $group->status, 'actor_id' => $actor->id, 'actor_type' => 'user']);
 
             return $group;
         });

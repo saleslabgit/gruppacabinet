@@ -1,5 +1,8 @@
 @if($realGroups ?? false)
 <div class="actions">
+@if(($realGroups ?? false) && !$group['disabled'] && $group['status'] === 'awaiting_payment')
+<x-button :href="($placementPayment ?? null) ? route('psychologist.payments.show', $placementPayment) : route('psychologist.groups.show', $group['id'])">Оплатить размещение</x-button>
+@endif
 @if(!$group['disabled'] && in_array($group['status'], ['draft', 'revision']))
 <x-button icon="pencil" :href="route('psychologist.groups.edit', $group['id'])">{{ $group['status'] === 'revision' ? 'Исправить и отправить' : 'Заполнить группу' }}</x-button>
 @endif

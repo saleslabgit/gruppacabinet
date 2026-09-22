@@ -50,10 +50,15 @@ class GroupPages
         }
 
         $lastTransition = $group->statusHistory->last();
+        $placement = $group->exists ? $group->payments()->where('type', 'placement')->latest('id')->first() : null;
+        if ($placement) {
+            $placement->setRelation('owner', $group->owner)->setRelation('group', $group);
+        }
 
         return array_merge($data, ['group' => self::data($group), 'groupModel' => $group,
             'republication' => $group->status === GroupStatus::Approved && $lastTransition?->from_status === GroupStatus::Expired
                 && $lastTransition->to_status === GroupStatus::Approved,
+            'placementPayment' => $placement, 'payment' => $placement ? PaymentPages::data($placement) : null,
             'history' => $group->statusHistory, 'user' => $group->owner ? PsychologistPages::profile($group->owner) : null,
             'canDelete' => $checkDeletion && $group->exists && request()->user()->can('delete', $group)]);
     }

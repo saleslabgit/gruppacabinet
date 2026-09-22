@@ -251,9 +251,9 @@ class GroupLifecycleTest extends TestCase
         } catch (ValidationException $exception) {
             $this->assertArrayHasKey('extension', $exception->errors());
         }
-        $this->get('/groups/'.$group->id.'/extension')->assertOk()->assertSee('Платное продление станет доступно')
+        $this->get('/groups/'.$group->id.'/extension')->assertOk()->assertSee('Стоимость оплаты не настроена')
             ->assertDontSee('WEBPAY')->assertDontSee('Продлить бесплатно')->assertDontSee('extend-group-form');
-        $this->post('/groups/'.$group->id.'/extension', ['confirmed' => 1])->assertSessionHasErrors('extension');
+        $this->post('/groups/'.$group->id.'/extension', ['confirmed' => 1])->assertSessionHasErrors('payment');
         $this->assertSame($original, $group->fresh()->getAttributes());
         $this->assertDatabaseCount('gp_group_status_history', 0);
         $this->noSideEffects();

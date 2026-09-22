@@ -1,171 +1,161 @@
-# Report: TASK-2026-09-21-11
+# Report: TASK-2026-09-21-12
 
 Status: done
 
 ## Summary
 
-Реализован Stage 12: одноразовая установка первого пароля, приглашение после
-commit одобрения, admin resend, письма через database queue, часовые уведомления
-об окончании размещения. Реальный HTTP/SMTP smoke и полный MySQL regression пройдены: 365 tests /
-4545 assertions. Окончательный focused прогон: 40 tests / 477 assertions.
-WEBPAY и Stage 11 API implementation не изменялись.
-
-## Architecture / behavior
-
-- Новая миграция `2026_09_21_120000_create_password_reset_tokens_table` создаёт
-  стандартную таблицу `password_reset_tokens` с email, хешем token, created_at.
-- `PasswordSetupService` на каждой операции создаёт Laravel PasswordBroker и
-  DatabaseTokenRepository, использует штатный Eloquent provider и APP_KEY.
-  Генерация, хеширование, проверка и удаление токенов — framework code.
-- Текущий SettingService::passwordSetupLinkTtlHours() переводится в секунды;
-  broker не кешируется в worker. Изменение TTL влияет на ранее выданные токены.
-  Проверенная граница Laravel isPast: точный момент expiry ещё допустим,
-  момент после него — нет; хранение с точностью до секунды. Увеличение TTL
-  может вернуть валидность ещё не использованной ссылки, что документировано.
-- GET `/password/setup/{token}?email=...`, POST `/password/setup`; общий лимит
-  10/min/IP. Существующий login limiter сохранён. Успех: hashed cast пароля,
-  ротация remember_token, удаление broker token под user lock, без автовхода.
-- Допускаются только approved/enabled/non-deleted/non-admin/password-null.
-  POST требует email/token/password/confirmation, пароль 8–255 символов.
-  Открытого forgot-password/reset-request endpoint нет.
-- Approval регистрирует afterCommit callback: rollback не создаёт приглашение.
-  После commit отдельная транзакция заменяет токен и вставляет database job.
-  Ошибка инфраструктуры оставляет approval/audit сохранёнными и пишет только
-  безопасное сообщение/user_id; восстановление — admin resend.
-- Admin POST `/admin/psychologists/{id}/password-setup`: account/admin, policy,
-  Form Request, CSRF, 1/min/admin/target. Токен и queue insert атомарны;
-  прежняя ссылка сразу теряет валидность после успешного commit. Audit action
-  `user.password_setup_resent`, actor/entity, metadata=null, без email/URL/token.
-- SendPasswordSetup перед отправкой проверяет текущее состояние и тот же токен.
-  Старое queued job после resend завершается без письма. Retry не меняет токен.
-- GET setup не сохраняется в session previous URL; validation не flash-ит ввод.
-  no-store/no-referrer, безопасные ответы при исключениях даже в APP_DEBUG.
-  Письмо и hidden input действительной формы содержат токен по назначению;
-  закрытые database queue payloads также могут содержать его.
-- `groups:queue-expiry-warnings`: hourly + withoutOverlapping; текущий threshold
-  читается один раз, выборка chunkById(200), eligibility owner через EXISTS,
-  вывод только фактического queued count. Disabled группы исключены без маркера.
-- SendExpiryWarning implements ShouldBeUnique. Ключ: group ID + exact expires_at
-  UTC `Y-m-d H:i:s`, совпадающая с БД точность. Команда берёт Laravel UniqueLock
-  явно перед Bus dispatch, worker освобождает тот же lock после завершения;
-  при dispatch failure команда освобождает lock. TTL блокировки не ограничен,
-  поэтому ожидание/выполнение/retry не открывает окно повторной постановки.
-- Job повторно читает группу/владельца/current threshold. После успешного SMTP
-  отдельная транзакция блокирует группу и проверяет active, exact expiry и null
-  marker, затем пишет expiry_warning_sent_at. SMTP exception/cancel не ставит
-  marker. Старое письмо не отмечает новый период при конкурентном продлении.
-- Письма содержат только необходимые данные, HTML/text по-русски без внешних
-  ресурсов. Warning указывает Europe/Minsk и защищённую ссылку группы.
-- Оба job: database queue, 3 tries, backoff 60/300, timeout 45; SMTP timeout 15.
-  Разрешён SMTP transport, чтобы log/failover-to-log не раскрывал ссылку.
-  Transport exceptions заменяются техническими без previous exception.
-  Bootstrap включает zend.exception_ignore_args=1: worker exception traces
-  не содержат аргументы с serialized payload и токеном.
-- Lifecycle expiration не зависит от писем/очереди. Warning не меняет
-  status/expires_at/placement_days, не создаёт платёжных эффектов.
+Реализованы локальные WEBPAY-платежи за размещение и продление, подписанная форма
+v2, stateless notify, XML get_transaction, единое идемпотентное подтверждение,
+ограниченные проверки статуса, реальные страницы платежей администратора и
+ручной учёт возврата. Существующие Blade и правила жизненного цикла сохранены.
+Реальная приёмка WEBPAY Sandbox и deployment НЕ ВЫПОЛНЯЛИСЬ.
 
 ## Changed Files
 
-Добавлены broker/setup service, два jobs, два mailables и четыре mail templates,
-password controller/Form Request/session middleware, warning command, миграция,
-два feature suites и тестовый SMTP receipt fake. Подключены approval, admin
-controller/policy/action/history, rate limits, routes/schedule, existing password
-Blade. Добавлены Mailpit/worker в корневой Compose и SMTP defaults. Обновлены
-email/development/architecture/project-status/ui-pages docs и этот отчёт.
-Task/SPEC/WORKFLOW/AGENTS, Stage 11 API, CSS и lifecycle implementation не менялись.
-В существующих тестах login ограничен срок действия Auth mock и добавлен
-assertOk; Stage 11 теперь проверяет отсутствие token rows после API вместо
-устаревшего ожидания отсутствия самой таблицы.
+- `application/app/Payments/`: адаптер протокола, безопасные результаты/ошибки,
+  создание/повтор/старт попыток, подтверждение и recovery.
+- Payment controllers, requests, policy, `PaymentPages`, команда и job проверки;
+  `config/webpay.php`, пустые env placeholders, additive migration контекста
+  попытки, casts Payment/PaymentNotification.
+- GroupWorkflow/GroupLifecycleService, GroupController/GroupPages, routes и
+  bootstrap подключены к платежам; существующие payment/group/settings views
+  используют реальные данные и действия. CSS и общий layout не изменены.
+- `WebpayTest`, `WebpayConcurrencyTest`, синтетический WebpayFixture; пять старых
+  suites обновлены только в местах прежних предположений об отсутствии платежей.
+- `docs/webpay.md`, `docs/deployment.md`, development/architecture/project-status/
+  ui-pages и этот отчёт. Task/SPEC/WORKFLOW/AGENTS не изменены.
+
+## Implemented behavior
+
+- Платный владелец создаёт awaiting_payment + created payment атомарно; бесплатный
+  — draft без платежа. Положительная цена и store/secret обязательны только для
+  платной операции. Сумма целочисленная, без float; случайный уникальный order.
+- Start — owner-only CSRF POST, переводит created в pending, сохраняет started_at.
+  Повторный start продолжает ту же попытку. Форма v2 содержит SHA1 и точные суммы,
+  не содержит secret/API password/карточные данные. Sandbox/production URL фиксированы.
+- Notify исключён из session/auth/CSRF и преобразования подписанных строк.
+  MD5 проверяется constant-time; card-inclusive режим отвергается. Журнал хранит
+  только ограниченные поля с проверкой формата; подпись, RRN, raw body и секреты
+  не сохраняются. Ошибки имеют фиксированные безопасные коды.
+- ConfirmPayment блокирует payment, затем group; проверяет merchant order,
+  transaction/provider order, сумму/BYN/cc/type. Эффект применяется один раз:
+  placement -> draft; active extension добавляет snapshot дней и очищает warning;
+  expired extension -> approved без новых дат публикации. Повтор возвращает успех
+  без дублирования history/срока. Succeeded/refunded не понижаются notify.
+- Новое продление использует текущий owner.free; исторический group.free не
+  определяет тариф. Незавершённая попытка сохраняет цену/тариф. Eligibility
+  проверяется при создании и первом старте; переход времени после старта не
+  отнимает успешное продление. Retry после доверенного failed/cancelled создаёт
+  новый order по текущей цене/тарифу, сохраняя историю.
+- XML API использует существующий HTTP client, HTTPS verify=true, без redirects,
+  connect timeout 5 s, total 1–30 s. DOM/libxml уже входят в production dependency
+  requirements. Пустой/повреждённый XML, DTD/entities, неоднозначные поля и неверные
+  подписи отвергаются; raw XML и транспортные exception payloads не логируются.
+- Standalone get_transaction НЕ устанавливает связь с локальным заказом:
+  документированный ответ не содержит подписанного site_order_id. API mutation
+  разрешена только после binding из проверенного notify. Browser wsb_tid/order
+  не используются для binding/API selection. Lost notify без binding оставляет
+  pending/manual review; обхода через «отметить оплаченным» нет.
+- Recovery запускается не ранее 20 min, только для trusted-bound pending.
+  Unique database job и shared-cache execution lock предотвращают параллельные
+  проверки. Максимум четыре вызова на отметках 0/10/30/55 min от первой проверки;
+  после 60 min вызовов нет. Ошибка расходует слот, но не меняет финансовый статус.
+  Unbound manual review выводится через 20 min без HTTP/job/counter increments.
+- Admin list/detail читают только БД: фильтры, Минские даты, eager loading,
+  pagination, безопасный журнал. Refund требует admin policy, CSRF, комментарий,
+  confirmation; ставит refunded/refunded_at и audit без вызова refund API.
+  Прежний запрет удаления при succeeded без возврата сохранён.
 
 ## Checks
 
-- `docker compose ps`: MySQL/PHP/Mailpit healthy, web и queue-worker запущены.
-- Non-destructive `php artisan migrate --force`: новая миграция выполнена;
-  `php artisan db:seed --force`: успешно, существующие данные не очищались.
-- `schedule:list`: warnings hourly, groups:expire every minute,
-  applications:cleanup daily, overlap protection сохранена.
-- `queue:failed`: No failed jobs found; после smoke очередь пуста.
-- Profile suites проверяют broker/hash/TTL, rollback и queue failure, роли,
-  CSRF/лимиты, invalid/expired/reused links, stale mail, marker ordering,
-  очередь/исполнение/retry uniqueness, extension/republication и lifecycle.
-  Финальный запуск `docker compose exec -T -e APP_DEBUG=false php php artisan
-  test --filter='PasswordSetupTest|ExpiryWarningTest|IntegrationIntakeTest'`:
-  40 passed / 477 assertions, 29.57 s. Включает 22 новых password/warning tests
-  и 18 тестов Stage 11; выполнен после последней настройки exception traces.
-- Полный MySQL прогон `docker compose exec -T -e APP_DEBUG=false php php artisan
-  test`: 365 passed / 4545 assertions, 303.54 s. Все 31/249 прототипов и
-  production isolation прошли, включая Stage 11 concurrency/signatures/replay.
-  Команда без APP_DEBUG override также запускалась, но тот ранний прогон был
-  остановлен до завершения. Промежуточный полный прогон выявил два описанных
-  выше устаревших тестовых ожидания; они исправлены до успешного финального.
-- `./vendor/bin/pint --test`: PASS, 146 PHP files.
-- `./vendor/bin/phpstan analyse --no-progress`: PASS, no errors. Первый холодный
-  прогон превысил 128 MiB; повтор с --memory-limit=512M прошёл, затем точная
-  команда без override тоже прошла.
-- `composer check-platform-reqs`: все требования проходят (PHP 8.2.32).
-- `php artisan view:cache`: успешно.
-- Local/production route lists: setup/resend присутствуют, production не имеет
-  prototype/foundation routes; публичного forgot-password endpoint нет.
-- `git diff --check` и `git diff --cached --check`: успешно. Финальный diff и
-  staged review выполнены: 37 файлов текущей задачи, нет credentials/raw tokens,
-  captured messages, runtime artifacts или посторонних изменений. Task/SPEC/
-  WORKFLOW/AGENTS не staged.
+- Docker/MySQL/PHP/Mailpit здоровы, web/worker работают. Additive migrate --force
+  и идемпотентный db:seed --force выполнены без очистки сохраняемой dev DB.
+- Финальный полный MySQL regression (`docker compose exec -T php php artisan test`):
+  397 passed / 6615 assertions, 462.35 s. Предыдущий полный прогон также прошёл:
+  394 passed / 5996 assertions (503.46 s).
+- Финальный focused `php artisan test tests/Feature/WebpayTest.php` после
+  проверки пустого XML: 26 passed / 272 assertions, 42.00 s.
+- Предыдущий focused прогон: 123 passed / 2675 assertions (241.67 s).
+  Промежуточные падения выявили устаревшие no-payment ожидания и конфликтующие
+  Http fake callbacks; исправлены. Точное время в тестах приведено к секундам БД.
+- Pint --test: PASS, 166 PHP files. Larastan с --memory-limit=512M: no errors.
+  Начальный анализ с лимитом 128 MiB завершился нехваткой памяти; лимит поднят
+  только для команды проверки, конфигурация проекта не менялась.
+- composer check-platform-reqs: PASS (PHP 8.2.32); view:cache: PASS, затем view:clear.
+- schedule:list: recovery каждые 5 min; прежние expiration/cleanup/warnings
+  расписания сохранены. Recovery command на очищенной dev DB: queued 0.
+  queue:failed: no failed jobs.
+- Local routes: 31 страницы прототипов + index; production: 0 prototype routes.
+  9 payment/notify routes присутствуют в обоих режимах; notify middleware = [].
+  Полный regression включает каталог 31/249, Stage 11 integration и Stage 12 mail.
+- Новые tests проверяют известные SHA1/MD5 vectors, integer bounds, trust boundary,
+  mismatch/signature/XML/transport errors, CSRF/ownership, idempotency, eligibility,
+  tariff/retry, bounded recovery, refund и отсутствие HTTP на admin страницах.
+  Шесть гонок реальными MySQL child processes: placement/active/expired extension,
+  notify-vs-notify и notify-vs-bound-API; ровно один эффект каждого платежа.
+- Полный diff и staged list проверены: 53 файла текущей задачи, без секретов,
+  чувствительных данных и посторонних artifacts. `git diff --check` и
+  `git diff --cached --check` проходят; защищённые task/SPEC/WORKFLOW/AGENTS
+  не изменены и не включены в commit.
 
 ## Runtime smoke
 
-Выполнен через реальные HTTP-формы/CSRF и Docker, синтетические @example.test
-адреса. Временный сценарий/вывод хранились вне репозитория. Графический браузер
-для этого прогона не использовался; CSS/layout не изменены.
+Выполнен реальный локальный HTTP/Chromium smoke через временный Docker process
+на localhost:8099, с исключительно синтетическими credentials и @example.test
+аккаунтами. WEBPAY browser requests блокировались; external requests = 0.
 
-1. Реальный admin login, detail и approval POST двух pending password-null
-   пользователей; по одной job на approval до запуска worker.
-2. `queue:work database --once --tries=3 --timeout=45` отправил реальное письмо
-   в Mailpit. Открыт именно полученный URL, установлен пароль, выполнен login,
-   повторное использование URL отвергнуто.
-3. Resend через admin POST немедленно сделал старую ссылку недействительной;
-   старое ожидающее job не отправило письмо, новое отправило рабочую ссылку,
-   по ней успешно установлен пароль.
-4. Outside threshold — 0; inside — 1; повтор до worker — 0; реальное письмо
-   warning захвачено, marker установлен, последующий scheduler — 0.
-5. Mailpit остановлен: реальное SMTP-падение оставило marker=null, job осталась
-   для retry (attempts=1). Группа стала due; groups:expire успешно перевёл её
-   в expired при недоступном SMTP. После восстановления stale retry завершился
-   без нового письма.
-6. Проверены application logs, audit и decoded session payloads: известных
-   smoke tokens и выбранного пароля нет. Failed jobs=0.
-7. Синтетические пользователи/группа/history/audit и captured messages удалены,
-   jobs завершены; Mailpit и persistent queue-worker восстановлены.
-8. Дополнительный реальный smoke приглашения: SMTP остановлен, worker сохранил
-   job для retry; raw token отсутствует в worker exception log, bootstrap flag=1.
-   После восстановления SMTP та же job доставила письмо с тем же токеном,
-   очередь опустела. Дополнительные пользователь/token/message удалены.
+1. Login психолога, создание платной группы, payment/start, проверка полей формы
+   и SHA1 независимым Node crypto расчётом; return/cancel не подтверждают платёж.
+2. Независимо подписанный notify отправлен по HTTP дважды: одна смена статуса,
+   один product effect. Проверены подтверждённые active и expired extensions.
+3. Trusted failure, новый order при retry и trusted cancellation.
+4. Admin login, list/detail, required comment и modal confirmation ручного учёта
+   возврата: status refunded, timestamp/audit, без provider call.
+5. Проверены widths 1440/1024/390: нет горизонтального overflow и JS errors.
+   Снимки placement/refund просмотрены; существующая структура страниц сохранена.
+6. Отдельная MySQL проверка подтвердила history, даты, marker, refund и отсутствие
+   synthetic secrets в журнале/логе; standalone API result без binding отвергнут.
+7. Синтетические users/groups/payments/notifications/audit/sessions удалены,
+   исходные цены восстановлены. Временный контейнер остановлен/удалён; .env не
+   менялся. Smoke scripts/screenshots/logs не добавлены в репозиторий.
 
-## Facts / Assumptions / Unknowns
+## Facts
 
-- Base `7bb1c7410e9e6db2d3225c5b8637681a7459ee8f`, planner `208c452`;
-  исходное рабочее дерево было чистым. Новая задача однозначно разрешена.
-- Осмотрены установленные Laravel 12 PasswordBroker, DatabaseTokenRepository,
-  PasswordBrokerManager и unique queue implementation. Context7 вернул docs
-  текущей ветки 13, поэтому детали сверены с installed 12 source и официальной
-  документацией https://laravel.com/docs/12.x/queues.
-- Mailpit pinned v1.27.8, SMTP mailpit:1025, UI 127.0.0.1:8025, без credentials.
-- Локальный file cache доступен контейнерам через общий mount. В production
-  нужен shared cache/lock store для всех экземпляров и актуальных settings.
-- В production нужны настоящий SMTP, APP_URL=https://gruppa.info/cabinet,
-  supervisor/systemd либо cron worker, scheduler cron и ограниченный доступ
-  к queue/failed jobs/storage. Локальный образ не имеет PCNTL; SMTP timeout
-  ограничивает ожидание транспорта. Production worker должен иметь PCNTL
-  для жёсткого job timeout, retry_after должен превышать timeout.
-- SMTP acceptance не гарантирует доставку в inbox. При аварии процесса между
-  SMTP success и DB marker возможна повторная доставка; это документированное
-  окно между двумя системами, которое unique dispatch не устраняет.
-- Production SMTP/deployment и внешняя доставка не проверялись и не входят
-  в задачу. HTTP access/error logging в production должно редактировать setup
-  path/query. Настоящие SMTP credentials не использовались.
+- Accepted base: 7b7e79c687f329f78ad94887c90e7b590b9b04fe; текущий planner:
+  56129209a02cdbb196f1fd8250a71c9b18b75b24. Исходное дерево чистое.
+- Ранее найденное отсутствие merchant order в get_transaction разрешено
+  уточнением задачи: автоматическое восстановление без binding запрещено.
+- Официальная WEBPAY документация перепроверена 2026-09-22; ссылки и точные
+  порядки signature fields, endpoints, types и API prerequisites в docs/webpay.md.
+  Laravel queue/HTTP details сверены с документацией и установленным кодом.
+- Новых production dependencies нет. Реальные credentials и данные платежей
+  не использовались и не включены в изменения.
+
+## Assumptions
+
+- Store настроен для обычного card notify без card-inclusive подписи; merchant
+  configuration, API permissions и callback URLs подтверждает оператор WEBPAY.
+- Shared persistent cache/locks, database worker и scheduler доступны всем
+  экземплярам при staging/production; эти prerequisites описаны в документации.
+
+## Unknowns
+
+Реальные цены, merchant/API credentials, public HTTPS/base path, доставка notify,
+фактический XML Sandbox, physical refund, staging/production hosting и acceptance
+не проверены. Никакие локальные fixtures не заменяют эти внешние проверки.
 
 ## Risks / Next Step
 
-Stage 12 завершён и проверен локально. Production deployment не выполнялся.
-Stage 13 WEBPAY
-Sandbox остаётся pending: нужны цены, merchant/Sandbox configuration, актуальный
-provider contract и доступные callback URLs. Stage 12 не выполняет платежи.
+Локальная реализация готова к отдельной внешней Sandbox-приёмке по
+`docs/webpay.md` и `docs/deployment.md`. Deployment не выполнялся.
+
+- Local payment implementation: done.
+- Real WEBPAY Sandbox payment: NOT VERIFIED.
+- Real notify delivery from WEBPAY: NOT VERIFIED locally.
+- Real get_transaction: NOT VERIFIED locally.
+- Lost-notify automatic confirmation via get_transaction: intentionally
+  unsupported without previously trusted merchant-order binding.
+- Manual Sandbox refund: NOT VERIFIED locally.
+
+При полностью потерянном notify без binding платёж намеренно остаётся pending
+и требует расследования WEBPAY/support и доставки доверенного уведомления.

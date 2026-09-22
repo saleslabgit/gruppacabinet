@@ -12,7 +12,7 @@
 <dd>{{ $payment['transaction_id'] ?? 'Ещё не получена' }}</dd>
 </div>
 <div>
-<dt>Сумма и валюта · пример</dt>
+<dt>Сумма и валюта{{ ($realPayments ?? false) ? '' : ' · пример' }}</dt>
 <dd>
 <x-money :value="$payment['amount']" :currency="$payment['currency']" />
 </dd>

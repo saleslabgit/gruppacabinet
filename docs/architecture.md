@@ -225,7 +225,8 @@ Owner edits/submission require enabled draft/revision groups. Admin edits are
 allowed in every lifecycle state. `GroupRequest` explicitly allows only the
 questionnaire fields; owner, UUID, tariff snapshot, lifecycle fields and current
 moderation messages cannot be edited. Creation uses the existing model UUID and
-owner tariff snapshot invariants. Both free and paid owners start in draft.
+owner tariff snapshot invariants. Free owners start in draft; paid owners now
+start in awaiting_payment with an atomic payment attempt.
 Dictionary options use active `group_format`/`gender` items plus the current
 inactive reference. Money validation accepts up to 16 whole decimal digits and
 at most two fractional digits, dot or comma, then converts with integer/string
@@ -252,14 +253,13 @@ admin lifecycle actions require `confirmed` via `GroupActionRequest`. Modal
 comment controls are associated with CSRF-protected confirmation forms through
 the standard HTML `form` attribute.
 
-Real views expose no payment actions or application links/counters; Stage 9
-connects free extension to the accepted pages. Applications are explicitly unavailable. There are no payment
-writes or transitions to awaiting_payment. Prototype fixtures and their no-op
-variants remain available only in local/testing using the same Blade files.
+The original Stage 7 payment placeholder has been replaced by the WEBPAY flows
+described below; Stage 10 connects applications. Prototype fixtures and their
+no-op variants remain local/testing only, using the same Blade files.
 
 ## Stage 8 dictionary administration and business settings
 
-`admin.dictionaries.*`, `admin.settings.*` and the GET-only `admin.payments.index`
+`admin.dictionaries.*`, `admin.settings.*` and the admin payment routes
 use the existing account/admin middleware. DictionaryPolicy and SettingPolicy
 require an approved, enabled, non-deleted administrator. Nested dictionary/item
 routes use scoped model bindings through `Dictionary::items`; a mismatched
@@ -309,10 +309,9 @@ belongs to that form and sends `confirmed=1`, preserving CSRF, method override,
 all edited fields and browser validation without nested forms. Previous URL-based
 confirmations and prototype no-op behavior remain supported.
 
-The real Payments view is an informational pre-WEBPAY surface, with no filters,
-synthetic rows, detail/refund links or mutations. Rendering does not query payment
-or notification tables. Settings changes do not create or modify payments/groups,
-and the temporary Stage 7 no-payment path for both tariffs remains unchanged.
+Payment list/detail now read real local payment/notification records, with no
+provider network calls. Settings updates themselves still do not create or
+modify payment attempts; new paid attempts snapshot the current price.
 
 ## Stage 9 placement lifecycle and free extension
 
@@ -337,10 +336,9 @@ to unpublish on gruppa.info manually; no separate unpublication state is stored.
 Owner-scoped GET/POST `/groups/{group}/extension` use account/psychologist
 middleware and `GroupPolicy::extend`. Confirmation and CSRF protect the POST.
 The service locks/re-reads the current owner, then the owned group, and checks
-policy again. Only current `gp_users.free=true` can extend; `gp_groups.free`
-remains the immutable historical tariff snapshot. Paid owners see information
-about unavailable paid extension; direct POST is rejected without date/status
-changes, payments, provider calls or payment routes.
+policy again. Current `gp_users.free=true` selects free extension; `gp_groups.free`
+remains the immutable historical tariff snapshot. Current paid owners use the
+WEBPAY attempt flow below; dates/status change only after trusted success.
 
 Active extension adds the stored `placement_days` to the future expiry, keeps
 status/published_at/duration and clears the warning marker. Missing/invalid dates
@@ -462,3 +460,42 @@ candidate queries filter owners without N+1. Marker writes follow successful
 SMTP and a locked period recheck. Lifecycle expiration never depends on email.
 See `email.md` for crash-window limits, sensitive queue storage, dynamic TTL and
 production shared-cache/worker/scheduler requirements.
+
+
+## Local WEBPAY payment subsystem
+
+`App\Payments\Webpay` owns config, integer money conversion, protocol-v2 form
+signatures, signed notify validation and XML get_transaction. ProviderResult
+separates signed merchant-order evidence from API results without that evidence.
+`ConfirmPayment` is the only provider-result mutation path: it locks payment
+then group, enforces binding/amount/currency/method/type/identity, and applies
+one atomic payment/group effect. It uses the existing group transition service.
+Binding fields are set only after verified notify. Browser parameters never
+populate authoritative transaction_id. See webpay.md for exact provider contract.
+
+The additive payment context migration stores started_at, binding_verified_at,
+provider_order_id, recovery_started_at, extension days/expiry/status snapshot,
+and product_effect (for truthful success presentation after later group changes).
+Existing payment records are not backfilled as trusted. No raw XML/signature or
+card field is retained. Notification journals and detail output use a whitelist.
+
+PaymentAttempts serializes new attempts under owner/group locks. Confirmation
+and start use payment/group locks; creation does not acquire existing payment
+row locks in the inverse order. The free lifecycle service rejects unfinished
+paid extensions. Historical group.free controls placement, current owner.free
+controls new extension attempts. A created/pending attempt retains its tariff.
+
+PaymentRecovery and CheckPayment reuse the Stage 12 database queue/UniqueLock
+pattern, with an additional shared execution lock for return/job races. Actual
+API-call counters are separate from derived unbound manual-review state. Checks
+start after 20 minutes and end within one hour of the first check, at most four.
+API results can only refresh a previously trusted-bound local payment; complete
+loss of notify remains pending/manual review by accepted design.
+
+PaymentPolicy, owner-scoped queries, existing account/role middleware and CSRF
+protect payment pages/actions. The notify route is separately registered without
+web/session/auth/CSRF; only that route bypasses input string normalization and
+uses sanitized errors. Admin refund takes a payment row lock, validates the
+succeeded state and required confirmation/comment, records audit, and makes no
+HTTP call. Normal admin list/detail also make no provider calls. Eager loading
+keeps list query counts independent of rows; journals and lists are paginated.

@@ -120,7 +120,7 @@ class PsychologistProfileTest extends TestCase
         $this->post('/logout')->assertRedirect(route('login'));
         $this->get('/profile')->assertRedirect(route('login'));
         foreach (Route::getRoutes() as $route) {
-            if (str_starts_with($route->getName() ?? '', 'psychologist.') && ! str_starts_with($route->getName(), 'psychologist.groups.')) {
+            if (str_starts_with($route->getName() ?? '', 'psychologist.') && ! str_starts_with($route->getName(), 'psychologist.groups.') && ! str_starts_with($route->getName(), 'psychologist.payments.')) {
                 $this->assertSame(['GET', 'HEAD'], $route->methods());
                 $this->assertContains($route->uri(), ['/', 'profile', 'profile/documents/{document}/view', 'profile/documents/{document}/download']);
             }

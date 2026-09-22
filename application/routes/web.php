@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\DictionaryController;
 use App\Http\Controllers\Admin\DictionaryItemController;
+use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
 use App\Http\Controllers\Admin\SettingController;
@@ -11,7 +12,6 @@ use App\Http\Controllers\Psychologist\ApplicationController;
 use App\Http\Controllers\Psychologist\GroupController;
 use App\Http\Controllers\Psychologist\ProfileController;
 use App\Http\Controllers\SessionController;
-use App\Support\PsychologistPages;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
@@ -109,7 +109,9 @@ Route::middleware(['account', 'role:admin'])->prefix('admin')->name('admin.')->s
     Route::delete('/dictionaries/{dictionary}/items/{item}', [$items, 'action'])->name('dictionaries.items.destroy');
     Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
     Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
-    Route::get('/payments', fn () => view('admin.payments.index', PsychologistPages::layout('Платежи') + ['realPayments' => true]))->name('payments.index');
+    Route::get('/payments', [PaymentController::class, 'index'])->name('payments.index');
+    Route::get('/payments/{payment}', [PaymentController::class, 'show'])->name('payments.show');
+    Route::post('/payments/{payment}/refund', [PaymentController::class, 'refund'])->name('payments.refund');
 });
 
 if (app()->environment(['local', 'testing'])) {
@@ -121,5 +123,14 @@ if (app()->environment(['local', 'testing'])) {
 
     Route::get('/redirect-check', fn () => redirect()->route('foundation'))->name('foundation.redirect');
 }
+
+Route::middleware(['account', 'role:psychologist'])->prefix('payments')->name('psychologist.payments.')->group(function (): void {
+    $controller = App\Http\Controllers\Psychologist\PaymentController::class;
+    Route::get('/{payment}', [$controller, 'show'])->name('show');
+    Route::get('/{payment}/return', [$controller, 'result'])->name('return');
+    Route::get('/{payment}/cancel', [$controller, 'result'])->name('cancel');
+    Route::post('/{payment}/start', [$controller, 'start'])->name('start');
+    Route::post('/{payment}/retry', [$controller, 'retry'])->name('retry');
+});
 
 require __DIR__.'/prototype.php';

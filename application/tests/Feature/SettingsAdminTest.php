@@ -165,21 +165,13 @@ class SettingsAdminTest extends TestCase
         $this->assertDatabaseCount('gp_payments', 0);
     }
 
-    public function test_payment_surface_is_informational_and_has_no_payment_queries_or_routes(): void
+    public function test_payment_list_is_available_without_configuring_business_prices(): void
     {
-        DB::enableQueryLog();
-        DB::flushQueryLog();
-        $this->get('/admin/payments')->assertOk()->assertViewIs('admin.payments.index')->assertSee('Платежи ещё не подключены')->assertDontSee('name="search"', false)->assertDontSee('Транзакция:')->assertDontSee('Заказ и дата')->assertDontSee('Возврат');
-        $queries = DB::getQueryLog();
-        DB::disableQueryLog();
-        foreach ($queries as $query) {
-            $this->assertDoesNotMatchRegularExpression('/gp_payments|gp_payment_notifications/', $query['query']);
-        }
-        $routes = collect(app('router')->getRoutes())->filter(fn ($route) => str_starts_with($route->uri(), 'admin/payments'));
-        $this->assertCount(1, $routes);
-        $this->assertSame(['GET', 'HEAD'], $routes->first()->methods());
+        $this->get('/admin/payments')->assertOk()->assertViewIs('admin.payments.index')
+            ->assertSee('Платежи не найдены')->assertSee('name="search"', false);
         $this->get('/admin/payments/1')->assertNotFound();
         $this->post('/admin/payments')->assertStatus(405);
+        $this->assertDatabaseCount('gp_payments', 0);
     }
 
     public function test_setting_reads_are_cached_and_can_be_invalidated_explicitly(): void

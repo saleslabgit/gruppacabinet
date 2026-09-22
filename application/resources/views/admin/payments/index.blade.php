@@ -1,29 +1,27 @@
 @extends('layouts.admin')
 @section('content')
-@if($realPayments ?? false)
-<x-empty title="Платежи ещё не подключены" text="После подключения WEBPAY здесь появятся платежи. Сейчас создание групп и изменение настроек не создают платежей." />
-@else
 <x-panel title="Поиск платежей" :compact="true" class="panel-compact filter-panel">
-<form data-prototype-form>
-<x-input name="search" label="Номер заказа или транзакции" />
+<form method="GET" @if(!($realPayments ?? false)) data-prototype-form @endif>
+@if($realPayments ?? false)<x-validation-summary :errors="$errors" />@endif
+<x-input name="search" :value="$filters['search'] ?? null" label="Номер заказа или транзакции" />
 <div class="row">
 <div class="col-md-6">
-<x-select name="status" label="Статус" :options="[''=>'Все','created'=>'Создан','pending'=>'Ожидает подтверждения','succeeded'=>'Подтверждён','failed'=>'Неуспешен','cancelled'=>'Отменён','refunded'=>'Возврат учтён']" :value="$variant === 'normal' ? '' : $payment['status']" />
+<x-select name="status" label="Статус" :options="[''=>'Все','created'=>'Создан','pending'=>'Ожидает подтверждения','succeeded'=>'Подтверждён','failed'=>'Неуспешен','cancelled'=>'Отменён','refunded'=>'Возврат учтён']" :value="($realPayments ?? false) ? ($filters['status'] ?? '') : ($variant === 'normal' ? '' : $payment['status'])" />
 </div>
 <div class="col-md-6">
-<x-select name="type" label="Тип платежа" :options="[''=>'Все','placement'=>'Размещение','extension'=>'Продление']" />
+<x-select name="type" :value="$filters['type'] ?? null" label="Тип платежа" :options="[''=>'Все','placement'=>'Размещение','extension'=>'Продление']" />
 </div>
 <div class="col-md-6">
-<x-select name="owner_id" label="Психолог" :options="[''=>'Все','demo'=>$user['name']]" />
+<x-select name="owner_id" label="Психолог" :options="($realPayments ?? false) ? $ownerOptions : [''=>'Все','demo'=>$user['name']]" :value="$filters['owner_id'] ?? null" />
 </div>
 <div class="col-md-3">
-<x-input name="from" label="Период с, Минск" type="date" />
+<x-input name="from" :value="$filters['from'] ?? null" label="Период с, Минск" type="date" />
 </div>
 <div class="col-md-3">
-<x-input name="to" label="Период до, Минск" type="date" />
+<x-input name="to" :value="$filters['to'] ?? null" label="Период до, Минск" type="date" />
 </div>
 </div>
-<x-button icon="search" kind="secondary" data-noop>Применить</x-button>
+<x-button icon="search" kind="secondary" :type="($realPayments ?? false) ? 'submit' : 'button'">Применить</x-button>
 </form>
 </x-panel>
 @if($variant === 'pre-webpay')
@@ -31,10 +29,11 @@
 @elseif($empty)
 <x-empty title="Платежи не найдены" text="Проверьте выбранный период и фильтры." />
 @else
-@if($payment['manual_review'])
+@if(!($realPayments ?? false) && $payment['manual_review'])
 <x-alert tone="warning">Требуется ручная проверка. Достоверный ответ не получен; платёж остаётся в ожидании подтверждения.</x-alert>
 @endif
 <x-table :headers="['Заказ и дата','Психолог и группа','Сумма и состояние','Действия']">
+@foreach(($realPayments ?? false) ? $payments : [$payment] as $payment)
 <tr>
 <x-cell label="Заказ и дата">
 <strong>{{ $payment['order_number'] }}</strong>
@@ -44,9 +43,9 @@
 </p>
 </x-cell>
 <x-cell label="Психолог и группа">
-<a href="{{ $links['admin-user'] }}">{{ $user['name'] }}</a>
+<a href="{{ ($realPayments ?? false) ? route('admin.psychologists.show', $payment['owner_id']) : $links['admin-user'] }}">{{ ($realPayments ?? false) ? $payment['owner_name'] : $user['name'] }}</a>
 <p>
-<a href="{{ $links['admin-group'] }}">{{ $group['title'] }}</a>
+<a href="{{ ($realPayments ?? false) ? route('admin.groups.show', $payment['group_id']) : $links['admin-group'] }}">{{ ($realPayments ?? false) ? $payment['group_title'] : $group['title'] }}</a>
 </p>
 </x-cell>
 <x-cell label="Сумма и состояние">
@@ -57,11 +56,12 @@
 <x-status domain="payment" :value="$payment['status']" />
 </x-cell>
 <x-cell label="Действия">
-<a href="{{ route('prototype.admin-payment',['variant'=>$payment['manual_review'] ? 'manual-review' : $payment['status']]) }}">Открыть</a>
+<a href="{{ ($realPayments ?? false) ? route('admin.payments.show', $payment['id']) : route('prototype.admin-payment',['variant'=>$payment['manual_review'] ? 'manual-review' : $payment['status']]) }}">Открыть</a>
+@if(($realPayments ?? false) && $payment['manual_review'])<p>Требуется ручная проверка</p>@endif
 </x-cell>
 </tr>
+@endforeach
 </x-table>
 <x-pagination :pages="$pages" :current="$currentPage" />
-@endif
 @endif
 @endsection

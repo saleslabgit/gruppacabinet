@@ -46,7 +46,10 @@ class GroupLifecycleService
             $locked = Group::query()->where('owner_id', $owner->id)->lockForUpdate()->findOrFail($group->id);
             Gate::forUser($owner)->authorize('extend', $locked);
             if (! $owner->free) {
-                throw ValidationException::withMessages(['extension' => 'Платное продление станет доступно после подключения оплаты.']);
+                throw ValidationException::withMessages(['extension' => 'Для текущего тарифа требуется оплата продления.']);
+            }
+            if ($locked->payments()->where('type', 'extension')->whereIn('status', ['created', 'pending'])->exists()) {
+                throw ValidationException::withMessages(['extension' => 'Сначала завершите текущую попытку оплаты продления.']);
             }
             $now = now()->utc();
             if (! $locked->expires_at) {

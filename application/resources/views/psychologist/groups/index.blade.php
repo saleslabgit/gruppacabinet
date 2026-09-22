@@ -9,6 +9,7 @@
 @endunless
 @endsection
 @section('content')
+@if($realGroups ?? false)<x-validation-summary :errors="$errors" />@endif
 @if($empty)
 <x-empty title="Здесь будут ваши группы" :text="($realGroups ?? false) ? 'Добавьте первую группу, чтобы отправить её на модерацию.' : (($canCreateGroup ?? true) ? 'Добавьте первую группу, чтобы отправить её на модерацию и получать заявки.' : 'Создание и просмотр групп пока недоступны.')">
 @if($realGroups ?? false)

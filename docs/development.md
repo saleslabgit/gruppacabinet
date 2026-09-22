@@ -215,8 +215,10 @@ All URLs below are relative to `http://localhost:8080/cabinet`.
    Dates start at activation and display in Europe/Minsk.
 5. Verify the rejected path on a separate group, including required reason and
    owner soft deletion. Rejected groups cannot be edited or resubmitted.
-6. Repeat with `free=false`: the historical tariff label differs, but no payment
-   screen, row or payment prerequisite exists in Stage 7.
+6. Repeat with `free=false` only with configured WEBPAY and a positive placement
+   price: creation now opens payment and the group stays awaiting_payment until
+   a trusted signed confirmation. Use synthetic local tests or separately
+   authorized Sandbox acceptance; browser return alone does not unlock editing.
 
 Group dictionaries are not seeded with invented product values. Before filling
 forms, approved active items must exist in `group_format` and `gender`.
@@ -269,9 +271,8 @@ are documented in architecture.md. Settings and their old/new audit values commi
 together; no payment is created. Changing placement duration affects later
 activations and leaves existing group dates intact.
 
-**Платежи** displays only “Платежи ещё не подключены”. There is no provider setup,
-payment detail, refund or payment mutation at this stage. Applications and
-WEBPAY remain later milestones; Stage 9 provides lifecycle automation below.
+**Платежи** now uses real local records, filters, detail and manual refund accounting.
+See the WEBPAY section below; Stage 9 lifecycle rules remain in force.
 
 ## Stage 9 expiration and free extension
 
@@ -453,3 +454,40 @@ unique job's lock; do not clear application queues or mailbox indiscriminately.
 
 See `email.md` for TTL semantics, production SMTP/worker/scheduler prerequisites
 and shared lock storage. Never deploy local Compose credentials or Mailpit.
+
+
+## Local WEBPAY flows
+
+See `docs/webpay.md` for protocol, trust boundaries, recovery timing and provider
+prerequisites; `docs/deployment.md` covers staging setup. Apply additive migrations
+and seed without resetting retained data. Configure WEBPAY values only in the
+ignored runtime environment; `.env.example` contains placeholders. Free flows
+remain usable without WEBPAY. Set approved prices in admin settings; unconfigured
+or zero paid prices prevent paid attempt creation.
+
+New paid groups enter awaiting_payment with one created placement payment. The
+owner starts it with a CSRF-protected action, then submits the signed HTML form
+to WEBPAY. Do not submit this external form in the local synthetic smoke.
+A browser return/cancel does not confirm payment; a signed notify establishes
+the required merchant-order binding. No binding means pending/manual review,
+even if a standalone API fixture reports success for an equal amount.
+
+Payment checks use the existing database worker and shared cache. Inspect:
+
+```bash
+docker compose exec -T php php artisan schedule:list
+docker compose exec -T php php artisan payments:queue-recovery-checks
+docker compose exec -T php php artisan test tests/Feature/WebpayTest.php tests/Feature/WebpayConcurrencyTest.php
+```
+
+The five-minute command queues only due trusted-bound pending checks. At 20
+minutes unbound attempts show manual review without any provider query. There
+are no indefinitely repeated checks. Do not share the test MySQL database
+between simultaneous PHPUnit runs: concurrency suites manage committed fixtures.
+If PHPStan exhausts a 128 MB process limit, run its same analysis with
+`--memory-limit=512M`; this does not change app runtime configuration.
+
+Local tests use synthetic config and Http fakes. Real Sandbox payment, delivered
+notify, get_transaction and physical refund are separate external acceptance
+checks, not prerequisites for running the local suite. Never use real financial
+or card information in fixtures or local smoke artifacts.

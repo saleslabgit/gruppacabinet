@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Dictionary;
 use App\Models\DictionaryItem;
 use App\Models\Group;
+use App\Models\Payment;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -176,12 +177,14 @@ class DictionaryAdminTest extends TestCase
     {
         $dictionary = $this->dictionary();
         $item = $this->item($dictionary);
+        $group = Group::create(['owner_id' => $this->owner->id]);
+        $payment = Payment::create(['owner_id' => $this->owner->id, 'group_id' => $group->id, 'order_number' => 'route-test', 'type' => 'placement', 'amount' => 100]);
         $this->actingAs($this->owner);
         foreach (app('router')->getRoutes() as $route) {
             if (! preg_match('/^admin\\.(dictionaries|settings|payments)\\./', $route->getName() ?? '')) {
                 continue;
             }
-            $path = '/'.str_replace(['{dictionary}', '{item}'], [$dictionary->id, $item->id], $route->uri());
+            $path = '/'.str_replace(['{dictionary}', '{item}', '{payment}'], [$dictionary->id, $item->id, $payment->id], $route->uri());
             $this->call($route->methods()[0], $path, ['confirmed' => 1])->assertForbidden();
         }
     }

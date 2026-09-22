@@ -5,7 +5,7 @@
 @if($real) @csrf @method('PUT') @endif
 <x-validation-summary :errors="$real ? $errors : array_intersect_key($errors, array_flip(['placement_price','warning_days']))" />
 <x-panel title="Стоимость операций">
-@if($real)<p class="mb-4">Укажите стоимость в BYN. Пустое поле означает, что цена не настроена. Платежи ещё не подключены.</p>@else
+@if($real)<p class="mb-4">Укажите стоимость в BYN. Пустое поле означает, что цена не настроена. Для платных операций нужна положительная стоимость и настройка WEBPAY.</p>@else
 <p class="mb-4">Цены пока не настроены. Укажите стоимость в BYN при подключении платных операций.</p>@endif
 <div class="row">
 <div class="col-md-6">

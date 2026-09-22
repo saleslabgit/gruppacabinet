@@ -50,10 +50,11 @@
 <p>{{ $user['email'] }} · {{ $user['phone'] }}</p>
 </x-panel>
 
-@unless($realGroups ?? false)
 <x-panel title="Оплата размещения">
 @if($group['free'])
 <p>Бесплатная группа. Платёж не требуется.</p>
+@elseif(($realGroups ?? false) && !$placementPayment)
+<p>Платёж не найден.</p>
 @else
 <p>
 <x-money :value="$payment['amount']" /> · <x-status domain="payment" :value="$payment['status']" />
@@ -63,10 +64,10 @@
 <p>
 <x-date :value="$payment['paid_at']" />
 </p>
-<a href="{{ $links['admin-payment'] }}">Открыть платёж</a>
+<a href="{{ ($realGroups ?? false) ? route('admin.payments.show', $placementPayment) : $links['admin-payment'] }}">Открыть платёж</a>
 @endif
 </x-panel>
-@endunless
+@if(($realGroups ?? false) && $placementPayment?->status === \App\Enums\PaymentStatus::Succeeded && $group['status'] === 'rejected')<x-alert tone="warning">Сначала выполните возврат вручную в WEBPAY, затем отметьте его в кабинете.</x-alert>@endif
 @include('shared.group-history')@include('shared.group-delete')
 @if(($realGroups ?? false) && $group['status'] === 'moderation')
 <x-confirmation id="approve" title="Одобрить группу?" action="Одобрить" kind="primary" :url="route('admin.groups.approve', $group['id'])"><p class="confirmation-object">{{ $group['title'] }}</p>

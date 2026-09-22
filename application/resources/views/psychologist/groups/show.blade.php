@@ -8,6 +8,7 @@
 </div>
 @endsection
 @section('content')
+@if($realGroups ?? false)<x-validation-summary :errors="$errors" />@endif
 @if($group['disabled'])
 <x-alert tone="warning">Группа отключена администратором. Действия временно недоступны.</x-alert>
 @endif
