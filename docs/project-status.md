@@ -191,8 +191,8 @@ password replacement is provided.
 
 Hourly expiry warnings use database jobs and a shared unique lock for each exact
 placement period. Jobs recheck current state, then mark only after successful
-SMTP. Lifecycle expiration stays independent. Local Mailpit and a dedicated
-worker provide reproducible SMTP/queue verification. Production prerequisites,
+SMTP or sendmail transport acceptance. Lifecycle expiration stays independent.
+Local Mailpit and a dedicated worker provide reproducible SMTP/queue verification. Production prerequisites,
 TTL semantics and delivery limits are in `docs/email.md`.
 
 Local WEBPAY implementation follows below. Real Sandbox acceptance remains a
@@ -248,3 +248,15 @@ local PHP image includes pcntl for worker timeouts. Actual HostER account limits
 web PHP, cron, SMTP, HTTPS and Sandbox acceptance remain unverified external gates.
 See deployment.md and webpay.md, especially success-only notify defaults and the
 support request for unsuccessful signed notifications. No trust rule is relaxed.
+
+## Shared-hosting mail portability
+
+Both business mail jobs support SMTP and explicitly configured local sendmail,
+with safe started/accepted_by_transport/failed diagnostics and post-commit
+password-invitation queued diagnostics. Unsupported transports remain blocked.
+Preflight checks sendmail executable capability without running it; local
+SMTP/Mailpit and database queue/retry/uniqueness semantics remain unchanged.
+HostER PCNTL and local MTA acceptance are reported by the task; downstream relay,
+inbox delivery, DNS/reputation and available MTA logs remain external unknowns.
+Transport acceptance does not establish inbox delivery. See email.md and
+deployment.md for timeout limits and manual staging verification.

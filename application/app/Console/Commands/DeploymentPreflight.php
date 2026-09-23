@@ -28,7 +28,7 @@ class DeploymentPreflight extends Command
             $failed = $failed || $check['status'] === 'fail';
         }
         $this->line('No email/provider request/business data change performed. Temporary cache probes are removed.');
-        $this->line('Web PHP, cron limits, routing, SMTP/HTTPS reachability and backups require hosting acceptance.');
+        $this->line('Web PHP, cron limits, routing, mail delivery/HTTPS reachability and backups require hosting acceptance.');
 
         return $failed ? self::FAILURE : self::SUCCESS;
     }

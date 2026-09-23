@@ -414,7 +414,11 @@ Compose includes Mailpit `axllent/mailpit:v1.27.8`, SMTP `mailpit:1025` inside
 Docker and capture UI at `http://localhost:8025` bound to loopback only. PHP and
 queue-worker use SMTP without credentials, the same application build/storage
 and database queue. Worker restarts after its one-hour max-time. No Node tools
-or mail application dependency are required.
+or mail application dependency are required. Local defaults remain SMTP/Mailpit;
+no sendmail binary or MTA package is added to Docker. Sendmail tests use Laravel
+Mail fakes and deterministic executable capability checks, without external mail.
+`MAIL_TIMEOUT` limits SMTP sockets only; production sendmail process safety and
+PCNTL/no-PCNTL requirements are documented in `deployment.md`.
 
 ```bash
 docker compose up -d --build
@@ -452,7 +456,7 @@ Inspect logs, audit, sessions and error/validation pages for token/password abse
 Remove only smoke-created records/messages/jobs and release any manually removed
 unique job's lock; do not clear application queues or mailbox indiscriminately.
 
-See `email.md` for TTL semantics, production SMTP/worker/scheduler prerequisites
+See `email.md` for TTL semantics, production SMTP/sendmail/worker/scheduler prerequisites
 and shared lock storage. Never deploy local Compose credentials or Mailpit.
 
 

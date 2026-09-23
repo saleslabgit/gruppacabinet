@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Throwable;
@@ -34,6 +35,13 @@ class SendExpiryWarning implements ShouldBeUnique, ShouldQueue
 
     public function handle(SettingService $settings): void
     {
+        $transport = config('mail.mailers.'.config('mail.default').'.transport');
+        $context = [
+            'group_id' => $this->groupId,
+            'transport' => in_array($transport, ['smtp', 'sendmail'], true) ? $transport : 'unsupported',
+            'attempt' => $this->attempts(),
+        ];
+        Log::info('mail.expiry_warning.started', $context);
         $group = Group::query()->with('owner')->find($this->groupId);
         $now = now()->utc();
         if (! $group || $group->status !== GroupStatus::Active || $group->disabled
@@ -44,8 +52,8 @@ class SendExpiryWarning implements ShouldBeUnique, ShouldQueue
             return;
         }
         try {
-            if (config('mail.mailers.'.config('mail.default').'.transport') !== 'smtp') {
-                throw new RuntimeException('SMTP transport required.');
+            if (! in_array($transport, ['smtp', 'sendmail'], true)) {
+                throw new RuntimeException('Supported mail delivery transport required.');
             }
             $sent = Mail::to($group->owner->email)->send(new ExpiryWarningMail(
                 $group->title, $group->expires_at->copy()->timezone('Europe/Minsk')->format('d.m.Y H:i'),
@@ -55,7 +63,9 @@ class SendExpiryWarning implements ShouldBeUnique, ShouldQueue
             if ($sent === null) {
                 throw new RuntimeException('Mail was not sent.');
             }
-        } catch (Throwable) {
+            Log::info('mail.expiry_warning.accepted_by_transport', $context);
+        } catch (Throwable $exception) {
+            Log::error('mail.expiry_warning.failed', $context + ['exception_class' => $exception::class]);
             throw new RuntimeException('Expiry warning delivery failed; retry the queued job.');
         }
         DB::transaction(function (): void {

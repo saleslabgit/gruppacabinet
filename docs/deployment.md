@@ -1,9 +1,10 @@
 # Deployment: shared PHP hosting and /cabinet
 
 The portable baseline is HostER.by / ispmanager-style shared hosting with MySQL,
-SMTP and cron. Docker and permanent daemons are local conveniences. No actual
-hosting account or public staging has been verified; the checklist below is a
-discovery and acceptance gate, not a statement of a hosting plan's capabilities.
+SMTP or local sendmail and cron. Docker and permanent daemons are local
+conveniences. The task records HostER PCNTL availability and local MTA acceptance.
+Full hosting/public staging acceptance has not been completed; the checklist
+below remains a discovery and acceptance gate.
 
 ## Discover before activation
 
@@ -14,8 +15,8 @@ contract), database permissions and quotas. Record Composer availability, allowe
 cron interval and maximum process lifetime, overlapping-task policy, symlink or
 alias support, rewrite support and public/private directory boundaries.
 
-Confirm outbound SMTP/TLS and HTTPS to WEBPAY, certificate and DNS, callback/WAF
-rules, writable directory permissions, log rotation, backups and tested restore.
+Confirm outbound SMTP/TLS or a local sendmail-compatible MTA, HTTPS to WEBPAY,
+certificate and DNS, callback/WAF rules, writable directory permissions, log rotation, backups and tested restore.
 The PHP binary selected in cron must match the deployed web runtime. If minute
 cron or a safe finite worker cannot run, resolve that hosting capability before
 activation; do not silently reduce lifecycle/recovery frequency or use sync jobs.
@@ -87,9 +88,9 @@ DB_CACHE_LOCK_TABLE=cache_locks
 ```
 
 Set a stable application-specific CACHE_PREFIX shared by web, scheduler and
-workers, the same database/cache connections and credentials, SMTP sender and
-transport, integration secret and WEBPAY configuration. Use WEBPAY_ENV=sandbox
-on staging. Never use array/file cache for staging/production distributed locks.
+workers, the same database/cache connections and credentials, mail sender and
+SMTP/sendmail transport, integration secret and WEBPAY configuration. Use
+WEBPAY_ENV=sandbox on staging. Never use array/file cache for staging/production distributed locks.
 Preserve an existing APP_KEY; generate and securely back up a key once for a new
 installation. Do not expose private configuration in diagnostic output.
 
@@ -114,8 +115,8 @@ approved procedure. Configure approved prices in admin settings.
 
 Preflight exits nonzero for blockers. It checks CLI PHP and production dependency
 extensions, MySQL identity, required tables, writable directories, configured
-sessions/queue/cache, HTTPS /cabinet, debug, SMTP and secret presence. It performs
-only disposable technical cache/lock probes (removed afterward); no mail, provider
+sessions/queue/cache, HTTPS /cabinet, debug, mail delivery configuration and
+secret presence. It performs only disposable technical cache/lock probes (removed afterward); no mail, provider
 requests or business writes. It prints neither credentials nor connection strings.
 It cannot prove web PHP compatibility, credentials' validity, actual delivery,
 cron operation, routing or external access. Verify these on the target separately.
@@ -145,7 +146,9 @@ Without PCNTL, Laravel still executes database jobs. Keep the finite cron model:
 
 Neither a job's timeout property nor a `--timeout` argument provides a hard limit
 without PCNTL. `--max-time` is also not a hard process deadline. Explicit transport
-timeouts remain mandatory: SMTP `MAIL_TIMEOUT` defaults to 15 seconds; WEBPAY
+timeouts remain mandatory where supported: SMTP `MAIL_TIMEOUT` defaults to 15 seconds
+and applies only to SMTP sockets, not the local sendmail process. Sendmail also
+requires the verified process-runtime/retry_after gate below without PCNTL. WEBPAY
 connect timeout is 5 seconds and request timeout `WEBPAY_HTTP_TIMEOUT` defaults
 to 15 seconds (bounded to 1–30 in the adapter). Bound MySQL connection/query/lock
 waits through verified hosting/database configuration as well. Transport timeouts
@@ -178,7 +181,7 @@ is an alternative. Local Compose retains its persistent queue-worker service.
 
 ## Acceptance and rollback
 
-Verify prototype routes are absent in production, SMTP invitation/password URLs,
+Verify prototype routes are absent in production, mail invitation/password URLs,
 warning delivery, lifecycle expiry, failed-job handling, cron lock behavior and
 WEBPAY recovery using synthetic data first. Check browser and CLI generated URLs
 under /cabinet. Do not log credentials, tokens, signatures, card data or raw
@@ -196,3 +199,52 @@ code/config and rebuild caches. Prefer retaining additive cache and payment
 context tables/columns. Do not drop history or restore DB without reconciliation
 of acknowledged financial events. Backups and restore testing are required before
 any deployment, not performed by preflight.
+
+## Sendmail configuration and staging verification
+
+Local development stays SMTP/Mailpit. For the explicitly selected production
+sendmail option, set private runtime values (verify the binary on that host):
+
+```dotenv
+MAIL_MAILER=sendmail
+MAIL_SENDMAIL_PATH="/usr/sbin/sendmail -bs -i"
+MAIL_FROM_ADDRESS=sender@YOUR-DOMAIN
+MAIL_FROM_NAME="Your application"
+QUEUE_CONNECTION=database
+LOG_CHANNEL=single
+LOG_LEVEL=info
+```
+
+Preflight uses the stable `Mail delivery configured` check. SMTP requires host
+and from address. Sendmail requires from address, a literal absolute executable
+path and simple flags including `-bs` (preferred) or `-t`. Shell expressions,
+relative paths, quoted/space-containing paths and missing/non-executable binaries
+fail; use a simple verified absolute binary path. Detection uses filesystem
+checks only and never runs the command or sends a probe. Output identifies only
+`smtp`, `sendmail` or `unsupported`, never the private path or credentials.
+Log/array/failover/roundrobin are hard failures in staging/production.
+
+The task records PCNTL available on the real HostER account, but verify it for
+the actual CLI binary on every target; the portable fallback gate above remains.
+`MAIL_TIMEOUT` does not protect sendmail. A hosting MTA `250 OK id=...` or Laravel
+`accepted_by_transport` is acceptance only, not remote inbox delivery.
+
+After deployment, an authorized operator should:
+
+1. Configure the verified sendmail path, real from address/name, database queue
+   and private logging settings above.
+2. Run `php artisan optimize:clear`, then `php artisan deployment:preflight`;
+   require `PASS Mail delivery configured: sendmail` and resolve all hard failures.
+3. Monitor private `storage/logs/laravel.log`, trigger one approved psychologist's
+   password-setup resend, and confirm `mail.password_setup.queued`.
+4. Run `php artisan queue:work database --once --tries=3 --timeout=45` using the
+   verified CLI PHP (apply the no-PCNTL gate if needed).
+5. Look for `mail.password_setup.started` followed by `accepted_by_transport` or
+   `failed`; inspect `php artisan queue:failed` if necessary, without dumping payloads.
+6. If accepted but absent from the inbox, use HostER MTA/Exim facilities/support
+   and its message ID to investigate queue/relay/rejection and SPF/DKIM/DMARC or
+   reputation. Available log access and actual delivery remain external unknowns.
+   Do not alter Laravel business state to claim delivery.
+
+These are manual staging steps; automated tests send no external email and make
+no HostER changes.

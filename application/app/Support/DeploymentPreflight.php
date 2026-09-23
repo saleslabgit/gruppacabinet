@@ -51,8 +51,13 @@ class DeploymentPreflight
             && ! isset($url['user']) && ! isset($url['pass']) && ! isset($url['query']) && ! isset($url['fragment'])));
         $add('APP_DEBUG disabled', ! $deployment || config('app.debug') === false);
         $transport = config('mail.mailers.'.config('mail.default').'.transport');
-        $add('SMTP delivery configured', ! $deployment || ($transport === 'smtp'
-            && $this->configured('mail.mailers.'.config('mail.default').'.host') && $this->configured('mail.from.address')));
+        $mailConfigured = $this->configured('mail.from.address') && match ($transport) {
+            'smtp' => $this->configured('mail.mailers.'.config('mail.default').'.host'),
+            'sendmail' => $this->sendmailConfigured(config('mail.mailers.'.config('mail.default').'.path')),
+            default => false,
+        };
+        $add('Mail delivery configured', ! $deployment || $mailConfigured,
+            in_array($transport, ['smtp', 'sendmail'], true) ? $transport : 'unsupported');
         $add('Integration secret', ! $deployment || $this->configured('integration.secret'), $this->presence('integration.secret'));
         $environment = config('webpay.environment');
         $add('WEBPAY environment', in_array($environment, ['sandbox', 'production'], true),
@@ -128,6 +133,23 @@ class DeploymentPreflight
     protected function supportsHardWorkerTimeout(): bool
     {
         return extension_loaded('pcntl');
+    }
+
+    private function sendmailConfigured(mixed $command): bool
+    {
+        // Accept a literal absolute binary and simple flags only, never shell syntax.
+        if (! is_string($command) || ! preg_match('~\A(/[a-zA-Z0-9_./-]+)((?: -[a-zA-Z0-9]+)+)\z~D', $command, $parts)) {
+            return false;
+        }
+        $flags = explode(' ', trim($parts[2]));
+
+        return (in_array('-bs', $flags, true) || in_array('-t', $flags, true))
+            && $this->sendmailExecutable($parts[1]);
+    }
+
+    protected function sendmailExecutable(string $binary): bool
+    {
+        return is_file($binary) && is_executable($binary);
     }
 
     private function supportedPhp(string $version): bool

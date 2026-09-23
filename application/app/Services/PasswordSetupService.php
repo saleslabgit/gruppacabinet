@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -54,7 +55,12 @@ class PasswordSetupService
                 return;
             }
             $token = $this->broker()->createToken($user);
-            Bus::dispatch((new SendPasswordSetup($user->id, $token))->onConnection('database')->beforeCommit());
+            $jobId = Bus::dispatch((new SendPasswordSetup($user->id, $token))->onConnection('database')->beforeCommit());
+            if ($jobId !== null) {
+                DB::afterCommit(static function () use ($userId): void {
+                    Log::info('mail.password_setup.queued', ['user_id' => $userId]);
+                });
+            }
             if ($actor) {
                 app(AuditService::class)->record('user', $user->id, 'user.password_setup_resent', [], $actor);
             }

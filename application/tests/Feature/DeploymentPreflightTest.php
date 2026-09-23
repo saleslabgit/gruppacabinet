@@ -69,6 +69,7 @@ class DeploymentPreflightTest extends TestCase
             ? 'PASS CLI worker hard timeout (pcntl): available'
             : 'WARN CLI worker hard timeout (pcntl): unavailable; verify cron process limit and shared-hosting fallback';
         $this->assertStringContainsString($expected, $output);
+        $this->assertStringContainsString('PASS Mail delivery configured: smtp', $output);
         $this->assertStringContainsString('MySQL', $output);
         $this->assertStringContainsString('PASS Database cache lock exclusion', $output);
         $this->assertStringContainsString('Integration secret: configured', $output);
@@ -90,7 +91,7 @@ class DeploymentPreflightTest extends TestCase
         $this->assertSame(1, Artisan::call('deployment:preflight'));
         $output = Artisan::output();
         $this->assertStringContainsString('WARN CLI worker hard timeout (pcntl): unavailable', $output);
-        foreach (['Database sessions', 'Database queue', 'Shared database cache', 'HTTPS /cabinet APP_URL', 'APP_DEBUG disabled', 'SMTP delivery configured', 'Integration secret', 'WEBPAY secret_key', 'WEBPAY environment'] as $check) {
+        foreach (['Database sessions', 'Database queue', 'Shared database cache', 'HTTPS /cabinet APP_URL', 'APP_DEBUG disabled', 'Mail delivery configured', 'Integration secret', 'WEBPAY secret_key', 'WEBPAY environment'] as $check) {
             $this->assertStringContainsString('FAIL '.$check, $output);
         }
         $this->assertStringNotContainsString($this->secret, $output);
@@ -107,5 +108,79 @@ class DeploymentPreflightTest extends TestCase
         $this->mock(DeploymentPreflight::class, fn ($mock) => $mock->shouldReceive('checks')->andThrow(new \RuntimeException($this->secret)));
         $this->assertSame(1, Artisan::call('deployment:preflight'));
         $this->assertStringNotContainsString($this->secret, Artisan::output());
+    }
+
+    public static function mailConfigurations(): array
+    {
+        return [
+            ['sendmail', '/private/synthetic/sendmail -bs -i', true, true],
+            ['sendmail', '/private/synthetic/sendmail -t -i', true, true],
+            ['sendmail', '/private/synthetic/sendmail -bs -i', false, false],
+            ['sendmail', null, true, false],
+            ['sendmail', '', true, false],
+            ['sendmail', 'sendmail -bs', true, false],
+            ['sendmail', '/private/synthetic/sendmail', true, false],
+            ['sendmail', '/private/synthetic/sendmail -bad', true, false],
+            ['sendmail', '/private/synthetic/sendmail -bs; touch /tmp/forbidden', true, false],
+            ['sendmail', '/private/synthetic/sendmail -bs | cat', true, false],
+            ['log', null, true, false], ['array', null, true, false],
+            ['failover', null, true, false], ['roundrobin', null, true, false],
+        ];
+    }
+
+    #[DataProvider('mailConfigurations')]
+    public function test_mail_configuration_capability_without_delivery(string $transport, ?string $command, bool $executable, bool $passes): void
+    {
+        config(['mail.default' => $transport, 'mail.mailers.sendmail.path' => $command]);
+        $this->app->instance(DeploymentPreflight::class, new class($executable) extends DeploymentPreflight
+        {
+            public function __construct(private bool $executable) {}
+
+            protected function sendmailExecutable(string $binary): bool
+            {
+                return $binary === '/private/synthetic/sendmail' && $this->executable;
+            }
+        });
+        $this->assertSame($passes ? 0 : 1, Artisan::call('deployment:preflight'));
+        $output = Artisan::output();
+        $this->assertStringContainsString(($passes ? 'PASS' : 'FAIL').' Mail delivery configured: '.($transport === 'sendmail' ? 'sendmail' : 'unsupported'), $output);
+        $this->assertStringNotContainsString('/private/synthetic', $output);
+        $this->assertStringNotContainsString($this->secret, $output);
+        Mail::assertNothingSent();
+        Http::assertNothingSent();
+    }
+
+    public function test_native_sendmail_capability_inspects_files_without_executing_them(): void
+    {
+        $directory = sys_get_temp_dir().'/sendmail-check-'.bin2hex(random_bytes(8));
+        mkdir($directory);
+        $binary = $directory.'/sendmail';
+        $marker = $directory.'/executed';
+        file_put_contents($binary, '#!/bin/sh'."\n".'touch '.$marker."\n");
+        try {
+            config(['mail.default' => 'sendmail', 'mail.mailers.sendmail.path' => $binary.' -bs -i']);
+            chmod($binary, 0600);
+            $this->assertSame(1, Artisan::call('deployment:preflight'));
+            chmod($binary, 0700);
+            clearstatcache();
+            $this->assertSame(0, Artisan::call('deployment:preflight'));
+            $this->assertFileDoesNotExist($marker);
+            config(['mail.from.address' => '']);
+            $this->assertSame(1, Artisan::call('deployment:preflight'));
+            unlink($binary);
+            clearstatcache();
+            config(['mail.from.address' => 'synthetic@example.test']);
+            $this->assertSame(1, Artisan::call('deployment:preflight'));
+            $this->assertStringContainsString('FAIL Mail delivery configured: sendmail', Artisan::output());
+            Mail::assertNothingSent();
+        } finally {
+            if (is_file($binary)) {
+                unlink($binary);
+            }
+            if (is_file($marker)) {
+                unlink($marker);
+            }
+            rmdir($directory);
+        }
     }
 }

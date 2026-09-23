@@ -17,8 +17,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\MailManager;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\SuccessfulMailFake;
 use Tests\TestCase;
 
@@ -209,5 +211,67 @@ class ExpiryWarningTest extends TestCase
         $this->artisan('groups:queue-expiry-warnings')->expectsOutput('Queued expiry warnings: 0')->assertSuccessful();
         $this->job($group)->handle(app(SettingService::class));
         Mail::assertSent(ExpiryWarningMail::class, 1);
+    }
+
+    public static function deliveryTransports(): array
+    {
+        return [
+            ['smtp', false], ['sendmail', false], ['smtp', true], ['sendmail', true],
+            ['log', false], ['array', false], ['failover', false], ['roundrobin', false],
+        ];
+    }
+
+    #[DataProvider('deliveryTransports')]
+    public function test_delivery_transports_and_safe_diagnostics(string $transport, bool $outage): void
+    {
+        config(['mail.default' => $transport]);
+        $records = [];
+        foreach (['info', 'error'] as $level) {
+            Log::shouldReceive($level)->andReturnUsing(function ($event, $context) use (&$records, $level): void {
+                $records[] = [$level, $event, $context];
+            });
+        }
+        $group = $this->group();
+        $job = $this->job($group);
+        $private = [$this->owner->email, $group->title, route('psychologist.groups.show', $group)];
+        $private[] = 'synthetic-transport-secret';
+        $private[] = 'synthetic MIME body';
+        $private[] = serialize($job);
+        if ($outage) {
+            Mail::shouldReceive('to')->once()->andReturnSelf();
+            Mail::shouldReceive('send')->once()->andThrow(new \RuntimeException(implode(' ', $private)));
+        }
+        $supported = in_array($transport, ['smtp', 'sendmail'], true);
+        $failed = $outage || ! $supported;
+        try {
+            $job->handle(app(SettingService::class));
+            $this->assertFalse($failed);
+        } catch (\RuntimeException $exception) {
+            $this->assertTrue($failed);
+            $this->assertSame('Expiry warning delivery failed; retry the queued job.', $exception->getMessage());
+            $this->assertNull($exception->getPrevious());
+            foreach ($private as $value) {
+                $this->assertStringNotContainsString($value, (string) $exception);
+            }
+        }
+        $context = ['group_id' => $group->id, 'transport' => $supported ? $transport : 'unsupported', 'attempt' => 1];
+        $this->assertSame(['info', 'mail.expiry_warning.started', $context], $records[0]);
+        $this->assertSame($failed
+            ? ['error', 'mail.expiry_warning.failed', $context + ['exception_class' => \RuntimeException::class]]
+            : ['info', 'mail.expiry_warning.accepted_by_transport', $context], $records[1]);
+        $this->assertCount(2, $records);
+        foreach ($private as $value) {
+            $this->assertStringNotContainsString($value, serialize($records));
+        }
+        if (! $supported) {
+            Mail::assertNothingSent();
+        }
+        $this->assertSame(! $failed, $group->fresh()->expiry_warning_sent_at !== null);
+        if (! $failed) {
+            Mail::assertSent(ExpiryWarningMail::class, 1);
+            $job->handle(app(SettingService::class));
+            Mail::assertSent(ExpiryWarningMail::class, 1);
+            $this->assertCount(3, $records); // Already marked: no second acceptance.
+        }
     }
 }
