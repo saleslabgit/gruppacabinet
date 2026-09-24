@@ -11,6 +11,7 @@ use App\Models\DictionaryItem;
 use App\Models\User;
 use App\Services\PasswordSetupService;
 use App\Services\PsychologistActions;
+use App\Services\PsychologistTrainings;
 use App\Support\DateTimeFormatter;
 use App\Support\PsychologistPages;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -18,6 +19,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -64,9 +66,17 @@ class PsychologistController extends Controller
     public function store(PsychologistRequest $request): RedirectResponse
     {
         try {
-            $psychologist = User::query()->create(array_merge($request->profileData(), [
-                'admin' => false, 'status' => 'pending', 'disabled' => false, 'password' => null,
-            ]));
+            $psychologist = DB::transaction(function () use ($request): User {
+                $data = $request->profileData();
+                $trainings = $data['trainings'] ?? [];
+                unset($data['trainings']);
+                $user = User::query()->create(array_merge($data, [
+                    'admin' => false, 'status' => 'pending', 'disabled' => false, 'password' => null,
+                ]));
+                app(PsychologistTrainings::class)->sync($user, $trainings);
+
+                return $user;
+            });
         } catch (UniqueConstraintViolationException $exception) {
             $this->emailConflict($exception);
         }
@@ -77,7 +87,7 @@ class PsychologistController extends Controller
     public function show(User $psychologist): View
     {
         Gate::authorize('manage', $psychologist);
-        $psychologist->load('educationType')->loadCount('documents');
+        $psychologist->load(['educationType', 'trainings'])->loadCount('documents');
         $groups = $psychologist->groups()->orderByDesc('created_at')->orderByDesc('id')->paginate(10);
         $history = AuditLog::query()->where('entity_type', 'user')->where('entity_id', $psychologist->id)
             ->with(['actor' => fn ($query) => $query->withTrashed()])->orderBy('created_at')->orderBy('id')->get();
@@ -97,7 +107,7 @@ class PsychologistController extends Controller
 
     private function form(User $psychologist, bool $creating): View
     {
-        $psychologist->load('educationType');
+        $psychologist->load(['educationType', 'trainings']);
         $options = DictionaryItem::query()->whereHas('dictionary', fn ($query) => $query->where('code', 'education_type'))
             ->where('active', true)->orderBy('sort_order')->orderBy('id')->pluck('name', 'id')->all();
         if ($psychologist->educationType && ! $psychologist->educationType->active) {
@@ -116,7 +126,14 @@ class PsychologistController extends Controller
     public function update(PsychologistRequest $request, User $psychologist): RedirectResponse
     {
         try {
-            $psychologist->update($request->profileData());
+            DB::transaction(function () use ($request, $psychologist): void {
+                $user = User::query()->lockForUpdate()->findOrFail($psychologist->id);
+                $data = $request->profileData();
+                $trainings = $data['trainings'] ?? [];
+                unset($data['trainings']);
+                $user->update($data);
+                app(PsychologistTrainings::class)->sync($user, $trainings);
+            });
         } catch (UniqueConstraintViolationException $exception) {
             $this->emailConflict($exception);
         }

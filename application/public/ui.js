@@ -189,3 +189,45 @@ document.querySelectorAll('select[data-custom-select]').forEach(select => {
     select.classList.add('custom-select-native');
     sync();
 });
+
+// The submitted list order is also the persisted training order.
+document.querySelectorAll('[data-trainings-editor]').forEach(editor => {
+    const list = editor.querySelector('[data-training-list]');
+    const add = editor.querySelector('[data-training-add]');
+    const renumber = () => {
+        Array.from(list.children).forEach((row, index, rows) => {
+            row.id = `trainings[${index}]`;
+            row.querySelector('[data-training-heading]').textContent = `Обучение ${index + 1}`;
+            row.querySelectorAll('*').forEach(element => {
+                ['name', 'id', 'for', 'aria-describedby'].forEach(attribute => {
+                    if (element.hasAttribute(attribute)) {
+                        element.setAttribute(attribute, element.getAttribute(attribute).replace(/trainings\[[^\]]+\]/g, `trainings[${index}]`));
+                    }
+                });
+            });
+            row.querySelector('[data-training-up]').disabled = index === 0;
+            row.querySelector('[data-training-down]').disabled = index === rows.length - 1;
+        });
+    };
+    add.addEventListener('click', () => {
+        list.append(editor.querySelector('[data-training-template]').content.cloneNode(true));
+        renumber();
+        list.lastElementChild.querySelector('input:not([type="hidden"])').focus();
+    });
+    list.addEventListener('click', event => {
+        const button = event.target.closest('button');
+        const row = button?.closest('[data-training]');
+        if (!row) return;
+        if (button.hasAttribute('data-training-remove')) {
+            row.remove();
+            add.focus();
+        } else if (button.hasAttribute('data-training-up') && row.previousElementSibling) {
+            list.insertBefore(row, row.previousElementSibling);
+        } else if (button.hasAttribute('data-training-down') && row.nextElementSibling) {
+            list.insertBefore(row.nextElementSibling, row);
+        }
+        renumber();
+        if (row.isConnected) row.querySelector('input:not([type="hidden"])').focus();
+    });
+    renumber();
+});

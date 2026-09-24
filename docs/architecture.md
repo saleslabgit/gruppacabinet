@@ -147,6 +147,19 @@ existing generated-column unique index, with duplicate races translated into
 an email validation error. Education choices come from active `education_type`
 items; the target's existing inactive item remains selectable.
 
+Current training data is the ordered `User::trainings()` relationship backed by
+`gp_user_trainings`, unique on `(user_id, position)`. `UserTraining::user()` and
+`documents()` expose ownership/certificates; `UserDocument::training()` is optional.
+The additive migration backfills legacy values once and links existing certificates
+only when a sole legacy training exists. Old user columns remain deprecated and
+unused by runtime. New training writes require at least one meaningful value.
+Admin profile saves use a user-locked transaction and `PsychologistTrainings`:
+validate ownership, retain submitted IDs, allocate temporary positions to avoid
+unique collisions, update/create in submitted order, delete omitted rows.
+The nullable document FK uses SET NULL; deletion never removes private files.
+Shared form/profile Blade views render ordered blocks with existing components;
+read-only profile/detail eager-load trainings, while the list keeps its query count.
+
 PsychologistActions locks the target and coordinates lifecycle transitions,
 access/tariff updates, session revocation and minimal AuditService records in
 one transaction on the existing MySQL/session connection. Approve/reject use
@@ -382,17 +395,15 @@ rows reuse the resolved group; admin rows eager-load group and owner. The admin
 search combines participant name, raw/canonical phone, group title and owner
 name/email. No application surface queries payments.
 
-PhoneNormalizer accepts explicit `+` or `00` international notation, removes
-spaces/parentheses/hyphens/dots, and requires 7–15 digits starting with a nonzero
-digit. Bare/local, malformed and overlong values fail explicitly without echoing
-the phone in the exception. This is syntactic normalization, not a country or
-subscriber validity check. No country code is guessed. digitsForSearch accepts
-phone-like punctuation and yields comparable digits (stripping the international
-00 prefix); arbitrary text yields an empty key and still uses textual search.
-Stage 11 reuses this boundary. The synthetic factory requires an existing
-group via `for($group)`, uses reserved fictional NANP numbers and derives the
-canonical phone from its raw phone, including attribute overrides. Production
-seeds do not create applications; public intake is provided by Stage 11 below.
+PhoneNormalizer::digitsForSearch is best-effort only: phone-like punctuation yields
+digits (stripping an international 00 prefix); arbitrary text yields an empty key.
+Participant intake accepts any trimmed nonempty string up to 255 characters and
+preserves it in `phone`. `phone_normalized` can be empty and never gates acceptance.
+No country code is guessed. Raw and digit search remain available. The strict
+normalizeForStorage method had no other runtime callers and has been removed.
+Synthetic factories require an existing group via `for($group)`, use reserved
+fictional NANP numbers and derive the same best-effort key from overridden values.
+Production seeds do not create applications.
 
 `applications:cleanup` reads the current typed retention-month setting once,
 computes a UTC calendar-month cutoff without month overflow, and physically
@@ -433,7 +444,13 @@ not automatically shortened in Stage 11.
 
 Questionnaire intake locks matching users including deleted rows, resolves
 education by dictionary code, uses `UserStatusTransitionService` for rejected
-resubmission, and reuses `PsychologistDocuments` with sanitized upload filenames.
+resubmission, replaces the current ordered training collection, and reuses
+`PsychologistDocuments` with sanitized upload filenames. Flat `certificate_N` links
+to new training position N; an absent position is rejected before writing. Prior
+certificate links become null without deleting documents. The semantic fingerprint
+includes normalized training values/positions and certificate positions, independent
+of multipart order. Completed replay skips replacement and upload. Participant
+fingerprints use a nonempty digit key or fall back to trimmed raw phone text.
 New private paths are tracked through transaction completion and removed on
 failure, including journal/storage failures. Application intake locks the group
 by immutable UUID, requires active/enabled, uses `PhoneNormalizer`, and creates

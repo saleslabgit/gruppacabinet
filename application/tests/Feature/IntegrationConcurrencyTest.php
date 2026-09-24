@@ -48,17 +48,19 @@ class IntegrationConcurrencyTest extends TestCase
 
     public function test_concurrent_psychologist_duplicates_and_distinct_ids_same_email(): void
     {
-        $payload = ['email' => 'concurrent@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1'];
+        $payload = ['email' => 'concurrent@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1', 'trainings' => [['modality_program' => 'Concurrent A'], ['training_hours' => 10]]];
         $results = $this->parallel('psychologists', $payload, true);
         foreach ($results as $result) {
             $this->assertSame($results[0], $result);
         }
         $this->assertDatabaseCount('gp_users', 1);
+        $this->assertDatabaseCount('gp_user_trainings', 2);
         $this->assertDatabaseCount('gp_integration_requests', 1);
         $payload['email'] = 'different-ids@example.test';
         $results = $this->parallel('psychologists', $payload, false);
         $this->assertSame(1, count(array_filter($results, fn ($result) => $result['status'] === 201)));
         $this->assertDatabaseCount('gp_users', 2);
+        $this->assertDatabaseCount('gp_user_trainings', 4);
         $this->assertDatabaseCount('gp_integration_requests', 5);
     }
 }

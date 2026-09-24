@@ -30,11 +30,12 @@ class PsychologistPages
     {
         $data = $user->only([
             'id', 'last_name', 'first_name', 'middle_name', 'phone', 'email', 'education_type_id',
-            'other_education', 'modality_program', 'training_center', 'graduation_year', 'training_hours',
+            'other_education',
             'license_number', 'group_leading_experience', 'groups_conducted_count',
             'documents_confirmed', 'education_confirmed', 'live_session_ready', 'personal_data_consent_version',
             'free', 'disabled',
         ]);
+        $data['trainings'] = $user->relationLoaded('trainings') ? $user->trainings->map(fn ($training) => $training->only(['id', 'position', 'modality_program', 'training_center', 'graduation_year', 'training_hours']))->all() : [];
         $data['name'] = trim(implode(' ', array_filter([$user->last_name, $user->first_name, $user->middle_name]))) ?: $user->email;
         $data['status'] = $user->status->value;
         $data['created_at'] = $user->created_at;

@@ -19,7 +19,7 @@ class ProfileController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
-        $user->load(['educationType', 'documents' => fn ($query) => $query->orderByDesc('id')]);
+        $user->load(['educationType', 'trainings', 'documents' => fn ($query) => $query->orderByDesc('id')]);
 
         return view('psychologist.profile.show', array_merge(PsychologistCabinetPages::layout('Мои данные'), [
             'user' => PsychologistPages::profile($user),

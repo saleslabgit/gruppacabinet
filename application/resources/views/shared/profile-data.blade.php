@@ -1,7 +1,7 @@
 <x-panel title="Анкета психолога">
 @foreach([
 'Контактные данные' => ['last_name'=>'Фамилия','first_name'=>'Имя','middle_name'=>'Отчество','phone'=>'Телефон','email'=>'Email'],
-'Образование' => ['education_type'=>'Тип образования','other_education'=>'Другое образование','modality_program'=>'Модальность / программа','training_center'=>'Учебный центр','graduation_year'=>'Год окончания','training_hours'=>'Количество часов'],
+'Образование' => ['education_type'=>'Тип образования','other_education'=>'Другое образование'],
 'Опыт и лицензия' => ['license_number'=>'Номер лицензии','license_expires_at'=>'Лицензия действительна до','group_leading_experience'=>'Опыт ведения групп','groups_conducted_count'=>'Проведено групп']
 ] as $heading => $fields)
 <section class="detail-section">
@@ -13,6 +13,19 @@
 </dl>
 </section>
 @endforeach
+<section class="detail-section">
+<h3>Дополнительное обучение</h3>
+@forelse($user['trainings'] as $training)
+<h4 class="h3">Обучение {{ $loop->iteration }}</h4>
+<dl class="detail-grid">
+@foreach(['modality_program'=>'Модальность / программа','training_center'=>'Учебный центр','graduation_year'=>'Год окончания','training_hours'=>'Количество часов'] as $key => $label)
+<div><dt>{{ $label }}</dt><dd>{{ $training[$key] ?? 'Не указано' }}</dd></div>
+@endforeach
+</dl>
+@empty
+<p class="meta">Обучение не указано.</p>
+@endforelse
+</section>
 </x-panel>
 <x-panel title="Подтверждения и согласие">
 <dl class="detail-grid">

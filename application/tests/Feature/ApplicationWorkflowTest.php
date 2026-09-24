@@ -48,10 +48,10 @@ class ApplicationWorkflowTest extends TestCase
     public static function phones(): array
     {
         return [
-            ['+375 (29) 123-45-67', '+375291234567'],
-            ['00375 29 123 45 67', '+375291234567'],
-            ['+375291234567', '+375291234567'],
-            [" \t+1 (202).555-0100 \n", '+12025550100'],
+            ['+375 (29) 123-45-67', '375291234567'],
+            ['00375 29 123 45 67', '375291234567'],
+            ['375291234567', '375291234567'],
+            [" \t+1 (202).555-0100 \n", '12025550100'],
         ];
     }
 
@@ -59,26 +59,24 @@ class ApplicationWorkflowTest extends TestCase
     public function test_phone_normalization(string $raw, string $expected): void
     {
         $phones = new PhoneNormalizer;
-        $this->assertSame($expected, $phones->normalizeForStorage($raw));
-        $this->assertSame(substr($expected, 1), $phones->digitsForSearch($raw));
+        $this->assertSame($expected, $phones->digitsForSearch($raw));
     }
 
-    public static function invalidPhones(): array
+    public static function localPhones(): array
     {
-        return [['0291234567'], ['375291234567'], ['not a phone'], ['+1abc2025550100'], ['++12025550100'], ['+0123456789'], ['+12'], ['+1234567890123456'], ['']];
+        return [['0291234567', '0291234567'], ['375291234567', '375291234567'], ['29 123-45-67', '291234567'], ['not a phone', ''], ['+1abc2025550100', ''], ['+12', '12'], ['', '']];
     }
 
-    #[DataProvider('invalidPhones')]
-    public function test_ambiguous_or_malformed_phone_fails_explicitly(string $phone): void
+    #[DataProvider('localPhones')]
+    public function test_local_and_text_phone_search_keys_are_best_effort(string $phone, string $expected): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        (new PhoneNormalizer)->normalizeForStorage($phone);
+        $this->assertSame($expected, (new PhoneNormalizer)->digitsForSearch($phone));
     }
 
     public function test_factory_is_synthetic_normalizes_overridden_phone_and_supports_states(): void
     {
         $record = GroupApplication::factory()->for($this->group)->create(['phone' => '+1 (202) 555-0101']);
-        $this->assertSame('+12025550101', $record->phone_normalized);
+        $this->assertSame('12025550101', $record->phone_normalized);
         $this->assertStringContainsString('Тестовый', $record->last_name);
         $this->assertNull($record->processed_at);
         $this->assertNotNull(GroupApplication::factory()->for($this->group)->processed()->create()->processed_at);

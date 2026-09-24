@@ -89,6 +89,8 @@ class IntakeService
     private function psychologist(IntakeData $data, array &$paths): int
     {
         $fields = $data->fields;
+        $trainings = $fields['trainings'];
+        unset($fields['trainings']);
         $matches = User::withTrashed()->where('email', $fields['email'])->orderBy('id')->lockForUpdate()->get();
         foreach ($matches as $match) {
             if ($match->trashed() || $match->disabled || $match->status === UserStatus::Approved) {
@@ -116,9 +118,14 @@ class IntakeService
                 app(UserStatusTransitionService::class)->transition($user, UserStatus::Pending);
             }
         }
+        $user->trainings()->delete();
+        $currentTrainings = $user->trainings()->createMany($trainings)->keyBy('position');
         foreach ($data->documents as $descriptor) {
             $document = app(PsychologistDocuments::class)->upload($user, $data->files[$descriptor['field']], $descriptor['type'], $descriptor['original_name']);
             $paths[] = $document->path;
+            if ($descriptor['training_position'] !== null) {
+                $document->update(['user_training_id' => $currentTrainings[$descriptor['training_position']]->id]);
+            }
         }
 
         return $new ? 201 : 200;

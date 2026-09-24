@@ -16,6 +16,12 @@ class UserDocument extends Model
         return ['size' => 'integer'];
     }
 
+    /** @return BelongsTo<UserTraining, $this> */
+    public function training(): BelongsTo
+    {
+        return $this->belongsTo(UserTraining::class, 'user_training_id');
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

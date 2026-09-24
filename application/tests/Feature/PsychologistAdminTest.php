@@ -8,12 +8,14 @@ use App\Models\Dictionary;
 use App\Models\DictionaryItem;
 use App\Models\Group;
 use App\Models\User;
+use App\Models\UserTraining;
 use App\Services\AuditService;
 use App\Services\PsychologistActions;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -148,12 +150,91 @@ class PsychologistAdminTest extends TestCase
     {
         $person = $this->person();
         $this->from('/admin/psychologists/create')->post('/admin/psychologists', ['email' => $person->email, 'free' => 0])->assertSessionHasErrors('email');
-        $this->from('/admin/psychologists/create')->post('/admin/psychologists', ['email' => 'invalid', 'free' => 0, 'training_hours' => -1])->assertSessionHasErrors(['email', 'training_hours']);
+        $this->from('/admin/psychologists/create')->post('/admin/psychologists', ['email' => 'invalid', 'free' => 0, 'trainings' => [['training_hours' => -1]]])->assertSessionHasErrors(['email', 'trainings.0.training_hours']);
         $this->get('/admin/psychologists/create')->assertOk()->assertSee('value="invalid"', false)->assertSee('is-invalid');
         $this->put('/admin/psychologists/'.$person->id, ['email' => $this->admin->email])->assertSessionHasErrors('email');
         $person->delete();
         $this->post('/admin/psychologists', ['email' => $person->email, 'free' => 0])->assertSessionHasNoErrors();
         $this->assertSame(1, User::query()->where('email', $person->email)->count());
+    }
+
+    public function test_training_create_reorder_update_remove_and_foreign_ids(): void
+    {
+        Storage::fake('local');
+        $this->post('/admin/psychologists', ['email' => 'trainings@example.test', 'free' => 0, 'trainings' => [
+            ['modality_program' => 'First program'], ['training_center' => 'Second center'],
+        ]])->assertSessionHasNoErrors()->assertRedirect();
+        $person = User::where('email', 'trainings@example.test')->sole();
+        [$first, $second] = $person->trainings->all();
+        $document = $person->documents()->create(['type' => 'certificate', 'user_training_id' => $first->id,
+            'path' => 'synthetic/training.pdf', 'original_name' => 'Synthetic.pdf', 'mime_type' => 'application/pdf', 'size' => 4]);
+        Storage::disk('local')->put($document->path, 'test');
+        $path = '/admin/psychologists/'.$person->id;
+        $this->get($path)->assertOk()->assertSeeInOrder(['First program', 'Second center']);
+        $this->get($path.'/edit')->assertOk()->assertSee('trainings[0][id]', false)->assertSee('Добавить обучение');
+        $this->put($path, ['email' => $person->email, 'trainings' => [
+            ['id' => $second->id, 'training_center' => 'Second edited'],
+            ['id' => $first->id, 'modality_program' => 'First edited'],
+            ['training_hours' => 0],
+        ]])->assertSessionHasNoErrors();
+        $this->assertSame([$second->id, $first->id], $person->fresh()->trainings->take(2)->pluck('id')->all());
+        $this->assertSame($first->id, $document->fresh()->user_training_id);
+        $this->assertSame([0, 1, 2], $person->fresh()->trainings->pluck('position')->all());
+        $unchanged = $person->fresh()->trainings->map(fn ($row) => $row->only(['id', 'modality_program', 'training_center', 'graduation_year', 'training_hours']))->all();
+        $this->put($path, ['email' => $person->email, 'trainings' => $unchanged])->assertSessionHasNoErrors();
+        $this->assertSame([0, 1, 2], $person->fresh()->trainings->pluck('position')->all());
+        $this->get($path)->assertSeeInOrder(['Second edited', 'First edited']);
+        $foreign = $this->person()->trainings()->create(['position' => 0, 'modality_program' => 'Foreign']);
+        $this->put($path, ['email' => $person->email, 'first_name' => 'Must not save', 'trainings' => [
+            ['id' => $foreign->id, 'training_hours' => 1],
+        ]])->assertSessionHasErrors('trainings.0.id');
+        $this->assertNull($person->fresh()->first_name);
+        $this->post('/admin/psychologists', ['email' => 'foreign-create@example.test', 'free' => 0, 'trainings' => [
+            ['id' => $foreign->id, 'training_hours' => 1],
+        ]])->assertSessionHasErrors('trainings.0.id');
+        $this->assertDatabaseMissing('gp_users', ['email' => 'foreign-create@example.test']);
+        $this->put($path, ['email' => $person->email, 'trainings' => [
+            ['id' => $first->id, 'training_hours' => 1], ['id' => $first->id, 'training_hours' => 2],
+        ]])->assertSessionHasErrors('trainings.0.id');
+        $this->from($path.'/edit')->put($path, ['email' => $person->email, 'trainings' => [
+            ['modality_program' => 'Keep old input'], ['training_hours' => -1],
+        ]])->assertSessionHasErrors('trainings.1.training_hours');
+        $this->get($path.'/edit')->assertOk()->assertSee('Keep old input')->assertSee('trainings[1][training_hours]-error', false);
+        $this->put($path, ['email' => $person->email, 'trainings' => [['id' => $first->id]]])->assertSessionHasErrors('trainings.0');
+        $this->from($path.'/edit')->put($path, ['email' => $person->email, 'trainings' => [
+            ['id' => ['invalid'], 'modality_program' => 'Malformed id'],
+        ]])->assertSessionHasErrors('trainings.0.id');
+        $this->get($path.'/edit')->assertOk()->assertSee('Malformed id');
+        $this->put($path, ['email' => $person->email, 'trainings' => []])->assertSessionHasNoErrors();
+        $this->assertCount(0, $person->fresh()->trainings);
+        $this->assertNull($document->fresh()->user_training_id);
+        Storage::disk('local')->assertExists($document->path);
+        $this->get($path.'/documents')->assertOk()->assertSee('Synthetic.pdf');
+        $this->get($path.'/documents/'.$document->id.'/view')->assertOk()->assertStreamedContent('test');
+        $this->assertSame('Foreign', $foreign->fresh()->modality_program);
+    }
+
+    public function test_profile_and_trainings_are_rolled_back_together(): void
+    {
+        $person = $this->person(['first_name' => 'Original']);
+        $training = $person->trainings()->create(['position' => 0, 'modality_program' => 'Original training']);
+        UserTraining::creating(function () {
+            throw new \RuntimeException('Synthetic training failure');
+        });
+        try {
+            $this->put('/admin/psychologists/'.$person->id, ['email' => $person->email, 'first_name' => 'Changed',
+                'trainings' => [['modality_program' => 'New training']],
+            ])->assertStatus(500);
+            $this->post('/admin/psychologists', ['email' => 'rollback@example.test', 'free' => 0,
+                'trainings' => [['modality_program' => 'New training']],
+            ])->assertStatus(500);
+        } finally {
+            UserTraining::flushEventListeners();
+            UserTraining::clearBootedModels();
+        }
+        $this->assertSame('Original', $person->fresh()->first_name);
+        $this->assertSame($training->id, $person->fresh()->trainings->sole()->id);
+        $this->assertDatabaseMissing('gp_users', ['email' => 'rollback@example.test']);
     }
 
     public function test_education_options_preserve_existing_inactive_item_only(): void

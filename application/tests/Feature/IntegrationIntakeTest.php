@@ -66,7 +66,7 @@ class IntegrationIntakeTest extends TestCase
 
     private function questionnaire(): array
     {
-        return ['email' => 'synthetic@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1'];
+        return ['email' => 'synthetic@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1', 'trainings' => [['modality_program' => 'Synthetic program'], ['training_center' => 'Synthetic center']]];
     }
 
     private function headers(string $id): array
@@ -108,7 +108,7 @@ class IntegrationIntakeTest extends TestCase
         $this->assertDatabaseCount('gp_group_applications', 1);
         $record = GroupApplication::sole();
         $this->assertSame($this->group->id, $record->group_id);
-        $this->assertSame('+12025550100', $record->phone_normalized);
+        $this->assertSame('12025550100', $record->phone_normalized);
         $this->assertNull($record->processed_at);
         $journal = IntegrationRequest::sole();
         $this->assertNotNull($journal->completed_at);
@@ -197,7 +197,7 @@ class IntegrationIntakeTest extends TestCase
         foreach (['psychologist_id', 'owner_id', 'group_id', 'processed_at', 'id', 'status'] as $field) {
             $this->application($this->fields() + [$field => 1])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
         }
-        foreach (['phone' => '02025550100', 'first_name' => '', 'group_uuid' => '1'] as $field => $value) {
+        foreach (['phone' => ' ', 'first_name' => '', 'group_uuid' => '1'] as $field => $value) {
             $this->application(array_replace($this->fields(), [$field => $value]))->assertStatus(422);
         }
         $this->assertDatabaseCount('gp_group_applications', 0);
@@ -350,7 +350,7 @@ class IntegrationIntakeTest extends TestCase
     {
         $files = ['certificate_0' => $this->file(), 'certificate_1' => $this->file("%PDF-1.4\nsecond")];
         $first = $this->psychologist(files: $files, id: 'certificates')->assertCreated();
-        $replay = $this->psychologist(files: ['certificate_8' => $files['certificate_1'], 'certificate_3' => $files['certificate_0']], id: 'certificates')->assertCreated();
+        $replay = $this->psychologist(files: ['certificate_1' => $files['certificate_1'], 'certificate_0' => $files['certificate_0']], id: 'certificates')->assertCreated();
         $this->assertSame($first->getContent(), $replay->getContent());
         $this->assertDatabaseCount('gp_user_documents', 2);
         $files['certificate_1'] = $this->file("%PDF-1.4\nchange");
@@ -451,6 +451,155 @@ class IntegrationIntakeTest extends TestCase
                 ['CONTENT_TYPE' => $multipart ? 'multipart/form-data' : 'application/json'] + $this->headers('query'), $multipart ? null : $body)
                 ->assertStatus(422)->assertJsonPath('code', 'validation_failed');
         }
+    }
+
+    public function test_training_list_contract_bounds_and_no_count_limit(): void
+    {
+        foreach (['modality_program', 'training_center', 'graduation_year', 'training_hours'] as $field) {
+            $this->psychologist($this->questionnaire() + [$field => 'legacy'])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+        $invalid = [null, '', 'text', (object) [], (object) ['0' => (object) ['modality_program' => 'X']],
+            [null], ['text'], [[]], [(object) []], [['modality_program' => '  ', 'training_hours' => null]],
+            [['unknown' => 'value']], [['id' => 1, 'training_hours' => 1]],
+            [['modality_program' => str_repeat('x', 256)]], [['training_center' => []]],
+            [['graduation_year' => -1]], [['graduation_year' => 65536]],
+            [['training_hours' => -1]], [['training_hours' => 4294967296]], [['training_hours' => 1.5]]];
+        foreach ($invalid as $trainings) {
+            $this->psychologist(array_replace($this->questionnaire(), ['trainings' => $trainings]))
+                ->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+        $this->assertDatabaseCount('gp_user_trainings', 0);
+        $trainings = array_fill(0, 35, ['training_hours' => 0]);
+        $trainings[0] = ['modality_program' => '  Program  ', 'graduation_year' => 65535, 'training_hours' => 4294967295];
+        $this->psychologist(array_replace($this->questionnaire(), ['trainings' => $trainings]))->assertCreated();
+        $user = User::where('email', 'synthetic@example.test')->sole();
+        $this->assertCount(35, $user->trainings);
+        $this->assertSame(range(0, 34), $user->trainings->pluck('position')->all());
+        $this->assertSame('Program', $user->trainings->first()->modality_program);
+        $this->assertSame(4294967295, $user->trainings->first()->training_hours);
+        foreach (['modality_program', 'training_center', 'graduation_year', 'training_hours'] as $field) {
+            $this->assertNull($user->getRawOriginal($field));
+        }
+        $this->psychologist(array_replace($this->questionnaire(), ['trainings' => []]))->assertOk();
+        $this->assertDatabaseCount('gp_user_trainings', 0);
+        $without = $this->questionnaire();
+        unset($without['trainings']);
+        $this->psychologist($without)->assertOk();
+        $this->assertDatabaseCount('gp_user_trainings', 0);
+        foreach (['certificate_0', 'certificate_9999999999999999999999999999'] as $field) {
+            $this->psychologist($without, [$field => $this->file()])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+    }
+
+    public function test_trainings_certificate_association_replay_and_replacement_preserve_documents(): void
+    {
+        $files = ['certificate_1' => $this->file("%PDF-1.4\nsecond"), 'diploma' => $this->file(), 'certificate_0' => $this->file()];
+        $this->psychologist(files: $files, id: 'ordered')->assertCreated();
+        $user = User::where('email', 'synthetic@example.test')->sole();
+        $originalIds = $user->trainings->pluck('id')->all();
+        $documents = $user->documents()->orderBy('id')->get();
+        $this->assertSame($originalIds[1], $documents[0]->user_training_id);
+        $this->assertNull($documents[1]->user_training_id);
+        $this->assertSame($originalIds[0], $documents[2]->user_training_id);
+        $this->assertTrue($documents[0]->training->is($user->trainings[1]));
+        $this->assertCount(1, $user->trainings[1]->documents);
+        $this->psychologist(files: array_reverse($files, true), id: 'ordered')->assertCreated();
+        $this->assertSame($originalIds, $user->fresh()->trainings->pluck('id')->all());
+        $this->assertDatabaseCount('gp_user_documents', 3);
+        $swapped = $files;
+        $swapped['certificate_0'] = $files['certificate_1'];
+        $swapped['certificate_1'] = $files['certificate_0'];
+        $this->psychologist(files: $swapped, id: 'ordered')->assertStatus(409)->assertJsonPath('code', 'idempotency_conflict');
+        foreach (['pending', 'rejected'] as $status) {
+            $user->update(['status' => $status]);
+            $this->psychologist(files: ['certificate_1' => $this->file()])->assertOk();
+            $this->assertSame('pending', $user->fresh()->status->value);
+            $newIds = $user->fresh()->trainings->pluck('id')->all();
+            $this->assertSame([], array_intersect($originalIds, $newIds));
+            $this->assertSame($newIds[1], $user->documents()->latest('id')->firstOrFail()->user_training_id);
+        }
+        foreach ($documents as $document) {
+            $this->assertNull($document->fresh()->user_training_id);
+            Storage::disk('local')->assertExists($document->path);
+        }
+        $this->assertDatabaseCount('gp_user_documents', 5);
+    }
+
+    public function test_all_training_values_and_order_are_part_of_semantic_idempotency(): void
+    {
+        $fields = $this->questionnaire();
+        $this->psychologist($fields, id: 'training-fingerprint')->assertCreated();
+        $variants = [[], array_reverse($fields['trainings']), array_slice($fields['trainings'], 0, 1), [...$fields['trainings'], ['training_hours' => 1]]];
+        foreach (['modality_program' => 'Changed', 'training_center' => 'Changed', 'graduation_year' => 2024, 'training_hours' => 120] as $key => $value) {
+            $changed = $fields['trainings'];
+            $changed[0][$key] = $value;
+            $variants[] = $changed;
+        }
+        foreach ($variants as $trainings) {
+            $this->psychologist(array_replace($fields, ['trainings' => $trainings]), id: 'training-fingerprint')
+                ->assertStatus(409)->assertJsonPath('code', 'idempotency_conflict');
+        }
+        $normalized = $fields;
+        $normalized['trainings'][0] = ['training_hours' => null, 'modality_program' => ' Synthetic program ', 'graduation_year' => null, 'training_center' => ''];
+        $this->psychologist($normalized, id: 'training-fingerprint')->assertCreated();
+        $this->assertDatabaseCount('gp_user_trainings', 2);
+        foreach (['diploma', 'license', 'registration'] as $type) {
+            $this->psychologist(files: [$type => $this->file()], id: 'file-'.$type)->assertOk();
+            $this->psychologist(files: [$type => $this->file("%PDF-1.4\nchanged")], id: 'file-'.$type)
+                ->assertStatus(409)->assertJsonPath('code', 'idempotency_conflict');
+        }
+    }
+
+    public function test_failed_resubmission_restores_trainings_links_and_files(): void
+    {
+        $this->psychologist(files: ['certificate_0' => $this->file()])->assertCreated();
+        $user = User::where('email', 'synthetic@example.test')->sole();
+        $trainingIds = $user->trainings->pluck('id')->all();
+        $document = $user->documents()->sole();
+        IntegrationRequest::updating(function () {
+            throw new \RuntimeException('Synthetic journal failure');
+        });
+        try {
+            $this->psychologist(files: ['certificate_1' => $this->file()])->assertStatus(500);
+        } finally {
+            IntegrationRequest::flushEventListeners();
+        }
+        $this->assertSame($trainingIds, $user->fresh()->trainings->pluck('id')->all());
+        $this->assertSame($trainingIds[0], $document->fresh()->user_training_id);
+        $this->assertSame([$document->path], Storage::disk('local')->allFiles());
+        $this->assertDatabaseCount('gp_user_documents', 1);
+        $this->assertDatabaseCount('gp_integration_requests', 1);
+    }
+
+    public function test_permissive_phones_preserve_raw_values_search_and_replay(): void
+    {
+        $admin = User::create(['email' => 'search@example.test', 'status' => 'approved', 'admin' => true]);
+        foreach (['80291234567' => '80291234567', '29 123-45-67' => '291234567', 'Call via reception' => '', 'Extension ABC 123' => '', '+12' => '12', str_repeat('x', 255) => ''] as $raw => $key) {
+            $raw = (string) $raw;
+            $id = (string) Str::uuid();
+            $fields = array_replace($this->fields(), ['phone' => '  '.$raw.'  ']);
+            $this->application($fields, $id)->assertCreated();
+            $record = GroupApplication::latest('id')->firstOrFail();
+            $this->assertSame($raw, $record->phone);
+            $this->assertSame($key, $record->phone_normalized);
+            $this->application($fields, $id)->assertCreated();
+            if ($key !== '') {
+                $this->application(array_replace($fields, ['phone' => implode('-', str_split($key))]), $id)->assertCreated();
+            } else {
+                $this->application(array_replace($fields, ['phone' => 'Changed text']), $id)->assertStatus(409)->assertJsonPath('code', 'idempotency_conflict');
+            }
+            foreach (array_unique([$raw, $key !== '' ? $key : $raw]) as $search) {
+                $this->actingAs($admin)->get('/admin/applications?search='.urlencode($search))->assertOk()
+                    ->assertViewHas('applications', fn ($rows) => $rows->pluck('id')->contains($record->id));
+            }
+        }
+        $this->assertDatabaseCount('gp_group_applications', 6);
+        foreach ([null, '', " \t\n", 12345, true, [], ['phone'], str_repeat('x', 256)] as $invalid) {
+            $this->application(array_replace($this->fields(), ['phone' => $invalid]))->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+        $fields = $this->fields();
+        unset($fields['phone']);
+        $this->application($fields)->assertStatus(422);
     }
 
     public function test_safe_logging_including_unexpected_database_exception(): void

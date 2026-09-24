@@ -152,8 +152,8 @@ links. Admin Applications navigation opens the global searchable read-only list
 and details with group/psychologist links. Lists remain constant-query and use
 the accepted Blade pages without changing prototype variants.
 
-Reusable phone normalization requires explicit international input and never
-invents a country code. Synthetic factories use reserved fictional phones.
+Participant intake accepts any trimmed nonempty phone string up to 255 characters.
+The best-effort digit search key may be empty and never invents a country code. Synthetic factories use reserved fictional phones.
 Daily overlap-protected applications:cleanup permanently removes only records
 strictly older than the current retention setting, including deleted parents;
 output is aggregate-only. Stage 11 adds public intake below, with no email, payment or lifecycle
@@ -178,7 +178,19 @@ transaction, including concurrent duplicates. Questionnaire repeats follow the
 pending/rejected/approved/disabled/deleted matrix; existing document policy and
 domain transitions are reused, with rollback cleanup for new files. Applications
 resolve immutable group UUIDs and derive ownership internally. Existing Stage 5
-and 10 pages/counters receive real incoming data without UI changes.
+and 10 pages/counters receive real incoming data.
+
+TASK-2026-09-24-02 adds ordered `gp_user_trainings`, certificate-to-training links
+and permissive participant phones. The additive migration preserves legacy users,
+documents/files and backfills position 0; old user training columns are deprecated
+and unused at runtime. Intake uses a `trainings` JSON list without a count cap and
+`certificate_N` mapped to `trainings[N]`. Resubmission replaces current trainings;
+old document links become null. Replay preserves IDs/files, and changed order or
+certificate association conflicts. Admin forms support ordered repeated blocks
+with ownership-checked IDs and transactional saves; detail/read-only profiles use
+the same approved shared views. WEBPAY and Stage 12 behavior are unchanged.
+Apply the additive migration before serving this code and coordinate the external
+public-site contract update; production deployment has not been performed.
 
 The public-site contract is `docs/integration.md`. Stage 11 itself adds no mail
 or payment effects. Public-site implementation/deployment is external; Stage 12

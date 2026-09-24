@@ -370,7 +370,11 @@ is unchanged. Stage 11 intake is documented below.
 The full public-site contract and synthetic curl examples are in
 [the integration guide](integration.md). Local endpoints use
 `http://localhost:8080/cabinet/api/v1/{psychologists,group-applications}`.
-Use `php artisan migrate --seed` (non-destructive) for the request journal.
+Use `php artisan migrate` (additive) for the request journal and training schema
+before serving current code. Do not use migrate:fresh on retained data. The training
+migration backfills legacy user fields to position 0 and links old certificates;
+old user columns are deprecated, not synchronized. Rollback preserves users/files
+but drops new trainings/links, so export new training data before rollback.
 
 No shared secret, signature, timestamp or client file hashes are required. Defaults
 are `INTEGRATION_RATE_PER_MINUTE=60` and empty `INTEGRATION_ALLOWED_IPS` (optional
@@ -384,7 +388,19 @@ questionnaire JSON in `payload` and optional flat `diploma`, `certificate_N`,
 `license`, `registration` file parts. PHP collapses duplicate flat names; use unique
 names and see the documented parser limitation in the integration guide.
 
+Send zero or more training objects in `payload.trainings`, each with at least one
+of modality_program/training_center/graduation_year/training_hours. Their list order
+maps `certificate_N` to `trainings[N]`; missing indices return 422. There is no
+application-level training-count cap. Omitted/empty lists clear current trainings
+on accepted resubmission; historical documents remain private and usable.
+Admin forms add/remove/reorder blocks and retain IDs of existing rows. Check errors
+on the correct block, foreign-ID rejection and profile display after saving.
+Participant phone accepts any nonempty trimmed string up to 255 characters,
+including local numbers/text; digit normalization is search-only. Check raw phone
+search and same-ID replay (digits when useful, trimmed raw text otherwise).
+
 ```bash
+docker compose exec -T php php artisan test --filter=UserTrainingMigrationTest
 docker compose exec -T php php artisan test --filter=IntegrationIntakeTest
 docker compose exec -T php php artisan test --filter=IntegrationConcurrencyTest
 docker compose exec -T php php artisan route:list --path=api -vv

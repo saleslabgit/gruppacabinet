@@ -8,7 +8,17 @@
 @csrf
 @if(!$creating) @method('PUT') @endif
 @endif
-<x-validation-summary :errors="$prototype ? array_intersect_key($errors, array_flip(['last_name', 'first_name', 'middle_name', 'phone', 'email', 'education_type_id', 'other_education', 'modality_program', 'training_center', 'graduation_year', 'training_hours', 'license_number', 'license_expires_at', 'group_leading_experience', 'groups_conducted_count', 'personal_data_consent_version', 'personal_data_consent_at', 'documents_confirmed', 'education_confirmed', 'live_session_ready', 'disabled'])) : $errors" />
+@php
+    $summaryErrors = [];
+    foreach ($prototype ? array_intersect_key($errors, array_flip(['last_name', 'first_name', 'middle_name', 'phone', 'email', 'education_type_id', 'other_education', 'trainings.0.graduation_year', 'trainings.0.training_hours', 'license_number', 'license_expires_at', 'group_leading_experience', 'groups_conducted_count', 'personal_data_consent_version', 'personal_data_consent_at', 'documents_confirmed', 'education_confirmed', 'live_session_ready', 'disabled'])) : $errors as $key => $message) {
+        $target = str_starts_with($key, 'trainings.') ? preg_replace('/\.([^.]+)/', '[$1]', $key) : $key;
+        if (str_starts_with($key, 'trainings.') && str_ends_with($key, '.id')) {
+            $target = substr($target, 0, -4);
+        }
+        $summaryErrors[$target] = $message;
+    }
+@endphp
+<x-validation-summary :errors="$summaryErrors" />
 <x-panel title="Анкета">
 <p class="meta mb-4">Email обязателен. Остальные поля могут быть не заполнены.</p>
 @if(!($creating ?? false) && $variant !== 'create')
@@ -42,18 +52,6 @@
 <x-input name="other_education" label="Другое образование" type="text" :value="$prototype ? ($variant === 'create' ? '' : $user['other_education']) : old('other_education', $user['other_education'])" :required="false" :error="$errors['other_education'] ?? null" />
 </div>
 <div class="col-md-6">
-<x-input name="modality_program" label="Модальность / программа" type="text" :value="$prototype ? ($variant === 'create' ? '' : $user['modality_program']) : old('modality_program', $user['modality_program'])" :required="false" :error="$errors['modality_program'] ?? null" />
-</div>
-<div class="col-md-6">
-<x-input name="training_center" label="Учебный центр" type="text" :value="$prototype ? ($variant === 'create' ? '' : $user['training_center']) : old('training_center', $user['training_center'])" :required="false" :error="$errors['training_center'] ?? null" />
-</div>
-<div class="col-md-6">
-<x-input name="graduation_year" label="Год окончания" type="number" :value="$prototype ? ($variant === 'create' ? '' : $user['graduation_year']) : old('graduation_year', $user['graduation_year'])" :required="false" :error="$errors['graduation_year'] ?? null" />
-</div>
-<div class="col-md-6">
-<x-input name="training_hours" label="Количество часов" type="number" :value="$prototype ? ($variant === 'create' ? '' : $user['training_hours']) : old('training_hours', $user['training_hours'])" :required="false" :error="$errors['training_hours'] ?? null" />
-</div>
-<div class="col-md-6">
 <x-input name="license_number" label="Номер лицензии" type="text" :value="$prototype ? ($variant === 'create' ? '' : $user['license_number']) : old('license_number', $user['license_number'])" :required="false" :error="$errors['license_number'] ?? null" />
 </div>
 <div class="col-md-6">
@@ -66,6 +64,25 @@
 <x-input name="groups_conducted_count" label="Количество проведённых групп" type="number" :value="$prototype ? ($variant === 'create' ? '' : $user['groups_conducted_count']) : old('groups_conducted_count', $user['groups_conducted_count'])" :required="false" :error="$errors['groups_conducted_count'] ?? null" />
 </div>
 </div>
+<section class="detail-section" id="trainings" tabindex="-1" data-trainings-editor>
+<h3>Дополнительное обучение</h3>
+<p class="meta">Добавьте программы в нужном порядке. При удалении обучения загруженные документы сохраняются.</p>
+@php
+    $trainings = $prototype ? ($variant === 'create' ? [] : $user['trainings']) : (session()->hasOldInput() ? old('trainings', []) : $user['trainings']);
+    $trainings = is_array($trainings) ? $trainings : [];
+@endphp
+@if(isset($errors['trainings']))<p class="text-danger" role="alert">{{ $errors['trainings'] }}</p>@endif
+<div data-training-list>
+@foreach($trainings as $index => $training)
+@include('shared.training-fields', ['training' => is_array($training) ? $training : [], 'index' => $index])
+@endforeach
+</div>
+<template data-training-template>
+@include('shared.training-fields', ['training' => [], 'index' => '__INDEX__', 'errors' => []])
+</template>
+<button type="button" class="btn btn-secondary" data-training-add>Добавить обучение</button>
+<noscript><p class="meta">Для добавления, удаления и перестановки обучений включите JavaScript.</p></noscript>
+</section>
 <h3 class="mt-3">Подтверждения и согласие</h3>
 <div class="row">
 <div class="col-md-6">

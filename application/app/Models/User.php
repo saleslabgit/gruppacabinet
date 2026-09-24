@@ -66,6 +66,12 @@ class User extends Authenticatable
         return $this->hasMany(UserDocument::class);
     }
 
+    /** @return HasMany<UserTraining, $this> */
+    public function trainings(): HasMany
+    {
+        return $this->hasMany(UserTraining::class)->orderBy('position');
+    }
+
     public function groups(): HasMany
     {
         return $this->hasMany(Group::class, 'owner_id');

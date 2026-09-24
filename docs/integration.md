@@ -36,7 +36,7 @@ are ignored. Preserve the request ID and logical fields/files on retries.
 Send exactly one scalar form field, `payload`, containing a JSON object:
 
 ```json
-{"email":"synthetic@example.test","personal_data_consent_at":"2026-09-21T12:00:00Z","personal_data_consent_version":"synthetic-v1"}
+{"email":"synthetic@example.test","personal_data_consent_at":"2026-09-21T12:00:00Z","personal_data_consent_version":"synthetic-v1","trainings":[{"modality_program":"Synthetic program","training_center":"Synthetic center","graduation_year":2024,"training_hours":120}]}
 ```
 
 Use UTF-8 JSON. Questionnaire fields belong directly in this object; additional
@@ -51,12 +51,21 @@ booleans. Send the complete current questionnaire on resubmission.
 | `personal_data_consent_version` | Required nonempty text, max 255. |
 | `last_name`, `first_name`, `middle_name`, `phone` | Optional nullable text, max 255 each. Questionnaire phone is not required to satisfy the participant-phone rule. |
 | `education_type_code` | Optional nullable stable dictionary item code, max 255. See mapping below. |
-| `other_education`, `modality_program`, `training_center`, `license_number` | Optional nullable text, max 255 each. |
-| `graduation_year` | Optional nullable integer, 0–65535. |
-| `training_hours`, `groups_conducted_count` | Optional nullable integer, 0–4294967295. |
+| `other_education`, `license_number` | Optional nullable text, max 255 each. |
+| `groups_conducted_count` | Optional nullable integer, 0–4294967295. |
+| `trainings` | Optional JSON list of training objects; omitted or `[]` means no current trainings. No application-level count cap. |
 | `license_expires_at` | Optional nullable date `YYYY-MM-DD`. |
 | `group_leading_experience` | Optional nullable text, max 16000. |
 | `documents_confirmed`, `education_confirmed`, `live_session_ready` | Optional nullable booleans; JSON true/false preferred (0/1 also accepted). |
+
+Each `trainings[N]` is a JSON object with only these optional nullable fields:
+`modality_program` and `training_center` (strings, max 255), `graduation_year`
+(integer 0–65535), `training_hours` (integer 0–4294967295). At least one meaningful
+non-null value is required; zero is meaningful. Whitespace-only text becomes null.
+Null/scalar/object collections, array items, empty objects, unknown keys and IDs
+are rejected. List order defines zero-based `position`. The four legacy top-level
+training fields are rejected as unexpected fields. HTTP/PHP size/input/upload
+limits still apply; no arbitrary training-count limit is introduced.
 
 Nullable text is trimmed; an empty string becomes null. Lifecycle, tariff,
 access, password, `id`, `education_type_id` and other internal fields are rejected.
@@ -73,12 +82,16 @@ Files are optional: zero uploads are accepted. Use unique flat multipart file fi
 | Field | Stored type |
 |---|---|
 | `diploma` | `diploma` |
-| `certificate_0`, `certificate_1`, ... | `certificate` |
+| `certificate_0`, `certificate_1`, ... | `certificate`, linked to `trainings[N]` |
 | `license` | `license` |
 | `registration` | `registration` |
 
 Certificate indices are nonnegative decimal integers without leading zeros;
-gaps are allowed. Arrays/nested files, unknown fields, invalid patterns and failed
+gaps in uploaded certificates are allowed only where the corresponding training
+exists. `certificate_N` must reference `trainings[N]` in the same request, otherwise
+422 `validation_failed`. A training without a certificate is valid. Multipart
+file order is irrelevant. Diploma/license/registration have no training link.
+Arrays/nested files, unknown fields, invalid patterns and failed
 uploads return 422 `validation_failed`. Do not send a `documents` manifest,
 `questionnaire` wrapper, size, hash or document descriptors.
 
@@ -103,7 +116,12 @@ are a known parsing limitation, not an application-level rejection guarantee.
 
 Files use random private local paths. No public URL or storage path is returned.
 Admins use existing protected document routes. Repeated submissions append files;
-they do not remove/replace existing documents. Idempotent replay appends nothing.
+they do not remove/replace existing documents. Accepted pending/rejected
+resubmissions replace the entire current training collection, including clearing
+it when omitted. Removed training IDs cause old certificate links to become null;
+new certificates link to the new current list. Unlinked historical certificates
+remain usable. Profile/training replacement, uploads and journal completion share
+one transaction. Idempotent replay recreates no trainings and appends nothing.
 A failed transaction cleans the files written by that request, including failures
 after multiple uploads or during journal completion.
 
@@ -136,10 +154,13 @@ Send a JSON object with **only** these four required fields:
 
 Use a real cabinet `public_uuid` for your synthetic test group; the UUID above is
 an illustrative placeholder. Names and phone are trimmed, nonempty strings up
-to 255 characters. Phone must contain an explicit international prefix `+` or
-`00`, followed by 7–15 digits with a nonzero first digit. Spaces, parentheses,
-periods and hyphens are allowed and removed in the normalized phone. No country
-code is inferred. Original display formatting is retained on first submission.
+to 255 characters. Phone accepts **any scalar string** that is nonempty after
+trimming; no international prefix, country code or digit-count syntax is required.
+Local values such as `80291234567` and `29 123-45-67`, short numbers and arbitrary
+text are accepted. The trimmed submitted value is preserved in `phone`.
+`phone_normalized` is only a best-effort search key: phone-like input yields digits
+(with a leading international `00` removed); other text yields `''`. No country
+code is inferred or prepended. Raw admin phone search remains available.
 
 The public-site administrator copies **ID группы для gruppa.info** from the
 cabinet's group page into the public site's `cabinet_group_uuid` field (or its
@@ -161,10 +182,15 @@ psychologists cannot access it. The group lifecycle is unchanged.
 ## Idempotency and retries
 
 The MySQL journal has a globally unique, case-sensitive request ID. Its semantic
-fingerprint includes the endpoint and normalized validated fields. Documents
-include type, sanitized original name, server-observed size and content hash,
-sorted independently of multipart order/field names. JSON formatting and multipart boundaries do not
-change the fingerprint; participant phone display punctuation is normalized.
+fingerprint includes the endpoint, normalized validated fields, ordered training
+values and positions. Documents include type, training position for certificates,
+sanitized original name, server-observed size and content hash, sorted independently
+of multipart order. JSON formatting, object-key order and multipart boundaries do
+not change the fingerprint. Adding/removing/reordering/changing trainings or
+swapping certificate contents between training indices causes 409; changing any
+diploma/license/registration file also conflicts. Participant phone punctuation is
+ignored when a nonempty digit key exists; otherwise the trimmed raw phone is used,
+so arbitrary text is accepted without collapsing different text into one request.
 
 A completed same-ID/same-fingerprint request returns the **exact original status
 and JSON body**, without rerunning business logic. This remains true if business
@@ -188,7 +214,7 @@ when resolving an ambiguous timeout; do not generate a new ID just to bypass 409
 All Laravel `/api/v1/*` errors use JSON, without login redirects or HTML:
 
 ```json
-{"code":"validation_failed","message":"Validation failed.","errors":{"phone":["An explicit international phone is required."]},"request_id":"example-application-001"}
+{"code":"validation_failed","message":"Validation failed.","errors":{"phone":["Invalid or missing value."]},"request_id":"example-application-001"}
 ```
 
 `errors` appears for validation when available; `request_id` is null if missing
@@ -237,6 +263,29 @@ curl --silent --show-error --include \
 
 Omit file parts for a questionnaire-only submission. Let curl create its multipart
 boundary. A retry may use a different boundary with the same logical content.
+
+## Migration and deployment
+
+Apply the additive `2026_09_24_000001_create_user_trainings` migration **before**
+serving the new application code, with intake/admin writes quiesced during deployment.
+It creates `gp_user_trainings` (unique user/position), adds nullable
+`gp_user_documents.user_training_id` with `ON DELETE SET NULL`, and copies each
+user's non-null legacy training set to position 0 (including soft-deleted users).
+All that user's existing certificates are linked to that sole backfilled training;
+certificates for users without legacy data remain unlinked. Users, documents and
+private files are retained. Legacy values are copied exactly, including any old
+empty strings; new intake/admin rows must contain a meaningful value.
+
+The four old `gp_users` columns remain deprecated compatibility data, never read,
+written or synchronized by runtime code. Current training data lives only in
+`gp_user_trainings`. Rollback removes the new association/table but preserves
+users/documents/files and the original legacy columns; it **cannot** encode new
+multiple trainings in those stale columns. Back up/export new training data before
+rolling back. Coordinate the external public-site handler's switch to `trainings`;
+its implementation is outside this repository. Existing journal hashes are not
+rewritten: retries recorded under the previous contract may return 409 after this
+fingerprint change. Reconcile in-flight submissions before switching producers;
+do not issue a new request ID blindly after an ambiguous prior success.
 
 ## Operations
 

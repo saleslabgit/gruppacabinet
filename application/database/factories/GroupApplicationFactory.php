@@ -21,7 +21,7 @@ class GroupApplicationFactory extends Factory
             'group_id' => fn () => throw new LogicException('Associate an existing synthetic group using for($group).'),
             'last_name' => 'Тестовый участник', 'first_name' => 'Синтетический',
             'phone' => $phone,
-            'phone_normalized' => fn (array $attributes) => app(PhoneNormalizer::class)->normalizeForStorage($attributes['phone']),
+            'phone_normalized' => fn (array $attributes) => app(PhoneNormalizer::class)->digitsForSearch($attributes['phone']),
             'processed_at' => null,
         ];
     }

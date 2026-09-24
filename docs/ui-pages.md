@@ -653,3 +653,14 @@ covers old awaiting_payment and draft records using the configured threshold.
 Real awaiting-payment summaries explain that editing unlocks after trusted WEBPAY
 confirmation. The existing detail link to the latest placement payment is retained.
 No layout, responsive structure or prototype state catalogue changed.
+
+## Повторяемые обучения — TASK-2026-09-24-02
+
+В существующей форме психолога используются упорядоченные блоки «Дополнительное
+обучение»: добавить, изменить, удалить, выше/ниже. При удалении блока документы
+сохраняются. Ошибки и старый ввод привязаны к соответствующему блоку; сохраняемые
+строки сохраняют ID. Используются прежние поля, сетка и visual tokens; на телефоне
+поля переходят в одну колонку. Для добавления/удаления/перестановки нужен JavaScript.
+Карточка и «Мои данные» показывают весь текущий список, включая пустое состояние.
+Те же prototype views демонстрируют несколько обучений, пустое создание,
+validation-ошибки первого блока и длинные значения. Каталог маршрутов не менялся.

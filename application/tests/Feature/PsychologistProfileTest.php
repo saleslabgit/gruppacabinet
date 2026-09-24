@@ -51,8 +51,7 @@ class PsychologistProfileTest extends TestCase
         $education = DictionaryItem::query()->create(['dictionary_id' => $dictionary->id, 'code' => 'degree', 'name' => 'Stored education', 'active' => false]);
         $fields = [
             'last_name' => 'Surname', 'first_name' => 'First', 'middle_name' => 'Middle', 'phone' => '+375291234567',
-            'other_education' => 'Other education', 'modality_program' => 'Program', 'training_center' => 'Center',
-            'graduation_year' => 2011, 'training_hours' => 678, 'license_number' => 'LICENSE-123',
+            'other_education' => 'Other education', 'license_number' => 'LICENSE-123',
             'license_expires_at' => '2030-12-01', 'group_leading_experience' => 'Stored experience',
             'groups_conducted_count' => 19, 'personal_data_consent_version' => 'consent-v3',
         ];
@@ -60,11 +59,14 @@ class PsychologistProfileTest extends TestCase
             'education_type_id' => $education->id, 'documents_confirmed' => true, 'education_confirmed' => false,
             'live_session_ready' => null, 'personal_data_consent_at' => '2026-09-21 09:30:00',
         ]);
+        $this->owner->trainings()->create(['position' => 1, 'modality_program' => 'Second program', 'training_hours' => 678]);
+        $this->owner->trainings()->create(['position' => 0, 'modality_program' => 'First program', 'training_center' => 'Center', 'graduation_year' => 2011]);
         $other = User::query()->create(['email' => 'other@example.test', 'first_name' => 'OtherPrivateName']);
         $ownDocument = $this->document($this->owner);
         $otherDocument = $this->document($other);
         $response = $this->actingAs($this->owner)->get('/profile?user_id='.$other->id.'&id='.$other->id)
             ->assertOk()->assertViewIs('psychologist.profile.show')->assertSee($this->owner->email)
+            ->assertSeeInOrder(['First program', 'Second program'])->assertSee('Center')->assertSee('2011')->assertSee('678')
             ->assertSee('Stored education')->assertSee('21.09.2026 12:30')->assertSee('Да')->assertSee('Нет')->assertSee('Не указано')
             ->assertSee($ownDocument->original_name)->assertSee('2 КБ')->assertSee('Диплом')
             ->assertSee(route('psychologist.documents.view', $ownDocument), false)
@@ -77,7 +79,7 @@ class PsychologistProfileTest extends TestCase
             'Редактировать', 'Загрузить', 'Удалить', 'type="file"', 'data-noop', '_prototype', '/admin/'] as $hidden) {
             $response->assertDontSee($hidden, false);
         }
-        $this->assertSame(['educationType', 'documents'], array_keys(Auth::user()->getRelations()));
+        $this->assertSame(['educationType', 'trainings', 'documents'], array_keys(Auth::user()->getRelations()));
         foreach (['password', 'remember_token', 'active_email'] as $key) {
             $this->assertArrayNotHasKey($key, $response->viewData('user'));
         }
