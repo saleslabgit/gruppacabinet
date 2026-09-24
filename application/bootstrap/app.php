@@ -29,7 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(replace: [StartSession::class => App\Http\Middleware\StartSession::class]);
-        // Preserve the exact signed manifest; API DTOs normalize validated fields explicitly.
+        // API DTOs validate payload shape and normalize questionnaire fields explicitly.
         $middleware->trimStrings(except: [fn ($request) => ApiErrors::matches($request) || $request->is('webpay/notify')]);
         $middleware->convertEmptyStringsToNull(except: [fn ($request) => ApiErrors::matches($request) || $request->is('webpay/notify')]);
         $middleware->redirectGuestsTo(fn () => route('login'));

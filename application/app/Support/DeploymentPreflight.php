@@ -58,7 +58,6 @@ class DeploymentPreflight
         };
         $add('Mail delivery configured', ! $deployment || $mailConfigured,
             in_array($transport, ['smtp', 'sendmail'], true) ? $transport : 'unsupported');
-        $add('Integration secret', ! $deployment || $this->configured('integration.secret'), $this->presence('integration.secret'));
         $environment = config('webpay.environment');
         $add('WEBPAY environment', in_array($environment, ['sandbox', 'production'], true),
             in_array($environment, ['sandbox', 'production'], true) ? $environment : 'invalid');

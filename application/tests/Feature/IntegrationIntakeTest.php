@@ -28,8 +28,6 @@ class IntegrationIntakeTest extends TestCase
 {
     use RefreshDatabase;
 
-    private string $secret;
-
     private array $temporaryFiles = [];
 
     private Group $group;
@@ -43,8 +41,7 @@ class IntegrationIntakeTest extends TestCase
             Setting::create(['key' => $key, 'type' => 'integer', 'value' => (string) $value]);
         }
         URL::forceRootUrl('http://localhost');
-        $this->secret = bin2hex(random_bytes(32));
-        config(['integration.secret' => $this->secret, 'integration.rate_per_minute' => 10000]);
+        config(['integration.allowed_ips' => [], 'integration.rate_per_minute' => 10000]);
         Storage::fake('local');
         Mail::fake();
         Queue::fake();
@@ -72,17 +69,15 @@ class IntegrationIntakeTest extends TestCase
         return ['email' => 'synthetic@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1'];
     }
 
-    private function headers(string $endpoint, string $payload, string $id, ?int $time = null): array
+    private function headers(string $id): array
     {
-        $time ??= now()->timestamp;
-
-        return ['HTTP_X_REQUEST_ID' => $id, 'HTTP_X_TIMESTAMP' => (string) $time, 'HTTP_X_SIGNATURE' => hash_hmac('sha256', implode("\n", ['v1', 'POST', '/api/v1/'.$endpoint, $time, $id, hash('sha256', $payload)]), $this->secret)];
+        return ['HTTP_X_REQUEST_ID' => $id];
     }
 
-    private function application(?array $fields = null, ?string $id = null, array $overrides = [], ?int $time = null)
+    private function application(?array $fields = null, ?string $id = null, array $overrides = [])
     {
         $body = json_encode($fields ?? $this->fields());
-        $headers = array_replace($this->headers('group-applications', $body, $id ?? (string) Str::uuid(), $time), $overrides);
+        $headers = array_replace($this->headers($id ?? (string) Str::uuid()), $overrides);
         $headers = array_filter($headers, fn ($value) => $value !== null);
 
         return $this->call('POST', '/api/v1/group-applications', [], [], [], ['CONTENT_TYPE' => 'application/json'] + $headers, $body);
@@ -94,24 +89,14 @@ class IntegrationIntakeTest extends TestCase
         file_put_contents($path, $contents);
         $this->temporaryFiles[] = $path;
 
-        return new UploadedFile($path, 'unsigned-name.txt', 'text/plain', null, true);
+        return new UploadedFile($path, "../synthetic\x01.pdf", 'text/plain', null, true);
     }
 
-    private function manifest(array $questionnaire, array $files): array
+    private function psychologist(?array $questionnaire = null, array $files = [], ?string $id = null, array $extra = [])
     {
-        $documents = [];
-        foreach ($files as $field => $file) {
-            $documents[] = ['field' => $field, 'type' => 'diploma', 'original_name' => '../signed.pdf', 'size' => $file->getSize(), 'sha256' => hash_file('sha256', $file->getPathname())];
-        }
+        $payload = ' '.json_encode($questionnaire ?? $this->questionnaire())."\n";
 
-        return ['questionnaire' => $questionnaire, 'documents' => $documents];
-    }
-
-    private function psychologist(?array $questionnaire = null, array $files = [], ?string $id = null, ?array $manifest = null, array $extra = [])
-    {
-        $payload = ' '.json_encode($manifest ?? $this->manifest($questionnaire ?? $this->questionnaire(), $files))."\n";
-
-        return $this->call('POST', '/api/v1/psychologists', ['payload' => $payload] + $extra, [], $files, ['CONTENT_TYPE' => 'multipart/form-data; boundary='.Str::random(20)] + $this->headers('psychologists', $payload, $id ?? (string) Str::uuid()));
+        return $this->call('POST', '/api/v1/psychologists', ['payload' => $payload] + $extra, [], $files, ['CONTENT_TYPE' => 'multipart/form-data; boundary='.Str::random(20)] + $this->headers($id ?? (string) Str::uuid()));
     }
 
     public function test_application_replay_ui_counters_and_no_side_effects(): void
@@ -160,33 +145,22 @@ class IntegrationIntakeTest extends TestCase
         $this->assertDatabaseCount('gp_group_applications', 3);
     }
 
-    public function test_protocol_headers_and_timestamp_boundaries(): void
+    public function test_public_protocol_requires_only_request_id_and_ignores_legacy_headers(): void
     {
-        foreach ([['HTTP_X_REQUEST_ID', null, 400, 'missing_request_id'], ['HTTP_X_REQUEST_ID', 'bad id', 400, 'invalid_request_id'], ['HTTP_X_REQUEST_ID', str_repeat('x', 129), 400, 'invalid_request_id'], ['HTTP_X_TIMESTAMP', null, 401, 'missing_timestamp'], ['HTTP_X_TIMESTAMP', '1.0', 401, 'invalid_timestamp'], ['HTTP_X_SIGNATURE', null, 401, 'missing_signature'], ['HTTP_X_SIGNATURE', str_repeat('0', 64), 401, 'invalid_signature']] as [$header, $value, $status, $code]) {
-            $this->application(overrides: [$header => $value])->assertStatus($status)->assertJsonPath('code', $code)->assertHeader('Content-Type', 'application/json');
+        $this->assertArrayNotHasKey('secret', config('integration'));
+        $this->assertArrayNotHasKey('timestamp_tolerance', config('integration'));
+        $this->application()->assertCreated();
+        $this->psychologist()->assertCreated();
+        $this->application(overrides: ['HTTP_X_TIMESTAMP' => 'invalid', 'HTTP_X_SIGNATURE' => 'invalid'])->assertCreated();
+        foreach ([[null, 'missing_request_id'], ['bad id', 'invalid_request_id'], ['.bad', 'invalid_request_id'], [str_repeat('x', 129), 'invalid_request_id']] as [$id, $code]) {
+            $this->application(overrides: ['HTTP_X_REQUEST_ID' => $id])->assertStatus(400)->assertJsonPath('code', $code)->assertHeader('Content-Type', 'application/json');
+            $this->call('POST', '/api/v1/psychologists', ['payload' => json_encode($this->questionnaire())], [], [],
+                ['CONTENT_TYPE' => 'multipart/form-data'] + ($id === null ? [] : $this->headers($id)))
+                ->assertStatus(400)->assertJsonPath('code', $code);
         }
-        $this->travelTo(now()->startOfSecond());
-        foreach ([-300, 300] as $offset) {
-            $this->application(time: now()->timestamp + $offset)->assertCreated();
+        foreach (['_', '-', 'A.b:C-0_1', str_repeat('x', 128)] as $id) {
+            $this->application(id: $id)->assertCreated();
         }
-        foreach ([-301, 301] as $offset) {
-            $this->application(time: now()->timestamp + $offset)->assertUnauthorized()->assertJsonPath('code', 'expired_timestamp');
-        }
-        config(['integration.secret' => '']);
-        $this->application()->assertStatus(503)->assertJsonPath('code', 'integration_unavailable');
-    }
-
-    public function test_signature_binds_endpoint_timestamp_request_id_and_exact_body(): void
-    {
-        $body = json_encode($this->fields());
-        $headers = $this->headers('group-applications', $body, 'bound');
-        foreach (['HTTP_X_REQUEST_ID' => 'different', 'HTTP_X_TIMESTAMP' => (string) (now()->timestamp - 1)] as $key => $value) {
-            $this->application(id: 'bound', overrides: [$key => $value, 'HTTP_X_SIGNATURE' => $headers['HTTP_X_SIGNATURE']])->assertUnauthorized();
-        }
-        $this->application(id: 'bound', overrides: ['HTTP_X_SIGNATURE' => $this->headers('psychologists', $body, 'bound')['HTTP_X_SIGNATURE']])->assertUnauthorized();
-        $fields = $this->fields();
-        $fields['first_name'] = 'Tampered';
-        $this->application($fields, 'bound', ['HTTP_X_SIGNATURE' => $headers['HTTP_X_SIGNATURE']])->assertUnauthorized();
     }
 
     public function test_ip_allowlist_limiter_and_json_routing_errors(): void
@@ -197,6 +171,8 @@ class IntegrationIntakeTest extends TestCase
         $this->application()->assertCreated();
         config(['integration.rate_per_minute' => 1]);
         $this->application()->assertStatus(429)->assertJsonPath('code', 'rate_limited');
+        $this->psychologist()->assertCreated();
+        $this->psychologist()->assertStatus(429)->assertJsonPath('code', 'rate_limited');
         $this->get('/api/v1/unknown')->assertNotFound()->assertJsonPath('code', 'not_found');
         $this->get('/api/v1/group-applications')->assertStatus(405)->assertJsonPath('code', 'method_not_allowed');
         foreach (['api/v1/group-applications', 'api/v1/psychologists'] as $uri) {
@@ -228,9 +204,9 @@ class IntegrationIntakeTest extends TestCase
         $this->assertDatabaseCount('gp_integration_requests', 0);
     }
 
-    public function test_new_psychologist_private_signed_files_and_boundary_independent_replay(): void
+    public function test_new_psychologist_private_files_and_boundary_independent_replay(): void
     {
-        $files = ['document_0' => $this->file(), 'document_1' => $this->file()];
+        $files = ['diploma' => $this->file(), 'certificate_0' => $this->file()];
         $questionnaire = $this->questionnaire();
         $questionnaire['email'] = '  SYNTHETIC@example.test  ';
         $first = $this->psychologist($questionnaire, $files, 'psych-one')->assertCreated()->assertJsonPath('data.status', 'pending');
@@ -245,9 +221,9 @@ class IntegrationIntakeTest extends TestCase
         $this->assertSame('2026-09-21 12:00:00', $user->personal_data_consent_at->format('Y-m-d H:i:s'));
         $this->assertDatabaseCount('gp_user_documents', 2);
         foreach ($user->documents as $document) {
-            $this->assertSame('signed.pdf', $document->original_name);
+            $this->assertSame('synthetic.pdf', $document->original_name);
             $this->assertSame('application/pdf', $document->mime_type);
-            $this->assertStringNotContainsString('signed', $document->path);
+            $this->assertStringNotContainsString('synthetic', $document->path);
             Storage::disk('local')->assertExists($document->path);
             Storage::disk('public')->assertMissing($document->path);
         }
@@ -256,7 +232,7 @@ class IntegrationIntakeTest extends TestCase
         $doc = $user->documents->first();
         $this->get('/admin/psychologists/'.$user->id.'/documents/'.$doc->id.'/view')->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertStringNotContainsString('synthetic@example.test', IntegrationRequest::sole()->toJson());
-        $this->assertStringNotContainsString('signed.pdf', IntegrationRequest::sole()->toJson());
+        $this->assertStringNotContainsString('synthetic.pdf', IntegrationRequest::sole()->toJson());
         Mail::assertNothingSent();
         Mail::assertNothingQueued();
         Queue::assertNothingPushed();
@@ -270,7 +246,7 @@ class IntegrationIntakeTest extends TestCase
         $password = $user->password;
         foreach (['pending', 'rejected'] as $status) {
             $user->update(['status' => $status]);
-            $this->psychologist($this->questionnaire() + ['last_name' => 'Updated'], ['document_0' => $this->file()])->assertOk();
+            $this->psychologist($this->questionnaire() + ['last_name' => 'Updated'], ['diploma' => $this->file()])->assertOk();
             $user->refresh();
             $this->assertSame('pending', $user->status->value);
             $this->assertTrue($user->free);
@@ -290,7 +266,7 @@ class IntegrationIntakeTest extends TestCase
                 $user->delete();
             }
             $before = $user->fresh()->getAttributes();
-            $this->psychologist(files: ['document_0' => $this->file()])->assertStatus(409)->assertJsonPath('code', 'psychologist_conflict');
+            $this->psychologist(files: ['diploma' => $this->file()])->assertStatus(409)->assertJsonPath('code', 'psychologist_conflict');
             $this->assertSame($before, $user->fresh()->getAttributes());
             $this->assertDatabaseCount('gp_user_documents', 2);
         }
@@ -337,43 +313,54 @@ class IntegrationIntakeTest extends TestCase
         $this->assertNull($user->fresh()->education_type_id);
     }
 
-    public function test_multipart_integrity_and_unsigned_fields(): void
+    public function test_multipart_rejects_invalid_fields_arrays_and_legacy_manifest(): void
     {
-        $files = ['document_0' => $this->file()];
-        $manifest = $this->manifest($this->questionnaire(), $files);
-        $this->psychologist(files: ['document_0' => $this->file('tampered')], manifest: $manifest)->assertUnauthorized();
-        $this->psychologist(files: [], manifest: $manifest)->assertUnauthorized();
-        $this->psychologist(files: $files, manifest: $this->manifest($this->questionnaire(), []))->assertUnauthorized();
-        $duplicate = $manifest;
-        $duplicate['documents'][] = $duplicate['documents'][0];
-        $this->psychologist(files: $files, manifest: $duplicate)->assertUnauthorized();
-        $this->psychologist(extra: ['email' => 'unsigned@example.test'])->assertStatus(422);
-        foreach (['type' => 'license', 'original_name' => 'tampered.pdf', 'size' => 0, 'sha256' => str_repeat('0', 64)] as $key => $value) {
-            $original = json_encode($manifest);
-            $changed = $manifest;
-            $changed['documents'][0][$key] = $value;
-            $this->call('POST', '/api/v1/psychologists', ['payload' => json_encode($changed)], [], $files, ['CONTENT_TYPE' => 'multipart/form-data'] + $this->headers('psychologists', $original, 'tampered-'.$key))->assertUnauthorized();
+        foreach (['unknown', 'document_0', 'certificate', 'certificate_-1', 'certificate_01', 'certificate_1x', 'certificate_1.0', 'certificate_'] as $field) {
+            $this->psychologist(files: [$field => $this->file()])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
         }
+        foreach (['diploma', 'certificate_0', 'license', 'registration'] as $field) {
+            $this->psychologist(files: [$field => [$this->file(), $this->file()]])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+        $this->psychologist(extra: ['email' => 'extra@example.test'])->assertStatus(422);
+        $this->psychologist(['questionnaire' => $this->questionnaire(), 'documents' => []])->assertStatus(422);
+        $this->psychologist($this->questionnaire() + ['documents' => []])->assertStatus(422);
+        $failed = new UploadedFile($this->file()->getPathname(), 'failed.pdf', 'application/pdf', UPLOAD_ERR_PARTIAL, true);
+        $this->psychologist(files: ['diploma' => $failed])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
         $this->assertDatabaseCount('gp_user_documents', 0);
+        $this->assertDatabaseCount('gp_integration_requests', 0);
     }
 
     public function test_document_content_size_types_and_validation(): void
     {
         foreach (PsychologistDocumentTest::allowedFiles() as [$name, $bytes, $mime]) {
-            $files = ['document_0' => $this->file($bytes)];
-            foreach (['diploma', 'certificate', 'license', 'registration'] as $type) {
-                $manifest = $this->manifest($this->questionnaire(), $files);
-                $manifest['documents'][0]['type'] = $type;
-                $this->psychologist(files: $files, manifest: $manifest)->assertSuccessful();
+            foreach (['diploma', 'certificate_0', 'certificate_1', 'license', 'registration'] as $field) {
+                $this->psychologist(files: [$field => $this->file($bytes)])->assertSuccessful();
+                $document = User::where('email', 'synthetic@example.test')->sole()->documents()->latest('id')->firstOrFail();
+                $this->assertSame(str_starts_with($field, 'certificate_') ? 'certificate' : $field, $document->type);
+                $this->assertSame($mime, $document->mime_type);
+                $this->assertSame(strlen($bytes), $document->size);
             }
         }
-        $this->psychologist(files: ['document_0' => $this->file('<?php echo "bad";')])->assertStatus(422);
+        $this->psychologist(files: ['diploma' => $this->file('<?php echo "bad";')])->assertStatus(422);
         config(['psychologist_documents.max_kb' => 1]);
-        $this->psychologist(files: ['document_0' => $this->file("%PDF-1.4\n".str_repeat(' ', 2048))])->assertStatus(422);
-        $files = ['document_0' => $this->file()];
-        $manifest = $this->manifest($this->questionnaire(), $files);
-        $manifest['documents'][0]['type'] = 'unknown';
-        $this->psychologist(files: $files, manifest: $manifest)->assertStatus(422);
+        $this->psychologist(files: ['diploma' => $this->file("%PDF-1.4\n".str_repeat(' ', 2048))])->assertStatus(422);
+    }
+
+    public function test_multiple_certificates_and_server_observed_file_fingerprint(): void
+    {
+        $files = ['certificate_0' => $this->file(), 'certificate_1' => $this->file("%PDF-1.4\nsecond")];
+        $first = $this->psychologist(files: $files, id: 'certificates')->assertCreated();
+        $replay = $this->psychologist(files: ['certificate_8' => $files['certificate_1'], 'certificate_3' => $files['certificate_0']], id: 'certificates')->assertCreated();
+        $this->assertSame($first->getContent(), $replay->getContent());
+        $this->assertDatabaseCount('gp_user_documents', 2);
+        $files['certificate_1'] = $this->file("%PDF-1.4\nchange");
+        $this->psychologist(files: $files, id: 'certificates')->assertStatus(409)->assertJsonPath('code', 'idempotency_conflict');
+        $this->assertDatabaseCount('gp_user_documents', 2);
+        $this->assertCount(2, Storage::disk('local')->allFiles());
+        $journal = IntegrationRequest::sole()->toJson();
+        foreach (['synthetic@example.test', 'synthetic.pdf', '%PDF', 'personal_data_consent'] as $private) {
+            $this->assertStringNotContainsString($private, $journal);
+        }
     }
 
     public function test_rollback_after_multiple_files_and_journal_failure_allows_retry(): void
@@ -382,7 +369,7 @@ class IntegrationIntakeTest extends TestCase
             throw new \RuntimeException('Synthetic failure after uploads');
         });
         try {
-            $this->psychologist(files: ['document_0' => $this->file(), 'document_1' => $this->file()], id: 'retry')->assertStatus(500)->assertJsonPath('code', 'internal_error');
+            $this->psychologist(files: ['diploma' => $this->file(), 'certificate_0' => $this->file()], id: 'retry')->assertStatus(500)->assertJsonPath('code', 'internal_error');
         } finally {
             IntegrationRequest::flushEventListeners();
         }
@@ -406,7 +393,7 @@ class IntegrationIntakeTest extends TestCase
             return $real->upload(...$args);
         });
         $this->app->instance(PsychologistDocuments::class, $mock);
-        $this->psychologist(files: ['document_0' => $this->file(), 'document_1' => $this->file()])->assertStatus(500);
+        $this->psychologist(files: ['diploma' => $this->file(), 'certificate_0' => $this->file()])->assertStatus(500);
         $this->assertSame([], Storage::disk('local')->allFiles());
         $this->assertDatabaseCount('gp_user_documents', 0);
         $this->assertDatabaseCount('gp_integration_requests', 0);
@@ -425,7 +412,7 @@ class IntegrationIntakeTest extends TestCase
         $failing->shouldReceive('exists')->andReturnUsing(fn ($path) => $disk->exists($path));
         $failing->shouldReceive('delete')->andReturnUsing(fn ($path) => $disk->delete($path));
         Storage::shouldReceive('disk')->with('local')->andReturn($failing);
-        $this->psychologist(files: ['document_0' => $this->file(), 'document_1' => $this->file()])->assertStatus(500);
+        $this->psychologist(files: ['diploma' => $this->file(), 'certificate_0' => $this->file()])->assertStatus(500);
         $this->assertSame([], $disk->allFiles());
         $this->assertDatabaseCount('gp_user_documents', 0);
         $this->assertDatabaseCount('gp_integration_requests', 0);
@@ -446,22 +433,30 @@ class IntegrationIntakeTest extends TestCase
     public function test_malformed_payloads_and_media_types_are_safe_json(): void
     {
         foreach (['{', '[]', 'null'] as $body) {
-            $this->call('POST', '/api/v1/group-applications', [], [], [], ['CONTENT_TYPE' => 'application/json'] + $this->headers('group-applications', $body, 'malformed'), $body)
+            $this->call('POST', '/api/v1/group-applications', [], [], [], ['CONTENT_TYPE' => 'application/json'] + $this->headers('malformed'), $body)
                 ->assertStatus(422)->assertJsonPath('code', 'validation_failed');
         }
-        $this->call('POST', '/api/v1/psychologists', ['payload' => ['nested']], [], [], ['CONTENT_TYPE' => 'multipart/form-data'] + $this->headers('psychologists', '', 'nested'))
-            ->assertUnauthorized()->assertJsonPath('code', 'invalid_signature');
-        $this->call('POST', '/api/v1/group-applications', [], [], [], ['CONTENT_TYPE' => 'text/plain'] + $this->headers('group-applications', '{}', 'wrong-media'), '{}')
-            ->assertStatus(415)->assertJsonPath('code', 'unsupported_media_type');
-        $body = json_encode($this->fields());
-        $this->call('POST', '/api/v1/group-applications?owner_id=1', [], [], [], ['CONTENT_TYPE' => 'application/json'] + $this->headers('group-applications', $body, 'query'), $body)
-            ->assertStatus(422);
+        foreach ([[], ['payload' => ['nested']], ['payload' => '{'], ['payload' => '[]'], ['payload' => 'null']] as $form) {
+            $this->call('POST', '/api/v1/psychologists', $form, [], [], ['CONTENT_TYPE' => 'multipart/form-data'] + $this->headers('malformed-psychologist'))
+                ->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+        foreach (['psychologists', 'group-applications'] as $endpoint) {
+            foreach (['text/plain', $endpoint === 'psychologists' ? 'application/json' : 'multipart/form-data'] as $type) {
+                $this->call('POST', '/api/v1/'.$endpoint, [], [], [], ['CONTENT_TYPE' => $type] + $this->headers('wrong-media'), '{}')
+                    ->assertStatus(415)->assertJsonPath('code', 'unsupported_media_type');
+            }
+            $multipart = $endpoint === 'psychologists';
+            $body = json_encode($multipart ? $this->questionnaire() : $this->fields());
+            $this->call('POST', '/api/v1/'.$endpoint.'?owner_id=1', $multipart ? ['payload' => $body] : [], [], [],
+                ['CONTENT_TYPE' => $multipart ? 'multipart/form-data' : 'application/json'] + $this->headers('query'), $multipart ? null : $body)
+                ->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
     }
 
     public function test_safe_logging_including_unexpected_database_exception(): void
     {
         Log::spy();
-        $this->application(overrides: ['HTTP_X_SIGNATURE' => str_repeat('0', 64)])->assertUnauthorized();
+        $this->application($this->fields() + ['unexpected' => 'Synthetic'])->assertStatus(422);
         $this->mock(IntakeService::class, function ($mock) {
             $mock->shouldReceive('submit')->andThrow(new QueryException(
                 'mysql', 'insert into synthetic values (?, ?)', ['synthetic@example.test', '+12025550100'],
@@ -471,7 +466,7 @@ class IntegrationIntakeTest extends TestCase
         $this->application()->assertStatus(500)->assertDontSee('Sensitive')->assertDontSee('synthetic@example.test');
         Log::shouldHaveReceived('warning')->twice()->withArgs(function ($message, $context) {
             $encoded = json_encode([$message, $context]);
-            foreach ([$this->secret, 'Synthetic', 'Participant', 'synthetic@example.test', '+12025550100', str_repeat('0', 64), 'Sensitive'] as $sensitive) {
+            foreach (['Synthetic', 'Participant', 'synthetic@example.test', '+12025550100', str_repeat('0', 64), 'Sensitive'] as $sensitive) {
                 $this->assertStringNotContainsString($sensitive, $encoded);
             }
             $this->assertArrayHasKey('exception_class', $context);

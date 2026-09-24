@@ -89,7 +89,7 @@ DB_CACHE_LOCK_TABLE=cache_locks
 
 Set a stable application-specific CACHE_PREFIX shared by web, scheduler and
 workers, the same database/cache connections and credentials, mail sender and
-SMTP/sendmail transport, integration secret and WEBPAY configuration. Use
+SMTP/sendmail transport and WEBPAY configuration. Public intake needs no shared secret. Use
 WEBPAY_ENV=sandbox on staging. Never use array/file cache for staging/production distributed locks.
 Preserve an existing APP_KEY; generate and securely back up a key once for a new
 installation. Do not expose private configuration in diagnostic output.

@@ -14,10 +14,9 @@ class IntegrationConcurrencyTest extends TestCase
 
     private function parallel(string $endpoint, array $payload, bool $sameId): array
     {
-        $secret = bin2hex(random_bytes(32));
         $processes = [];
         for ($i = 0; $i < 4; $i++) {
-            $process = new Process([PHP_BINARY, base_path('tests/Support/integration-worker.php')], base_path(), ['TEST_INTEGRATION_SECRET' => $secret]);
+            $process = new Process([PHP_BINARY, base_path('tests/Support/integration-worker.php')], base_path());
             $process->setTimeout(90);
             $process->setInput(json_encode(['endpoint' => $endpoint, 'payload' => $payload, 'request_id' => $sameId ? 'concurrent' : 'concurrent-'.$i]));
             $process->start();
@@ -49,14 +48,14 @@ class IntegrationConcurrencyTest extends TestCase
 
     public function test_concurrent_psychologist_duplicates_and_distinct_ids_same_email(): void
     {
-        $payload = ['questionnaire' => ['email' => 'concurrent@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1'], 'documents' => []];
+        $payload = ['email' => 'concurrent@example.test', 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic-v1'];
         $results = $this->parallel('psychologists', $payload, true);
         foreach ($results as $result) {
             $this->assertSame($results[0], $result);
         }
         $this->assertDatabaseCount('gp_users', 1);
         $this->assertDatabaseCount('gp_integration_requests', 1);
-        $payload['questionnaire']['email'] = 'different-ids@example.test';
+        $payload['email'] = 'different-ids@example.test';
         $results = $this->parallel('psychologists', $payload, false);
         $this->assertSame(1, count(array_filter($results, fn ($result) => $result['status'] === 201)));
         $this->assertDatabaseCount('gp_users', 2);

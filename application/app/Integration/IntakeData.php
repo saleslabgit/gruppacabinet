@@ -7,7 +7,6 @@ use App\Support\PhoneNormalizer;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use JsonException;
 
@@ -69,13 +68,11 @@ class IntakeData
 
     public static function psychologist(Request $request): self
     {
-        if (array_keys($request->request->all()) !== ['payload']) {
-            throw new IntegrationException('validation_failed', 422, ['payload' => ['Only the signed payload field is accepted.']]);
+        $form = $request->request->all();
+        if (array_keys($form) !== ['payload'] || ! is_string($form['payload'])) {
+            throw new IntegrationException('validation_failed', 422, ['payload' => ['Exactly one scalar payload field is required.']]);
         }
-        $manifest = self::decode($request->request->all()['payload']);
-        if (array_diff(array_keys($manifest), ['questionnaire', 'documents']) !== [] || ! isset($manifest['questionnaire'], $manifest['documents']) || ! is_array($manifest['questionnaire']) || ! is_array($manifest['documents']) || ! array_is_list($manifest['documents'])) {
-            throw new IntegrationException('validation_failed', 422, ['payload' => ['Expected questionnaire and documents.']]);
-        }
+        $questionnaire = self::decode($form['payload']);
         $rules = [
             'email' => ['required', 'email', 'max:255'],
             'education_type_code' => ['nullable', 'string', 'max:255'],
@@ -93,7 +90,7 @@ class IntakeData
         foreach (['documents_confirmed', 'education_confirmed', 'live_session_ready'] as $field) {
             $rules[$field] = ['nullable', 'boolean'];
         }
-        $data = self::validate($manifest['questionnaire'], $rules);
+        $data = self::validate($questionnaire, $rules);
         $data = array_replace(array_fill_keys(array_keys($rules), null), $data);
         $data['email'] = mb_strtolower($data['email']);
         foreach (['graduation_year', 'training_hours', 'groups_conducted_count'] as $field) {
@@ -104,36 +101,20 @@ class IntakeData
         }
         $files = $request->allFiles();
         $documents = [];
-        $seen = [];
-        foreach ($manifest['documents'] as $descriptor) {
-            if (! is_array($descriptor)) {
-                throw new IntegrationException('invalid_signature', 401);
-            }
-            $descriptor = self::validate($descriptor, [
-                'field' => ['required', 'string', 'regex:/\Adocument_[0-9]+\z/'],
-                'type' => ['required', Rule::in(array_keys(config('psychologist_documents.types')))],
-                'original_name' => ['required', 'string', 'max:255'],
-                'size' => ['required', 'integer', 'min:0'],
-                'sha256' => ['required', 'string', 'regex:/\A[a-f0-9]{64}\z/'],
-            ]);
-            $field = $descriptor['field'];
-            $file = $files[$field] ?? null;
-            if (isset($seen[$field]) || ! $file instanceof UploadedFile || ! $file->isValid()) {
-                throw new IntegrationException('invalid_signature', 401);
-            }
-            $seen[$field] = true;
-            if ($file->getSize() !== (int) $descriptor['size'] || ! hash_equals($descriptor['sha256'], hash_file('sha256', $file->getPathname()))) {
-                throw new IntegrationException('invalid_signature', 401);
+        foreach ($files as $field => $file) {
+            if (! preg_match('/\A(?:diploma|license|registration|certificate_(?:0|[1-9][0-9]*))\z/', (string) $field) || ! $file instanceof UploadedFile || ! $file->isValid()) {
+                throw new IntegrationException('validation_failed', 422, ['documents' => ['Invalid document field or upload. Use unique flat file fields.']]);
             }
             if ($file->getSize() > config('psychologist_documents.max_kb') * 1024 || ! in_array($file->getMimeType(), config('psychologist_documents.mime_types'), true)) {
                 throw new IntegrationException('validation_failed', 422, ['documents' => ['Invalid document content or size.']]);
             }
-            $descriptor['size'] = (int) $descriptor['size'];
-            $descriptor['original_name'] = app(PsychologistDocuments::class)->safeName($descriptor['original_name']);
-            $documents[] = $descriptor;
-        }
-        if (count($seen) !== count($files)) {
-            throw new IntegrationException('invalid_signature', 401);
+            $documents[] = [
+                'field' => $field,
+                'type' => str_starts_with($field, 'certificate_') ? 'certificate' : $field,
+                'original_name' => app(PsychologistDocuments::class)->safeName($file->getClientOriginalName()),
+                'size' => $file->getSize(),
+                'sha256' => hash_file('sha256', $file->getPathname()),
+            ];
         }
 
         return new self($data, $documents, $files);

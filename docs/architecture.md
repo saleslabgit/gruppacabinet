@@ -392,7 +392,7 @@ phone-like punctuation and yields comparable digits (stripping the international
 Stage 11 reuses this boundary. The synthetic factory requires an existing
 group via `for($group)`, uses reserved fictional NANP numbers and derives the
 canonical phone from its raw phone, including attribute overrides. Production
-seeds do not create applications; signed intake is provided by Stage 11 below.
+seeds do not create applications; public intake is provided by Stage 11 below.
 
 `applications:cleanup` reads the current typed retention-month setting once,
 computes a UTC calendar-month cutoff without month overflow, and physically
@@ -406,17 +406,20 @@ minute. Running the scheduler/cron is still an operational prerequisite.
 ## Stage 11 incoming API boundary
 
 `routes/api.php` registers stateless v1 intake separately from web sessions/CSRF.
-The dedicated Laravel limiter runs before `AuthenticateIntegration`; it uses
+The dedicated Laravel limiter runs before `ValidateIntegrationRequest`; it uses
 source IP + endpoint, configured shared cache and a configurable default of
 60/minute. Optional exact-IP allowlisting uses the trusted Laravel request IP.
-`config/integration.php` is env-backed and fails closed without a secret.
+`config/integration.php` contains only rate limit and optional allowed IPs.
 
-Authentication binds method/path/timestamp/request ID/payload digest with HMAC
-and `hash_equals`. JSON uses raw body bytes; standard FPM multipart parsing uses
-the exact signed manifest field plus verified per-file hashes/sizes. Global text
-normalizers skip the API so signed strings stay intact. `IntakeData` validates an
-explicit field whitelist and normalizes fields for semantic fingerprinting;
-unsigned query/form fields, undeclared files and protected fields are rejected.
+Intake is public: no shared secret/HMAC or authenticated origin. The middleware
+checks non-secret request IDs, content types, optional source IPs and absence of
+query parameters. Standard FPM multipart parsing exposes one scalar `payload`
+with direct questionnaire JSON and flat optional document fields. `IntakeData`
+validates an explicit whitelist, derives file types/names/sizes/content hashes
+on the server and normalizes fields for semantic fingerprinting. Extra form and
+protected fields, unknown/nested uploads and invalid content are rejected with
+422. Raw duplicate flat names are already collapsed by PHP; see integration.md.
+Global text normalizers skip the API; `IntakeData` owns its normalization.
 
 `IntakeService` owns one MySQL transaction: no-op unique-ID upsert (waits for a
 concurrent claimant), locked journal read, semantic conflict/replay decision,
@@ -430,7 +433,7 @@ not automatically shortened in Stage 11.
 
 Questionnaire intake locks matching users including deleted rows, resolves
 education by dictionary code, uses `UserStatusTransitionService` for rejected
-resubmission, and reuses `PsychologistDocuments` with signed sanitized filenames.
+resubmission, and reuses `PsychologistDocuments` with sanitized upload filenames.
 New private paths are tracked through transaction completion and removed on
 failure, including journal/storage failures. Application intake locks the group
 by immutable UUID, requires active/enabled, uses `PhoneNormalizer`, and creates

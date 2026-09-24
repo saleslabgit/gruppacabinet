@@ -1,10 +1,12 @@
 # Incoming integration v1
 
-Stage 11 receives submissions from the **backend** of the existing public site.
-The browser submits to that backend; the backend signs and sends HTTPS requests
-to the cabinet. Same-host deployment does not make this a browser API. Never put
-the secret or signature generation in HTML/browser JavaScript. No session, CSRF,
-login cookie, CORS integration, email, password invitation or payment is involved.
+Stage 11 exposes **public submission endpoints**, normally called by the backend
+of the existing public site after a browser form submission. Direct callers can
+also reach them: origin identity is not authenticated. No shared secret or HMAC
+is required, and public-site secrets must not be introduced for these forms.
+Validation, rate limiting and optional infrastructure controls mitigate abuse;
+they do not prove trusted origin or eliminate spam. Cabinet remains authoritative
+for validation and business rules. No session, CSRF or login cookie is required.
 
 Production endpoints:
 
@@ -15,58 +17,29 @@ Local base: `http://localhost:8080/cabinet/api/v1` (Docker only).
 Staging base is not known: configure it when the staging deployment exists.
 Production transport must be HTTPS, terminated by the hosting infrastructure.
 
-## Authentication
+## Public request protocol
 
 Required headers on every POST:
 
 | Header | Contract |
 |---|---|
-| `X-Request-Id` | Case-sensitive opaque token, 1–128 ASCII characters; first character alphanumeric, `_` or `-`; remaining characters alphanumeric, `_`, `-`, `.`, `:`. |
-| `X-Timestamp` | Unix UTC seconds, decimal integer without leading zeros. Default tolerance is inclusive ±300 seconds. ±301 is rejected. |
-| `X-Signature` | 64 lowercase hexadecimal characters, HMAC-SHA256 below. |
+| `X-Request-Id` | Non-secret idempotency token, **not authentication**. Case-sensitive, 1–128 ASCII characters; first character alphanumeric, `_` or `-`; remaining characters alphanumeric, `_`, `-`, `.`, `:`. |
 | `Content-Type` | `application/json` for applications; `multipart/form-data; boundary=...` for questionnaires. |
 
-No query parameters are accepted. Canonical signing text consists of these six
-lines, UTF-8, separated by LF, **without a trailing newline**:
-
-```text
-v1
-POST
-/api/v1/<endpoint>
-<X-Timestamp>
-<X-Request-Id>
-<payload-sha256>
-```
-
-The endpoint is `psychologists` or `group-applications`. The canonical path
-**excludes `/cabinet`** regardless of deployment. Compute:
-
-```text
-X-Signature = lowercase_hex(HMAC-SHA256(signing_text, INTEGRATION_SECRET))
-```
-
-For JSON, `payload-sha256` is lowercase hexadecimal SHA-256 of the exact raw JSON
-body bytes. Serialize once, sign those bytes, send the same bytes.
-
-For multipart, it is SHA-256 of the exact string value of the `payload` form
-field. Every uploaded file is bound by its signed descriptor. The raw multipart
-body, MIME boundary and multipart filename/headers are **not signed**. Keep
-standard PHP/FPM parsing enabled (`enable_post_data_reading=1`). No custom parser
-or proxy body-signing module is needed.
-
-A retry can use a fresh timestamp and regenerated signature; preserve its request
-ID and logical content. Endpoint, timestamp, ID and payload digest are all bound
-by HMAC. The server compares signatures using `hash_equals`.
+No query parameters are accepted. `INTEGRATION_SECRET`,
+`INTEGRATION_TIMESTAMP_TOLERANCE`, `X-Timestamp`, `X-Signature`, signing text and
+client-computed hashes are no longer used. Legacy signature/timestamp headers
+are ignored. Preserve the request ID and logical fields/files on retries.
 
 ## Psychologist questionnaire
 
 Send exactly one scalar form field, `payload`, containing a JSON object:
 
 ```json
-{"questionnaire":{"email":"synthetic@example.test","personal_data_consent_at":"2026-09-21T12:00:00Z","personal_data_consent_version":"synthetic-v1"},"documents":[]}
+{"email":"synthetic@example.test","personal_data_consent_at":"2026-09-21T12:00:00Z","personal_data_consent_version":"synthetic-v1"}
 ```
 
-Use UTF-8 JSON. All questionnaire values belong under `questionnaire`; unsigned
+Use UTF-8 JSON. Questionnaire fields belong directly in this object; additional
 form fields and unknown questionnaire fields are rejected. This is a **full
 submission**, not PATCH: omitted optional values become null, including optional
 booleans. Send the complete current questionnaire on resubmission.
@@ -95,31 +68,38 @@ A repeated pending/rejected questionnaire may retain its current inactive code.
 Unknown codes and codes belonging only to another dictionary return 422. Never
 send the dictionary's numeric ID.
 
-`documents` is a required JSON array outside `questionnaire`; an empty array is
-allowed. Each document has a separate, flat multipart file field, e.g.
-`document_0`, declared exactly once:
+Files are optional: zero uploads are accepted. Use unique flat multipart file fields:
 
-```json
-{
-  "field": "document_0",
-  "type": "diploma",
-  "original_name": "synthetic-diploma.pdf",
-  "size": 12345,
-  "sha256": "<64 lowercase hexadecimal characters: SHA-256 of actual file bytes>"
-}
-```
+| Field | Stored type |
+|---|---|
+| `diploma` | `diploma` |
+| `certificate_0`, `certificate_1`, ... | `certificate` |
+| `license` | `license` |
+| `registration` | `registration` |
 
-Descriptor fields are required. `field` matches `document_[0-9]+`; no nested
-file arrays. Each descriptor must have one uploaded file, and every file must
-have one descriptor. Duplicate descriptors, missing or undeclared files and
-mismatched byte length/hash are rejected before business mutation. Allowed
-`type`: `diploma`, `certificate`, `license`, `registration`. Maximum original name
-length: 255 characters; the server removes path components/control characters.
-Only the **signed** original name is authoritative. The server detects actual
-content MIME: `application/pdf`, `image/jpeg`, `image/png`; an extension or
-client-supplied MIME cannot override it. Default maximum is **10240 KiB (10 MiB)
-per file**, configurable by the cabinet administrator. PHP/Nginx total upload
-limits also apply (see development documentation).
+Certificate indices are nonnegative decimal integers without leading zeros;
+gaps are allowed. Arrays/nested files, unknown fields, invalid patterns and failed
+uploads return 422 `validation_failed`. Do not send a `documents` manifest,
+`questionnaire` wrapper, size, hash or document descriptors.
+
+The server derives type from the field, sanitizes the actual upload's original
+name (removes paths/control characters, limits to 255 characters), detects MIME
+from contents and measures bytes. Allowed MIME: `application/pdf`, `image/jpeg`,
+`image/png`; client MIME and filename extensions do not override detection.
+The default maximum is **10240 KiB (10 MiB) per file**, configurable by the cabinet
+administrator. PHP/Nginx total upload limits also apply. SHA-256 is computed only
+on the server for semantic idempotency; callers do not compute or send it.
+
+Standard PHP/Laravel multipart parsing is retained by explicit product decision;
+no raw multipart parser or infrastructure change is required. Validation applies
+at the observable Laravel boundary: unknown file fields, invalid `certificate_N`
+names, unexpected arrays/structures and observable duplicate/ambiguous structures
+return 422. Every file Laravel actually sees is validated on the server.
+
+Send each field exactly once. Duplicate multipart field names that PHP collapses
+before the request reaches Laravel cannot be reliably detected at the application
+layer. These raw duplicates, and original names lost during PHP normalization,
+are a known parsing limitation, not an application-level rejection guarantee.
 
 Files use random private local paths. No public URL or storage path is returned.
 Admins use existing protected document routes. Repeated submissions append files;
@@ -136,8 +116,9 @@ after multiple uploads or during journal completion.
 | Disabled | 409 `psychologist_conflict`; unchanged. |
 | Any soft-deleted match | 409 `psychologist_conflict`; no restore/new row. |
 
-Repeat submission preserves access, tariff, admin and password fields. No mail or
-password token is generated, including later admin approval in Stage 11.
+Repeat submission preserves access, tariff, admin and password fields. Intake
+generates no mail or password token; existing Stage 12 admin approval/mail flows
+remain unchanged.
 
 Example success (201 or 200):
 
@@ -181,8 +162,8 @@ psychologists cannot access it. The group lifecycle is unchanged.
 
 The MySQL journal has a globally unique, case-sensitive request ID. Its semantic
 fingerprint includes the endpoint and normalized validated fields. Documents
-include type, sanitized original name, verified size and hash, sorted independently
-of multipart order/field names. JSON formatting and multipart boundaries do not
+include type, sanitized original name, server-observed size and content hash,
+sorted independently of multipart order/field names. JSON formatting and multipart boundaries do not
 change the fingerprint; participant phone display punctuation is normalized.
 
 A completed same-ID/same-fingerprint request returns the **exact original status
@@ -195,9 +176,8 @@ PII, file bytes, secret or signature; success responses contain only status and 
 No automatic journal expiry is configured in Stage 11.
 
 Persist the ID and logical submission on the public-site backend before sending.
-On a timeout, transport failure, 429 or 5xx, retry with backoff, the **same ID**,
-fresh timestamp/signature and identical logical fields/files. Use a new ID for an
-intentional new submission or corrected payload. Separate request IDs create
+On a timeout, transport failure, 429 or 5xx, retry with backoff, the **same ID**
+and identical logical fields/files. Use a new ID for an intentional new submission or corrected payload. Separate request IDs create
 separate participant applications even with identical names/phone. A repeated
 questionnaire with a new ID follows the email matrix and can append documents.
 Fix 4xx contract/business errors before retrying. Preserve the original submission
@@ -217,7 +197,6 @@ or syntactically unsafe. Messages are informational; branch on `code` and status
 | HTTP | Codes |
 |---|---|
 | 400 | `missing_request_id`, `invalid_request_id` |
-| 401 | `missing_timestamp`, `invalid_timestamp`, `expired_timestamp`, `missing_signature`, `invalid_signature` (also file integrity failures) |
 | 403 | `source_not_allowed` |
 | 404 | `group_not_found`, `not_found` (unknown API route) |
 | 405 | `method_not_allowed` |
@@ -227,81 +206,52 @@ or syntactically unsafe. Messages are informational; branch on `code` and status
 | 422 | `validation_failed`, `group_not_accepting_applications` |
 | 429 | `rate_limited` |
 | 500 | `internal_error`; no stack, SQL or internal message exposed |
-| 503 | `integration_unavailable` when secret is absent |
 
 An upstream proxy can reject requests before Laravel (e.g. total body size);
 handle non-JSON transport failures as well. Do not interpret those as acceptance.
 
-## Signing and curl examples
+## Curl examples
 
-This Python standard-library helper writes only the signature to stdout. Keep it
-on the public-site **server**, never in browser code. `payload.bin` is either the
-exact JSON body or exact manifest string. Do not pretty-print/change it after
-signing. Supply `INTEGRATION_SECRET` securely in the process environment.
-
-```python
-import hashlib, hmac, os, pathlib
-payload = pathlib.Path('payload.bin').read_bytes()
-envelope = '\n'.join([
-    'v1', 'POST', '/api/v1/' + os.environ['ENDPOINT'],
-    os.environ['TIMESTAMP'], os.environ['REQUEST_ID'],
-    hashlib.sha256(payload).hexdigest(),
-]).encode('utf-8')
-print(hmac.new(os.environ['INTEGRATION_SECRET'].encode('utf-8'), envelope,
-               hashlib.sha256).hexdigest())
-```
-
-For each file, before serializing a multipart manifest:
-
-```python
-content = pathlib.Path('synthetic.pdf').read_bytes()
-descriptor = dict(field='document_0', type='diploma',
-                  original_name='synthetic.pdf', size=len(content),
-                  sha256=hashlib.sha256(content).hexdigest())
-```
-
-Assuming you saved the signing helper as `sign.py`, set a local synthetic secret
-interactively (same value temporarily configured on the cabinet; do not commit it):
+Save the participant JSON shown above in `application.json`, using your synthetic
+test group's real UUID. Generate a fresh ID per logical submission; retain it for
+retries. No signing helper, secret, timestamp or file digest is needed.
 
 ```bash
-read -rsp 'Local synthetic integration secret: ' INTEGRATION_SECRET; echo
-export INTEGRATION_SECRET
-export ENDPOINT=group-applications REQUEST_ID=example-application-001
-export TIMESTAMP="$(date +%s)"
-SIGNATURE="$(python3 sign.py)"
 curl --silent --show-error --include \
   'http://localhost:8080/cabinet/api/v1/group-applications' \
   -H 'Content-Type: application/json' \
-  -H "X-Request-Id: $REQUEST_ID" -H "X-Timestamp: $TIMESTAMP" \
-  -H "X-Signature: $SIGNATURE" --data-binary @payload.bin
+  -H 'X-Request-Id: example-application-001' \
+  --data-binary @application.json
 ```
 
-For multipart, put the manifest in `payload.bin`, change `ENDPOINT=psychologists`,
-choose/preserve the appropriate request ID and regenerate timestamp/signature:
+For a psychologist, save the direct questionnaire object in `questionnaire.json`:
 
 ```bash
 curl --silent --show-error --include \
   'http://localhost:8080/cabinet/api/v1/psychologists' \
-  -H "X-Request-Id: $REQUEST_ID" -H "X-Timestamp: $TIMESTAMP" \
-  -H "X-Signature: $SIGNATURE" \
-  --form 'payload=<payload.bin' \
-  --form 'document_0=@synthetic.pdf;type=application/pdf'
+  -H 'X-Request-Id: example-questionnaire-001' \
+  --form 'payload=<questionnaire.json' \
+  --form 'diploma=@synthetic.pdf' \
+  --form 'certificate_0=@synthetic-certificate.pdf'
 ```
 
-For no documents, omit the file part and use `"documents":[]` in the signed
-manifest. Let curl create its boundary. A retry may create a new boundary.
+Omit file parts for a questionnaire-only submission. Let curl create its multipart
+boundary. A retry may use a different boundary with the same logical content.
 
 ## Operations
 
-`INTEGRATION_SECRET` is server-only, env/config-backed, with no committed default.
-An empty secret fails closed. Config defaults:
+Only non-secret intake settings remain:
 
-- `INTEGRATION_TIMESTAMP_TOLERANCE=300` seconds; synchronize both server clocks.
-- `INTEGRATION_RATE_PER_MINUTE=60` per source IP **and endpoint**, including failed
-  authentication. Uses Laravel's configured shared cache; provision a common
-  cache for multiple application instances. Requests over the limit return 429.
-- `INTEGRATION_ALLOWED_IPS=` disables allowlisting. Otherwise provide comma-separated
-  exact IP addresses (no CIDR); requests outside the list return 403.
+- `INTEGRATION_RATE_PER_MINUTE=60` per source IP **and endpoint**, including invalid
+  requests. Uses Laravel's configured shared cache; provision a common cache for
+  multiple application instances. Requests over the limit return 429.
+- `INTEGRATION_ALLOWED_IPS=` disables allowlisting by default. Otherwise provide
+  comma-separated exact IP addresses (no CIDR); other sources return 403. This is
+  optional and not required for public-form operation.
+
+There is no integration secret to provision, rotate or synchronize, and no need
+to clear cached configuration because a public-site secret changed. Normal
+application deployment/configuration procedures still apply to code changes.
 
 IP checks use Laravel's trusted request IP. Configure trusted proxies correctly
 before using proxy-forwarded IPs; do not trust arbitrary forwarded headers. No
@@ -310,7 +260,7 @@ rejection logs contain only endpoint, validated ID, reason, IP, UTC time and
 exception class/source location. Exception messages, SQL bindings and trace
 arguments are excluded; class/location and request ID support diagnosis.
 
-External work: implement signing/retries and durable outbound IDs on the public
-site, agree actual dictionary codes, store/link `cabinet_group_uuid`, provision
-secret/HTTPS/allowlist/proxy settings, and run a coordinated staging test. Public
+External work: implement plain requests/retries and durable outbound IDs on the
+public site, agree actual dictionary codes, store/link `cabinet_group_uuid`, set
+HTTPS/optional allowlist/proxy settings, and run a coordinated staging test. Public
 site code, SMTP, password setup and WEBPAY are outside Stage 11.

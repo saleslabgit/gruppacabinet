@@ -26,7 +26,7 @@ class DeploymentPreflightTest extends TestCase
         config(['app.url' => 'https://gruppa.info/cabinet', 'app.debug' => false,
             'session.driver' => 'database', 'queue.default' => 'database', 'cache.default' => 'database',
             'mail.default' => 'smtp', 'mail.mailers.smtp.host' => 'synthetic.invalid',
-            'mail.mailers.smtp.password' => $this->secret, 'integration.secret' => $this->secret,
+            'mail.mailers.smtp.password' => $this->secret,
             'webpay.environment' => 'sandbox', 'webpay.store_id' => $this->secret,
             'webpay.secret_key' => $this->secret, 'webpay.api_username' => $this->secret, 'webpay.api_password' => $this->secret]);
         Mail::fake();
@@ -72,7 +72,7 @@ class DeploymentPreflightTest extends TestCase
         $this->assertStringContainsString('PASS Mail delivery configured: smtp', $output);
         $this->assertStringContainsString('MySQL', $output);
         $this->assertStringContainsString('PASS Database cache lock exclusion', $output);
-        $this->assertStringContainsString('Integration secret: configured', $output);
+        $this->assertStringNotContainsString('Integration secret', $output);
         $this->assertStringNotContainsString($this->secret, $output);
         foreach ($before as $table => $count) {
             $this->assertDatabaseCount($table, $count);
@@ -86,12 +86,12 @@ class DeploymentPreflightTest extends TestCase
         $this->provideTimeoutCapability(false);
         config(['app.url' => 'http://'.$this->secret.'.invalid/wrong', 'app.debug' => true,
             'session.driver' => 'file', 'queue.default' => 'sync', 'cache.default' => 'file',
-            'mail.default' => 'log', 'integration.secret' => null, 'webpay.secret_key' => null,
+            'mail.default' => 'log', 'webpay.secret_key' => null,
             'webpay.environment' => $this->secret]);
         $this->assertSame(1, Artisan::call('deployment:preflight'));
         $output = Artisan::output();
         $this->assertStringContainsString('WARN CLI worker hard timeout (pcntl): unavailable', $output);
-        foreach (['Database sessions', 'Database queue', 'Shared database cache', 'HTTPS /cabinet APP_URL', 'APP_DEBUG disabled', 'Mail delivery configured', 'Integration secret', 'WEBPAY secret_key', 'WEBPAY environment'] as $check) {
+        foreach (['Database sessions', 'Database queue', 'Shared database cache', 'HTTPS /cabinet APP_URL', 'APP_DEBUG disabled', 'Mail delivery configured', 'WEBPAY secret_key', 'WEBPAY environment'] as $check) {
             $this->assertStringContainsString('FAIL '.$check, $output);
         }
         $this->assertStringNotContainsString($this->secret, $output);

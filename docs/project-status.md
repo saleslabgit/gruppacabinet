@@ -156,17 +156,22 @@ Reusable phone normalization requires explicit international input and never
 invents a country code. Synthetic factories use reserved fictional phones.
 Daily overlap-protected applications:cleanup permanently removes only records
 strictly older than the current retention setting, including deleted parents;
-output is aggregate-only. Stage 11 adds signed intake below, with no email, payment or lifecycle
+output is aggregate-only. Stage 11 adds public intake below, with no email, payment or lifecycle
 side effect. Verification evidence is in `.ai/report.md`.
 
 ## Stage 11 incoming integration
 
-Two stateless production API routes accept signed questionnaires and participant
-applications: `/api/v1/psychologists` (multipart manifest/files) and
-`/api/v1/group-applications` (JSON), under the `/cabinet` deployment prefix.
-Canonical HMAC binds endpoint, timestamp, request ID and payload digest; multipart
-file descriptors bind actual bytes. Configurable clock tolerance, per-IP/endpoint
-rate limiting, optional IP allowlist and safe JSON errors/logging protect intake.
+Two stateless public submission routes accept questionnaires and participant
+applications: `/api/v1/psychologists` (direct questionnaire JSON in multipart
+`payload`, optional `diploma`, `certificate_N`, `license`, `registration` files)
+and `/api/v1/group-applications` (JSON), under the `/cabinet` deployment prefix.
+No shared secret/HMAC, timestamp/signature headers or client file manifest is
+required. `X-Request-Id` is a non-secret idempotency token, not authentication.
+Cabinet derives file metadata/content hashes and enforces business validation.
+Per-IP/endpoint rate limiting, optional IP allowlisting and safe errors/logging
+remain; direct abuse/spam is not prevented by authenticated origin identity.
+Do not introduce public-site secrets for these forms. Standard PHP parsing
+cannot expose raw duplicate flat parts; see the integration guide's limitation.
 
 The MySQL request journal coordinates replay and business mutation in one
 transaction, including concurrent duplicates. Questionnaire repeats follow the

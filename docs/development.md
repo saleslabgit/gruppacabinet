@@ -321,7 +321,7 @@ tools; keep scripts/screenshots outside the repository.
 
 ## Stage 10 applications and retention
 
-Create only clearly synthetic fixtures locally. Stage 11 now provides signed
+Create only clearly synthetic fixtures locally. Stage 11 now provides public
 participant intake (see below). A local PHP script bootstrapped through the console kernel can use:
 
 ```php
@@ -365,34 +365,24 @@ Cleanup is permanent and reports `Deleted applications: N` only. Its daily
 schedule has overlap protection; the existing every-minute group expiry schedule
 is unchanged. Stage 11 intake is documented below.
 
-## Stage 11 signed intake
+## Stage 11 public intake
 
-The full public-site contract, signing helper and synthetic curl examples are in
+The full public-site contract and synthetic curl examples are in
 [the integration guide](integration.md). Local endpoints use
 `http://localhost:8080/cabinet/api/v1/{psychologists,group-applications}`.
 Use `php artisan migrate --seed` (non-destructive) for the request journal.
 
-Configure `INTEGRATION_SECRET` outside version control. For manual testing,
-choose a temporary synthetic value interactively in your local shell:
-
-```bash
-read -rsp 'Local synthetic integration secret: ' INTEGRATION_SECRET; echo
-export INTEGRATION_SECRET
-```
-
-Provision that same value through the receiving PHP/FPM environment or ignored
-local `.env`; an exported host variable alone does not change running FPM.
-Reload cached configuration as appropriate, and remove the temporary value after
-testing. Do not print it in command output, reports or logs. Defaults are
-`INTEGRATION_TIMESTAMP_TOLERANCE=300`, `INTEGRATION_RATE_PER_MINUTE=60`, and empty
-`INTEGRATION_ALLOWED_IPS` (comma-separated exact IPs when enabled). See the guide
-for trusted-proxy/shared-cache prerequisites and fail-closed behavior.
+No shared secret, signature, timestamp or client file hashes are required. Defaults
+are `INTEGRATION_RATE_PER_MINUTE=60` and empty `INTEGRATION_ALLOWED_IPS` (optional
+comma-separated exact IPs). See the guide for trusted-proxy/shared-cache settings
+and the public, unauthenticated trust model. Preserve `X-Request-Id` on retries.
 
 Keep standard `enable_post_data_reading=1`. Existing PHP limits are 10 MiB/file
 and 12 MiB total POST; Nginx also limits total requests to 12 MiB. Multiple small
-files work; keep the entire multipart request below the total limit. Do not
-change global upload parsing or build a raw multipart parser. Sign the payload
-manifest and include actual byte size/SHA-256 for each file.
+files work; keep the entire multipart request below the total limit. Send direct
+questionnaire JSON in `payload` and optional flat `diploma`, `certificate_N`,
+`license`, `registration` file parts. PHP collapses duplicate flat names; use unique
+names and see the documented parser limitation in the integration guide.
 
 ```bash
 docker compose exec -T php php artisan test --filter=IntegrationIntakeTest
