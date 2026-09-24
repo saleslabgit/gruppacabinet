@@ -118,7 +118,11 @@ class IntakeService
                 app(UserStatusTransitionService::class)->transition($user, UserStatus::Pending);
             }
         }
-        $user->trainings()->delete();
+        if (! $new) {
+            // MySQL 8.0.46 can fail to re-prepare the ordered relationship DELETE.
+            // Use direct DML on this transaction's connection, with only an integer ID.
+            DB::unprepared('DELETE FROM `gp_user_trainings` WHERE `user_id` = '.(int) $user->id);
+        }
         $currentTrainings = $user->trainings()->createMany($trainings)->keyBy('position');
         foreach ($data->documents as $descriptor) {
             $document = app(PsychologistDocuments::class)->upload($user, $data->files[$descriptor['field']], $descriptor['type'], $descriptor['original_name']);

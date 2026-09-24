@@ -15,6 +15,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
@@ -488,6 +489,50 @@ class IntegrationIntakeTest extends TestCase
         $this->assertDatabaseCount('gp_user_trainings', 0);
         foreach (['certificate_0', 'certificate_9999999999999999999999999999'] as $field) {
             $this->psychologist($without, [$field => $this->file()])->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        }
+    }
+
+    public function test_training_delete_is_skipped_for_creation_and_replay_and_is_direct_for_resubmission(): void
+    {
+        $connection = DB::connection();
+        $transactionLevel = $connection->transactionLevel();
+        $directDeletes = [];
+        $database = \Mockery::mock(DB::getFacadeRoot());
+        DB::swap($database);
+        $database->shouldReceive('unprepared')->twice()->andReturnUsing(function (string $sql) use ($connection, $transactionLevel, &$directDeletes): bool {
+            $this->assertMatchesRegularExpression('/^DELETE FROM `gp_user_trainings` WHERE `user_id` = [0-9]+$/D', $sql);
+            $this->assertGreaterThan($transactionLevel, $connection->transactionLevel());
+            $directDeletes[] = $sql;
+
+            return $connection->unprepared($sql);
+        });
+        $connection->enableQueryLog();
+        try {
+            $this->psychologist(id: 'new-without-delete')->assertCreated();
+            $user = User::where('email', 'synthetic@example.test')->sole();
+            $this->assertCount(2, $user->trainings);
+            $this->assertSame([], array_values(array_filter($connection->getQueryLog(), fn ($query) => preg_match('/^delete\b.*gp_user_trainings/i', $query['query']))));
+            $this->assertSame([], $directDeletes);
+            $this->psychologist(id: 'new-without-delete')->assertCreated();
+            $this->assertSame([], $directDeletes);
+            foreach (['pending', 'rejected'] as $status) {
+                $user->update(['status' => $status]);
+                $oldIds = $user->fresh()->trainings->pluck('id')->all();
+                $this->psychologist(id: 'replace-'.$status)->assertOk();
+                $newIds = $user->fresh()->trainings->pluck('id')->all();
+                $this->assertCount(2, $newIds);
+                $this->assertSame([], array_intersect($oldIds, $newIds));
+                $this->psychologist(id: 'replace-'.$status)->assertOk();
+                $this->assertSame($newIds, $user->fresh()->trainings->pluck('id')->all());
+            }
+            $this->assertSame(array_fill(0, 2, 'DELETE FROM `gp_user_trainings` WHERE `user_id` = '.$user->id), $directDeletes);
+            $deletes = array_values(array_filter($connection->getQueryLog(), fn ($query) => preg_match('/^delete\b.*gp_user_trainings/i', $query['query'])));
+            $this->assertSame($directDeletes, array_column($deletes, 'query'));
+            $this->assertSame([[], []], array_column($deletes, 'bindings'));
+            $this->assertSame(0, (int) $connection->getPdo()->getAttribute(\PDO::ATTR_EMULATE_PREPARES));
+        } finally {
+            $connection->disableQueryLog();
+            $connection->flushQueryLog();
         }
     }
 
