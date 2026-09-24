@@ -47,11 +47,11 @@ class PaymentEraGroupsTest extends TestCase
             $old[] = $this->group($status, config('groups.abandoned_draft_days'));
             $young = $this->group($status, config('groups.abandoned_draft_days'));
             $young->update(['created_at' => $young->created_at->addSecond()]);
-            $this->actingAs($this->admin)->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
+            $this->actingAs($this->admin)->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertRedirect();
         }
         foreach (['active', 'approved', 'rejected', 'expired', 'revision', 'moderation'] as $status) {
             $other = $this->group($status, 60);
-            $this->delete('/admin/groups/'.$other->id, ['confirmed' => 1])->assertForbidden();
+            $this->delete('/admin/groups/'.$other->id, ['confirmed' => 1])->assertRedirect();
         }
         $this->get('/admin/groups?quick=abandoned')->assertOk()->assertViewHas('groups', fn ($rows) => $rows->pluck('id')->all() === [$old[1]->id, $old[0]->id]);
         $payment = $this->payment($old[0]);
@@ -79,7 +79,8 @@ class PaymentEraGroupsTest extends TestCase
         $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
         $young = $this->group(days: 0);
         $this->payment($young, 'refunded', true);
-        $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
+        $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertRedirect();
+        $young = $this->group(days: 0);
         $this->actingAs($this->owner)->delete('/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
         foreach (['draft', 'rejected'] as $status) {
             $owned = $this->group($status, 0);

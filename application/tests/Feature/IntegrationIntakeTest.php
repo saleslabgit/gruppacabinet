@@ -257,14 +257,11 @@ class IntegrationIntakeTest extends TestCase
             $this->assertSame('synthetic-token', $user->remember_token);
         }
         $this->assertDatabaseCount('gp_user_documents', 2);
-        foreach (['approved', 'disabled', 'deleted'] as $state) {
+        foreach (['approved', 'disabled'] as $state) {
             if ($state === 'approved') {
                 $user->update(['status' => 'approved']);
-            } elseif ($state === 'disabled') {
-                $user->update(['status' => 'pending', 'disabled' => true]);
             } else {
-                $user->update(['disabled' => false]);
-                $user->delete();
+                $user->update(['status' => 'pending', 'disabled' => true]);
             }
             $before = $user->fresh()->getAttributes();
             $this->psychologist(files: ['diploma' => $this->file()])->assertStatus(409)->assertJsonPath('code', 'psychologist_conflict');
@@ -668,5 +665,47 @@ class IntegrationIntakeTest extends TestCase
             return true;
         });
         Log::shouldNotHaveReceived('error');
+    }
+
+    public function test_deleted_email_creates_fresh_lifecycle_and_preserves_historical_relations_and_replay(): void
+    {
+        $files = ['diploma' => $this->file()];
+        $this->psychologist(files: $files, id: 'historical')->assertCreated();
+        $old = User::where('email', 'synthetic@example.test')->sole();
+        $old->update(['status' => 'approved', 'free' => true, 'disabled' => true]);
+        $group = Group::create(['owner_id' => $old->id, 'status' => 'rejected']);
+        $old->delete();
+        $before = $old->fresh()->getAttributes();
+        $trainings = $old->trainings()->get()->toJson();
+        $documents = $old->documents()->get()->toJson();
+        $this->psychologist(files: $files, id: 'historical')->assertCreated();
+        $this->assertSame(0, User::where('email', 'synthetic@example.test')->count());
+        $this->psychologist(files: ['diploma' => $this->file()], id: 'fresh')->assertCreated();
+        $new = User::where('email', 'synthetic@example.test')->sole();
+        $this->assertNotSame($old->id, $new->id);
+        $this->assertSame('pending', $new->status->value);
+        $this->assertFalse($new->free);
+        $this->assertFalse($new->disabled);
+        $this->assertNull($new->password);
+        $this->assertSame(0, $new->groups()->count());
+        $this->assertSame(1, $new->documents()->count());
+        $this->assertSame(2, $new->trainings()->count());
+        $this->assertSame($before, $old->fresh()->getAttributes());
+        $this->assertSame($trainings, $old->trainings()->get()->toJson());
+        $this->assertSame($documents, $old->documents()->get()->toJson());
+        $this->assertSame($old->id, $group->fresh()->owner_id);
+        foreach (['pending', 'rejected'] as $status) {
+            $new->update(['status' => $status]);
+            $this->psychologist(id: 'active-'.$status)->assertOk();
+            $this->assertSame($new->id, User::where('email', 'synthetic@example.test')->sole()->id);
+        }
+        $new->update(['status' => 'approved']);
+        $this->psychologist(id: 'approved-conflict')->assertStatus(409);
+        $new->update(['status' => 'pending', 'disabled' => true]);
+        $this->psychologist(id: 'disabled-conflict')->assertStatus(409);
+        $new->delete();
+        $this->psychologist(id: 'third-generation')->assertCreated();
+        $this->assertSame(3, User::withTrashed()->where('email', 'synthetic@example.test')->count());
+        $this->assertSame($before, $old->fresh()->getAttributes());
     }
 }

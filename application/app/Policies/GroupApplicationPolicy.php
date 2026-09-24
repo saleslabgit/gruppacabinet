@@ -15,7 +15,7 @@ class GroupApplicationPolicy
 
     public function view(User $actor, GroupApplication $application): bool
     {
-        return $this->viewAny($actor) && ($actor->admin || $application->group?->owner_id === $actor->id);
+        return $this->viewAny($actor) && ($actor->admin || ($application->group !== null && (new GroupPolicy)->view($actor, $application->group)));
     }
 
     public function process(User $actor, GroupApplication $application): bool

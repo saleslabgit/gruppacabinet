@@ -248,3 +248,22 @@ After deployment, an authorized operator should:
 
 These are manual staging steps; automated tests send no external email and make
 no HostER changes.
+
+### TASK-2026-09-24-04: group visibility migration
+
+Apply `php artisan migrate --force` during the deployment maintenance window,
+then clear/rebuild the usual application caches. Migration
+`2026_09_24_000002_add_psychologist_deleted_at_to_groups` adds a nullable timestamp
+and owner/visibility index. Its single backfill UPDATE copies `deleted_at` to
+`psychologist_deleted_at` and clears `deleted_at` only for rejected groups.
+Other deleted statuses and all related records remain unchanged. No fresh
+migration or data reset is required. MySQL schema changes implicitly commit;
+keep writers stopped until the schema change and backfill finish.
+
+Rollback converts psychologist-hidden rows to ordinary soft deletes before
+removing the field, preserving an existing admin deletion timestamp. Thus those
+rows disappear from admin again under the old behavior. The distinction between
+psychologist hiding and admin deletion is lost on rollback. A subsequent up()
+again restores all soft-deleted rejected groups, including groups deleted by an
+administrator after the original deployment; the old schema cannot distinguish
+those origins. Retain the normal pre-deployment backup for exact recovery.

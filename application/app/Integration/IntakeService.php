@@ -91,9 +91,9 @@ class IntakeService
         $fields = $data->fields;
         $trainings = $fields['trainings'];
         unset($fields['trainings']);
-        $matches = User::withTrashed()->where('email', $fields['email'])->orderBy('id')->lockForUpdate()->get();
+        $matches = User::query()->where('email', $fields['email'])->orderBy('id')->lockForUpdate()->get();
         foreach ($matches as $match) {
-            if ($match->trashed() || $match->disabled || $match->status === UserStatus::Approved) {
+            if ($match->disabled || $match->status === UserStatus::Approved) {
                 throw new IntegrationException('psychologist_conflict', 409);
             }
         }

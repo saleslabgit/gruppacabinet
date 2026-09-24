@@ -16,7 +16,7 @@ class ApplicationController extends Controller
 {
     public function index(ApplicationIndexRequest $request, string $group): View
     {
-        $model = Group::query()->where('owner_id', $request->user()->id)->withCount(Group::applicationCounts())->findOrFail($group);
+        $model = Group::query()->visibleToPsychologist($request->user()->id)->withCount(Group::applicationCounts())->findOrFail($group);
         Gate::authorize('view', $model);
         $filters = $request->validated();
         $query = $model->applications();
@@ -33,7 +33,7 @@ class ApplicationController extends Controller
 
     public function show(Request $request, string $group, string $application): View
     {
-        $model = Group::query()->where('owner_id', $request->user()->id)->findOrFail($group);
+        $model = Group::query()->visibleToPsychologist($request->user()->id)->findOrFail($group);
         $record = $model->applications()->findOrFail($application);
         $record->setRelation('group', $model);
         Gate::authorize('view', $record);

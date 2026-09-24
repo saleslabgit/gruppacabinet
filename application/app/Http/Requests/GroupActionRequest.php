@@ -11,7 +11,7 @@ class GroupActionRequest extends FormRequest
     {
         $group = $this->route('group');
 
-        return $group instanceof Group ? $group : Group::query()->where('owner_id', $this->user()->id)->findOrFail($group);
+        return $group instanceof Group ? $group : Group::query()->visibleToPsychologist($this->user()->id)->findOrFail($group);
     }
 
     public function authorize(): bool

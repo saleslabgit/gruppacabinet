@@ -127,12 +127,16 @@ after multiple uploads or during journal completion.
 
 | Existing normalized email | Result |
 |---|---|
-| No matching active/deleted user | 201: create pending, non-admin, enabled, `free=false`, password null. |
+| No active user (historical soft-deleted matches allowed) | 201: create pending, non-admin, enabled, `free=false`, password null. |
 | Pending | 200: replace questionnaire, append documents. |
 | Rejected | 200: replace questionnaire, transition to pending, append documents. |
 | Approved | 409 `psychologist_conflict`; unchanged. |
 | Disabled | 409 `psychologist_conflict`; unchanged. |
-| Any soft-deleted match | 409 `psychologist_conflict`; no restore/new row. |
+| Soft-deleted history only | 201: new pending user ID and fresh relations. Historical users/documents/trainings/groups/payments remain unchanged; no restore or merge. |
+
+The matrix applies to a new request ID and only non-deleted users. Same-ID replay
+returns the original result even after deletion. Active-email uniqueness and
+transaction retries still serialize concurrent same-email intake.
 
 Repeat submission preserves access, tariff, admin and password fields. Intake
 generates no mail or password token; existing Stage 12 admin approval/mail flows

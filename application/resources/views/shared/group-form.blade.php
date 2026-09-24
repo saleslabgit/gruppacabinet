@@ -10,7 +10,7 @@
 @if($realGroups ?? false)
 @csrf
 @endif
-<x-validation-summary :errors="array_intersect_key($errors, array_flip(['owner_id','title','description','schedule','format_id','meeting_duration_minutes','participant_capacity','gender_id','meeting_price']))" />
+<x-validation-summary :errors="array_intersect_key($errors, array_flip(['owner_id','title','description','schedule','format_id','meeting_duration_minutes','participant_capacity','gender_id','meeting_price','published_at','expires_at']))" />
 <x-panel title="Основная информация">
 @if($admin)
 @if(($realGroups ?? false) && ! $creating)
@@ -45,6 +45,19 @@
 </div>
 </div>
 </x-panel>
+@if($admin && ($realGroups ?? false) && !$creating)
+<x-panel title="Даты размещения">
+<p>Время по Минску (Europe/Minsk). Коррекция дат не меняет статус и длительность продления. Оставьте поле пустым, если дата не задана.</p>
+<div class="row">
+<div class="col-md-6">
+<x-input name="published_at" label="Дата публикации, Минск" type="datetime-local" step="1" :value="old('published_at', $published_atInput)" :error="$errors['published_at'] ?? null" />
+</div>
+<div class="col-md-6">
+<x-input name="expires_at" label="Дата окончания, Минск" type="datetime-local" step="1" :value="old('expires_at', $expires_atInput)" :error="$errors['expires_at'] ?? null" />
+</div>
+</div>
+</x-panel>
+@endif
 <div class="actions">
 @if($realGroups ?? false)
 @unless($admin)

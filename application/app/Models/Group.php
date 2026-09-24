@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Domain\Compatibility\AcceptFromStatus;
 use App\Enums\GroupStatus;
 use DomainException;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -14,6 +15,7 @@ use Illuminate\Support\Str;
 
 /**
  * @property GroupStatus $status
+ * @property Carbon|null $published_at
  * @property Carbon|null $expires_at
  * @property int|null $all_count
  * @property int|null $new_count
@@ -63,7 +65,14 @@ class Group extends Model
             'published_at' => 'datetime',
             'expires_at' => 'datetime',
             'expiry_warning_sent_at' => 'datetime',
+            'psychologist_deleted_at' => 'datetime',
         ];
+    }
+
+    /** @param Builder<Group> $query */
+    public function scopeVisibleToPsychologist(Builder $query, int $ownerId): void
+    {
+        $query->where('owner_id', $ownerId)->whereNull('psychologist_deleted_at');
     }
 
     /** @return BelongsTo<User, $this> */

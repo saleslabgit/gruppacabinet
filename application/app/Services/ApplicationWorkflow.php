@@ -13,7 +13,7 @@ class ApplicationWorkflow
     public function setProcessed(string $groupId, string $applicationId, User $actor, bool $processed): GroupApplication
     {
         return DB::transaction(function () use ($groupId, $applicationId, $actor, $processed): GroupApplication {
-            $group = Group::query()->where('owner_id', $actor->id)->lockForUpdate()->findOrFail($groupId);
+            $group = Group::query()->visibleToPsychologist($actor->id)->lockForUpdate()->findOrFail($groupId);
             $application = $group->applications()->lockForUpdate()->findOrFail($applicationId);
             $application->setRelation('group', $group);
             Gate::forUser($actor)->authorize('process', $application);

@@ -40,7 +40,29 @@ class GroupWorkflow
         return DB::transaction(function () use ($group, $actor, $data, $submit): Group {
             $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
             Gate::forUser($actor)->authorize($submit ? 'submit' : 'update', $locked);
-            $locked->update(Arr::only($data, self::FIELDS));
+            $locked->fill(Arr::only($data, self::FIELDS));
+            if ($actor->admin) {
+                $before = [];
+                foreach (['published_at', 'expires_at'] as $field) {
+                    $before[$field] = $locked->$field?->copy()->utc()->toIso8601String();
+                }
+                $locked->fill(Arr::only($data, ['published_at', 'expires_at']));
+                if ($locked->published_at !== null && $locked->expires_at !== null && $locked->expires_at->lte($locked->published_at)) {
+                    throw ValidationException::withMessages(['expires_at' => 'Дата окончания должна быть позже даты публикации.']);
+                }
+                if ($locked->isDirty('expires_at')) {
+                    $locked->expiry_warning_sent_at = null;
+                }
+                if ($locked->isDirty(['published_at', 'expires_at'])) {
+                    app(AuditService::class)->record('group', $locked->id, 'group_placement_dates_changed', [
+                        'old_published_at' => $before['published_at'],
+                        'new_published_at' => $locked->published_at?->copy()->utc()->toIso8601String(),
+                        'old_expires_at' => $before['expires_at'],
+                        'new_expires_at' => $locked->expires_at?->copy()->utc()->toIso8601String(),
+                    ], $actor);
+                }
+            }
+            $locked->save();
 
             return $submit ? $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user') : $locked;
         });
@@ -84,7 +106,15 @@ class GroupWorkflow
         DB::transaction(function () use ($group, $actor): void {
             $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
             Gate::forUser($actor)->authorize('delete', $locked);
+            if (! $actor->admin && $locked->status === GroupStatus::Rejected) {
+                $locked->update(['psychologist_deleted_at' => now()->utc()]);
+
+                return;
+            }
             $locked->delete();
+            if ($actor->admin) {
+                app(AuditService::class)->record('group', $locked->id, 'group_deleted', ['status' => $locked->status->value], $actor);
+            }
         });
     }
 }

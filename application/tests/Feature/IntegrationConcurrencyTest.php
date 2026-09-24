@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Group;
+use App\Models\IntegrationRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Symfony\Component\Process\Process;
@@ -62,5 +63,25 @@ class IntegrationConcurrencyTest extends TestCase
         $this->assertDatabaseCount('gp_users', 2);
         $this->assertDatabaseCount('gp_user_trainings', 4);
         $this->assertDatabaseCount('gp_integration_requests', 5);
+    }
+
+    public function test_concurrent_reuse_of_deleted_email_has_one_new_active_user(): void
+    {
+        foreach ([true, false] as $sameId) {
+            $email = $sameId ? 'same@example.test' : 'distinct@example.test';
+            $old = User::create(['email' => $email, 'status' => 'approved']);
+            $old->trainings()->create(['position' => 0, 'training_hours' => 10]);
+            $old->delete();
+            $before = $old->fresh()->getAttributes();
+            // Reuse worker IDs only after the previous case's assertions.
+            IntegrationRequest::query()->delete();
+            $results = $this->parallel('psychologists', ['email' => $email, 'personal_data_consent_at' => '2026-09-21T12:00:00Z', 'personal_data_consent_version' => 'synthetic', 'trainings' => [['training_hours' => 20]]], $sameId);
+            $new = User::where('email', $email)->sole();
+            $this->assertNotSame($old->id, $new->id);
+            $this->assertSame($sameId ? 4 : 1, count(array_filter($results, fn ($result) => $result['status'] === 201)));
+            $this->assertSame($before, $old->fresh()->getAttributes());
+            $this->assertSame(10, $old->trainings()->sole()->training_hours);
+            $this->assertSame(20, $new->trainings()->sole()->training_hours);
+        }
     }
 }

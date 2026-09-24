@@ -21,7 +21,7 @@ class GroupPolicy
 
     public function view(User $actor, Group $group): bool
     {
-        return $this->create($actor) && ! $group->trashed() && ($actor->admin || $group->owner_id === $actor->id);
+        return $this->create($actor) && ! $group->trashed() && ($actor->admin || ($group->owner_id === $actor->id && $group->psychologist_deleted_at === null));
     }
 
     public function update(User $actor, Group $group): bool
@@ -56,7 +56,7 @@ class GroupPolicy
             return false;
         }
         $eligible = $actor->admin
-            ? in_array($group->status, [GroupStatus::AwaitingPayment, GroupStatus::Draft], true) && $group->created_at->lte(now()->subDays(config('groups.abandoned_draft_days')))
+            ? true
             : ! $group->disabled && in_array($group->status, [GroupStatus::Draft, GroupStatus::Rejected], true);
 
         return $eligible && ! $group->payments()->withTrashed()->where('status', 'succeeded')->whereNull('refunded_at')->exists();

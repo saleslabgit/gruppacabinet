@@ -21,7 +21,7 @@ class GroupController extends Controller
 {
     public function index(Request $request): View
     {
-        $paginator = Group::query()->where('owner_id', $request->user()->id)->with(['format', 'gender'])->withCount(Group::applicationCounts())
+        $paginator = Group::query()->visibleToPsychologist($request->user()->id)->with(['format', 'gender'])->withCount(Group::applicationCounts())
             ->orderByDesc('created_at')->orderByDesc('id')->paginate(20);
         $paginator->getCollection()->each(fn (Group $group) => $group->setRelation('owner', $request->user()));
 
@@ -46,7 +46,7 @@ class GroupController extends Controller
 
     public function show(Request $request, string $group): View
     {
-        $model = Group::query()->where('owner_id', $request->user()->id)->withCount(Group::applicationCounts())->findOrFail($group);
+        $model = Group::query()->visibleToPsychologist($request->user()->id)->withCount(Group::applicationCounts())->findOrFail($group);
         Gate::authorize('view', $model);
 
         return view('psychologist.groups.show', GroupPages::detail($model, false) + [
@@ -56,7 +56,7 @@ class GroupController extends Controller
 
     public function edit(Request $request, string $group): View
     {
-        $model = Group::query()->where('owner_id', $request->user()->id)->findOrFail($group);
+        $model = Group::query()->visibleToPsychologist($request->user()->id)->findOrFail($group);
         Gate::authorize('update', $model);
 
         return view('psychologist.groups.form', GroupPages::form($model, false));
@@ -64,7 +64,7 @@ class GroupController extends Controller
 
     public function extension(Request $request, string $group): View
     {
-        $model = Group::query()->where('owner_id', $request->user()->id)->findOrFail($group);
+        $model = Group::query()->visibleToPsychologist($request->user()->id)->findOrFail($group);
         Gate::authorize('extend', $model);
 
         return view('psychologist.groups.extension', array_replace(GroupPages::detail($model, false, false), ['title' => 'Продление размещения', 'extensionPrice' => app(SettingService::class)->extensionPriceMinorUnits(),

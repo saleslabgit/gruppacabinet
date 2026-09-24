@@ -83,6 +83,9 @@ class GroupPages
             }
             $data[$relation.'Options'] = ['' => 'Выберите значение'] + $options;
         }
+        foreach (['published_at', 'expires_at'] as $field) {
+            $data[$field.'Input'] = $group->$field ? DateTimeFormatter::format($group->$field, 'Y-m-d\\TH:i:s') : '';
+        }
         $data['priceInput'] = $group->meeting_price === null ? '' : str_replace(' ', '', trim(MoneyFormatter::format($group->meeting_price, '')));
         $data['ownerOptions'] = $creating ? User::query()->where('admin', false)->where('disabled', false)->where('status', 'approved')
             ->orderBy('last_name')->orderBy('id')->get()->mapWithKeys(fn (User $user) => [$user->id => PsychologistPages::profile($user)['name'].' · '.$user->email])->all() : [];

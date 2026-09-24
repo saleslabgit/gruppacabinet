@@ -5,6 +5,8 @@ namespace App\Http\Requests;
 use App\Models\DictionaryItem;
 use App\Models\Group;
 use App\Services\GroupWorkflow;
+use App\Support\DateTimeFormatter;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\Rule;
@@ -21,7 +23,7 @@ class GroupRequest extends FormRequest
             return null;
         }
 
-        return Group::query()->where('owner_id', $this->user()->id)->findOrFail($group);
+        return Group::query()->visibleToPsychologist($this->user()->id)->findOrFail($group);
     }
 
     public function authorize(): bool
@@ -57,6 +59,13 @@ class GroupRequest extends FormRequest
             $rules['owner_id'] = ['required', 'integer', Rule::exists('gp_users', 'id')->where('admin', false)->where('disabled', false)->where('status', 'approved')->whereNull('deleted_at')];
         }
 
+        if ($group !== null && $this->user()->admin) {
+            foreach (['published_at', 'expires_at'] as $field) {
+                $rules[$field] = ['sometimes', 'nullable', 'date_format:Y-m-d\\TH:i,Y-m-d\\TH:i:s',
+                    'after_or_equal:1970-01-01T03:00:01', 'before_or_equal:2038-01-19T06:14:07'];
+            }
+        }
+
         return $rules;
     }
 
@@ -66,12 +75,20 @@ class GroupRequest extends FormRequest
         $parts = preg_split('/[.,]/', $data['meeting_price']);
         $data['meeting_price'] = (int) $parts[0] * 100 + (int) str_pad($parts[1] ?? '', 2, '0');
 
+        if ($this->group() !== null && $this->user()->admin) {
+            foreach (Arr::only($this->validated(), ['published_at', 'expires_at']) as $field => $value) {
+                $data[$field] = $value === null ? null : CarbonImmutable::parse($value, DateTimeFormatter::DISPLAY_TIMEZONE)->utc();
+            }
+        }
+
         return $data;
     }
 
     public function messages(): array
     {
-        return ['required' => 'Заполните это поле.', 'string' => 'Введите текст.', 'max' => 'Допустимо не более :max символов.',
+        return ['date_format' => 'Введите дату и время в формате ГГГГ-ММ-ДД ЧЧ:ММ.',
+            'after_or_equal' => 'Дата должна быть не раньше :date (Минск).', 'before_or_equal' => 'Дата должна быть не позже :date (Минск).',
+            'required' => 'Заполните это поле.', 'string' => 'Введите текст.', 'max' => 'Допустимо не более :max символов.',
             'integer' => 'Введите целое число.', 'between' => 'Введите число от :min до :max.',
             'in' => 'Выберите доступное значение справочника.', 'exists' => 'Выберите доступного психолога.',
             'meeting_price.regex' => 'Введите неотрицательную сумму с не более чем двумя знаками после запятой (до 16 цифр целой части).'];

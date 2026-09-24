@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\GroupStatus;
+use App\Models\AuditLog;
 use App\Models\Dictionary;
 use App\Models\DictionaryItem;
 use App\Models\Group;
@@ -10,6 +11,8 @@ use App\Models\Payment;
 use App\Models\Setting;
 use App\Models\User;
 use App\Payments\PaymentAttempts;
+use App\Services\AuditService;
+use App\Services\GroupLifecycleService;
 use App\Services\GroupStatusTransitionService;
 use App\Services\GroupWorkflow;
 use App\Services\SettingService;
@@ -116,7 +119,7 @@ class GroupWorkflowTest extends TestCase
         $this->assertSame($uuid, $group->public_uuid);
         $last = $group->statusHistory()->latest('id')->first();
         $this->assertSame($this->admin->id, $last->actor_id);
-        $before = $group->getAttributes();
+        $before = $group->fresh()->getAttributes();
         $historyCount = $group->statusHistory()->count();
         $this->travel(1)->days();
         $this->post('/admin/groups/'.$group->id.'/activate', ['confirmed' => 1])->assertForbidden();
@@ -135,7 +138,7 @@ class GroupWorkflowTest extends TestCase
             $prefix = $actor->admin ? '/admin/groups/' : '/groups/';
             $this->actingAs($actor)->put($prefix.$group->id, $this->fields + [
                 'owner_id' => $this->admin->id, 'public_uuid' => 'forged', 'free' => true, 'status' => 'active', 'accept' => true,
-                'disabled' => true, 'published_at' => '2026-01-01', 'expires_at' => '2027-01-01', 'placement_days' => 99,
+                'disabled' => true, 'published_at' => null, 'expires_at' => null, 'placement_days' => 99,
                 'expiry_warning_sent_at' => '2026-01-01', 'deleted_at' => '2026-01-01', 'moderator_comment' => 'Forged comment', 'rejection_reason' => 'Forged reason',
             ])->assertRedirect();
             $this->assertEquals($immutable, $group->fresh()->only(array_keys($immutable)));
@@ -223,7 +226,8 @@ class GroupWorkflowTest extends TestCase
         $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertOk()->assertSee('Подробная причина отклонения');
         $this->post('/groups/'.$group->id.'/submit', $this->fields)->assertForbidden();
         $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
-        $this->assertSoftDeleted($group);
+        $this->assertNull($group->fresh()->deleted_at);
+        $this->assertNotNull($group->fresh()->psychologist_deleted_at);
         $this->assertSame(3, $group->statusHistory()->count());
     }
 
@@ -283,7 +287,7 @@ class GroupWorkflowTest extends TestCase
         $this->get('/groups/'.$group->id)->assertNotFound();
     }
 
-    public function test_abandoned_cutoff_matches_filter_and_delete_policy(): void
+    public function test_abandoned_cutoff_filters_without_restricting_admin_deletion(): void
     {
         $this->travelTo(now()->setDate(2026, 9, 21)->startOfDay());
         $old = $this->draft();
@@ -291,12 +295,12 @@ class GroupWorkflowTest extends TestCase
         $young = $this->draft();
         $young->update(['created_at' => now()->subDays(30)->addSecond()]);
         $this->actingAs($this->admin)->get('/admin/groups?quick=abandoned')->assertOk()->assertViewHas('groups', fn ($groups) => $groups->pluck('id')->all() === [$old->id]);
-        $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
+        $this->assertTrue($this->admin->can('delete', $young));
         $this->delete('/admin/groups/'.$old->id, ['confirmed' => 1])->assertRedirect();
         $this->assertSoftDeleted($old);
         $this->assertSame(1, $old->statusHistory()->count());
         $young->update(['created_at' => now()->subDays(31), 'status' => 'active']);
-        $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
+        $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertRedirect();
     }
 
     public function test_lists_filters_pagination_and_constant_queries_without_payments(): void
@@ -417,5 +421,145 @@ class GroupWorkflowTest extends TestCase
             $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
         }
         $this->assertFalse($group->fresh()->trashed());
+    }
+
+    #[DataProvider('statuses')]
+    public function test_admin_deletion_in_every_status_requires_confirmation_refund_and_audit(string $status): void
+    {
+        $group = $this->draft();
+        $group->update(['status' => $status]);
+        $this->actingAs($this->admin)->get('/admin/groups/'.$group->id)->assertOk()->assertSee('data-bs-target="#delete-group"', false);
+        if ($status === 'active') {
+            $this->get('/admin/groups/'.$group->id)->assertSee('вручную снимите публикацию');
+        } elseif ($status === 'approved') {
+            $this->get('/admin/groups/'.$group->id)->assertSee('Проверьте, опубликована ли группа');
+        }
+        $this->delete('/admin/groups/'.$group->id)->assertSessionHasErrors('confirmed');
+        $payment = Payment::create(['owner_id' => $this->owner->id, 'group_id' => $group->id, 'type' => 'placement', 'order_number' => 'historical', 'amount' => 1, 'status' => 'succeeded']);
+        $payment->delete();
+        $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
+        $this->assertDatabaseCount('gp_audit_log', 0);
+        $payment->update(['refunded_at' => now()]);
+        $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
+        $this->assertSoftDeleted($group);
+        $this->assertSame($status, $group->fresh()->status->value);
+        $this->assertSame(1, $group->statusHistory()->count());
+        $audit = AuditLog::sole();
+        $this->assertSame('group_deleted', $audit->action);
+        $this->assertSame(['status' => $status], $audit->metadata);
+        $this->assertSame($this->admin->id, $audit->actor_id);
+        $this->get('/admin/groups/'.$group->id)->assertNotFound();
+    }
+
+    public function test_rejected_hide_closes_all_psychologist_routes_and_preserves_admin_data(): void
+    {
+        $group = $this->draft();
+        $group->update(['status' => 'rejected', 'title' => 'Hidden synthetic group']);
+        $application = $group->applications()->create(['first_name' => 'Synthetic', 'last_name' => 'Participant', 'phone' => 'test', 'phone_normalized' => '']);
+        $payment = Payment::create(['owner_id' => $this->owner->id, 'group_id' => $group->id, 'type' => 'placement', 'order_number' => 'hidden', 'amount' => 1, 'status' => 'succeeded']);
+        $payment->delete();
+        $this->actingAs($this->owner)->delete('/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
+        $this->assertNull($group->fresh()->psychologist_deleted_at);
+        $payment->update(['refunded_at' => now()]);
+        $this->travelTo(now()->utc()->startOfSecond());
+        $before = $group->fresh()->getAttributes();
+        $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
+        $group->refresh();
+        $this->assertTrue($group->psychologist_deleted_at->eq(now()->utc()));
+        $this->assertNull($group->deleted_at);
+        $this->assertSame('rejected', $group->status->value);
+        $this->assertSame($before['public_uuid'], $group->public_uuid);
+        $this->assertSame(1, $group->statusHistory()->count());
+        $this->assertFalse($this->owner->can('view', $group));
+        $this->assertFalse($this->owner->can('view', $application->fresh()));
+        $base = '/groups/'.$group->id;
+        foreach ([$base, $base.'/edit', $base.'/extension', $base.'/applications', $base.'/applications/'.$application->id] as $url) {
+            $this->get($url)->assertNotFound();
+        }
+        $this->get('/')->assertDontSee('Hidden synthetic group');
+        $this->put($base, $this->fields)->assertNotFound();
+        $this->post($base.'/submit', $this->fields)->assertNotFound();
+        $this->post($base.'/extension', ['confirmed' => 1])->assertNotFound();
+        $this->delete($base, ['confirmed' => 1])->assertNotFound();
+        foreach (['processed', 'unprocessed'] as $action) {
+            $this->post($base.'/applications/'.$application->id.'/'.$action)->assertNotFound();
+        }
+        $this->assertNull($application->fresh()->processed_at);
+        $this->actingAs($this->admin)->get('/admin/groups/'.$group->id)->assertOk()->assertSee('Hidden synthetic group');
+        $this->get('/admin/groups?status=rejected&search=Hidden')->assertOk()->assertSee('Hidden synthetic group');
+        $this->get('/admin/applications/'.$application->id)->assertOk();
+        $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
+        $this->assertSoftDeleted($group);
+        $this->assertDatabaseHas('gp_group_applications', ['id' => $application->id]);
+    }
+
+    public function test_admin_placement_dates_timezone_warning_audit_validation_and_scheduler(): void
+    {
+        $group = $this->draft();
+        $group->update(['status' => 'active', 'published_at' => '2026-09-01 12:34:56', 'expires_at' => '2026-10-01 12:34:56', 'placement_days' => 37, 'expiry_warning_sent_at' => '2026-09-20 12:00:00']);
+        $this->actingAs($this->admin)->get('/admin/groups/'.$group->id.'/edit')->assertOk()->assertSee('2026-09-01T15:34:56')->assertSee('2026-10-01T15:34:56')->assertDontSee('name="placement_days"', false);
+        $this->get('/admin/groups/create')->assertDontSee('name="published_at"', false);
+        $url = '/admin/groups/'.$group->id;
+        $this->put($url, $this->fields + ['published_at' => '2026-09-02T15:34:56'])->assertSessionHasNoErrors();
+        $this->assertSame('2026-09-02 12:34:56', $group->fresh()->published_at->toDateTimeString());
+        $this->assertNotNull($group->fresh()->expiry_warning_sent_at);
+        $this->assertDatabaseCount('gp_audit_log', 1);
+        $this->put($url, $this->fields + ['expires_at' => '2026-10-01T15:34:56'])->assertSessionHasNoErrors();
+        $this->assertNotNull($group->fresh()->expiry_warning_sent_at);
+        $this->assertDatabaseCount('gp_audit_log', 1);
+        foreach (['2026-09-02T15:34:56', '2026-09-01T15:34', '2026-02-30T15:00', '2039-01-01T00:00', 'invalid'] as $value) {
+            $this->put($url, $this->fields + ['expires_at' => $value])->assertSessionHasErrors('expires_at');
+        }
+        $this->assertDatabaseCount('gp_audit_log', 1);
+        $this->put($url, $this->fields + ['published_at' => '2026-11-01T00:00'])->assertSessionHasErrors('expires_at');
+        $this->put($url, $this->fields + ['expires_at' => '2026-09-03T15:30', 'placement_days' => 99, 'status' => 'expired'])->assertSessionHasNoErrors();
+        $group->refresh();
+        $this->assertNull($group->expiry_warning_sent_at);
+        $this->assertSame('2026-09-03 12:30:00', $group->expires_at->toDateTimeString());
+        $this->assertSame(GroupStatus::Active, $group->status);
+        $this->assertSame(37, $group->placement_days);
+        $this->assertSame(1, $group->statusHistory()->count());
+        $audit = AuditLog::where('action', 'group_placement_dates_changed')->latest('id')->firstOrFail();
+        $this->assertEquals(['old_published_at' => '2026-09-02T12:34:56+00:00', 'new_published_at' => '2026-09-02T12:34:56+00:00', 'old_expires_at' => '2026-10-01T12:34:56+00:00', 'new_expires_at' => '2026-09-03T12:30:00+00:00'], $audit->metadata);
+        $this->travelTo(now()->setDate(2026, 9, 24));
+        $this->assertTrue(app(GroupLifecycleService::class)->expireOne($group->id));
+        $this->assertSame(GroupStatus::Expired, $group->fresh()->status);
+        $this->put($url, $this->fields + ['published_at' => '', 'expires_at' => ''])->assertSessionHasNoErrors();
+        $this->assertNull($group->fresh()->published_at);
+        $this->assertNull($group->fresh()->expires_at);
+    }
+
+    public function test_psychologist_cannot_write_placement_or_hide_fields(): void
+    {
+        $group = $this->draft();
+        $this->actingAs($this->owner)->put('/groups/'.$group->id, $this->fields + ['published_at' => '2026-09-01T15:00', 'expires_at' => '2026-10-01T15:00', 'psychologist_deleted_at' => '2026-09-01', 'placement_days' => 99])->assertSessionHasNoErrors();
+        foreach (['published_at', 'expires_at', 'psychologist_deleted_at', 'placement_days'] as $field) {
+            $this->assertNull($group->fresh()->$field);
+        }
+        $this->assertDatabaseCount('gp_audit_log', 0);
+    }
+
+    public function test_audit_failure_rolls_back_admin_date_edit_and_delete(): void
+    {
+        $group = $this->draft();
+        $group->update(['published_at' => '2026-09-01 12:00:00', 'expires_at' => '2026-10-01 12:00:00', 'expiry_warning_sent_at' => now()]);
+        $before = $group->fresh()->getAttributes();
+        $audit = \Mockery::mock(AuditService::class);
+        $audit->shouldReceive('record')->twice()->andThrow(new \RuntimeException('Synthetic audit failure'));
+        $this->app->instance(AuditService::class, $audit);
+        foreach (['dates', 'delete'] as $operation) {
+            try {
+                if ($operation === 'dates') {
+                    app(GroupWorkflow::class)->save($group, $this->admin, ['title' => 'Must roll back', 'expires_at' => now()->setDate(2026, 11, 1)]);
+                } else {
+                    app(GroupWorkflow::class)->delete($group, $this->admin);
+                }
+                $this->fail('Expected audit failure');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('Synthetic audit failure', $exception->getMessage());
+            }
+            $this->assertSame($before, $group->fresh()->getAttributes());
+            $this->assertSame(1, $group->statusHistory()->count());
+        }
     }
 }
