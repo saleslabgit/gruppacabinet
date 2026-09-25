@@ -1,258 +1,171 @@
-# Task: TASK-2026-09-24-04
+# Task: TASK-2026-09-25-01
 
 Status: planned
-Created from: aff00f66d2dd75ac00025586bb03288d95abae28 (main)
+Created from: 5ad0f13baabe79f02fca047bdbd515134e88ae5a (main)
 
 ## Title
 
-Admin group controls, psychologist-hidden rejected groups, placement date editing, and deleted-email reuse
+Enforce HTTPS for the production cabinet and prevent HTTP login flows
 
 ## Goal
 
-Implement four approved product changes without adding arbitrary manual group-status overrides:
+Make the production cabinet at `gruppa.info/cabinet` HTTPS-only so a browser can never continue the login/session flow over plain HTTP.
 
-1. administrators can soft-delete groups in any status, subject to existing payment safety;
-2. when a psychologist deletes a rejected group, it disappears only from the psychologist cabinet and remains visible to administrators as a normal rejected group;
-3. administrators can manually correct group placement publication/expiry dates;
-4. a new public psychologist application may reuse the email of a soft-deleted psychologist by creating a new user record instead of returning `psychologist_conflict`.
-
-Do **not** implement the previously discussed generic admin "change group status manually" control in this task.
+Fix the deployment/runtime boundary, not the authentication business logic.
 
 ## Facts
 
-- Current HEAD is `aff00f66d2dd75ac00025586bb03288d95abae28`.
-- Groups already use Laravel soft deletes.
-- Current admin group delete policy is intentionally limited to abandoned old `awaiting_payment` / `draft` groups.
-- Current psychologist delete policy allows only `draft` and `rejected` groups and blocks deletion when a succeeded payment has not been marked refunded.
-- Current psychologist delete calls the same group soft-delete path as admin delete; therefore a psychologist-deleted rejected group also disappears from the admin cabinet.
-- Current admin group edit may change ordinary group content regardless of status but cannot edit `published_at` / `expires_at`.
-- Placement logic stores dates in UTC. Existing presentation converts them to `Europe/Minsk`.
-- `placement_days` is the duration snapshot used by the lifecycle/extension logic and is not currently an admin-editable content field.
-- Current intake loads psychologists with `withTrashed()` and treats any soft-deleted email match as `psychologist_conflict`.
-- The database already permits reuse of a soft-deleted psychologist email through the generated `active_email` unique key; admin psychologist validation also treats only non-deleted users as email conflicts.
-- Existing group statuses and transition matrix are explicit and must remain the source of lifecycle state.
-- Existing succeeded/unrefunded-payment safety must remain intact.
-- Existing status history must continue to contain only real status transitions.
+- Accepted base commit is `5ad0f13baabe79f02fca047bdbd515134e88ae5a`.
+- Remote `main` is identical to that commit; there are no newer repository commits or changed files on remote `main`.
+- The owner reproduced the issue in mobile Chrome: after psychologist login the browser can land on an `http://` cabinet URL; changing it manually to `https://` shows the user is already authenticated.
+- HTTPS request behavior itself is currently correct:
+  - unauthenticated `https://gruppa.info/cabinet/profile` returns a 302 whose `Location` is `https://gruppa.info/cabinet/login`;
+  - an invalid POST to `https://gruppa.info/cabinet/login` also redirects to `https://gruppa.info/cabinet/login`.
+- Plain HTTP is currently accepted:
+  - `http://gruppa.info/cabinet/login` returns `HTTP/1.1 200 OK` instead of redirecting to HTTPS.
+- Current `application/public/.htaccess` contains the standard Laravel rewrite/front-controller rules but no HTTP-to-HTTPS redirect.
+- `docs/deployment.md` already requires production `APP_URL=https://.../cabinet` and `SESSION_SECURE_COOKIE=true`, and explicitly notes that `APP_URL` alone cannot fix server rewrite errors.
+- `SPEC.md` defines the production cabinet URL as `https://gruppa.info/cabinet/` and requires production HTTPS.
+- Current login controller regenerates the session and redirects by named route; no hardcoded `http://` URL exists in the login form or controller.
+- Existing relevant tests include `AuthenticationTest`, `DeploymentPreflightTest`, and `SharedHostingRuntimeTest`.
+- Last accepted verification reported the full MySQL suite as **465 passed / 5683 assertions**, Pint PASS, Larastan no errors, platform requirements success, and `view:cache` success.
+
+## Assumptions
+
+- The production canonical host remains exactly `gruppa.info`.
+- The application continues to be published under `/cabinet`.
+- HTTPS termination/rewrite behavior must be handled safely for the actual shared-hosting topology; do not blindly trust client-supplied forwarded headers.
+
+## Unknowns
+
+- The exact mobile-Chrome navigation step that first enters plain HTTP has not been captured.
+- Whether HostER terminates TLS directly in the Apache context that reads this `.htaccess`, or through a trusted front proxy, is not proven from the repository.
+- The separate intermittent 405 issue and the suspected `route:cache` trigger are not yet isolated by the required production cache-by-cache test.
 
 ## Scope
 
-### 1. Administrator may soft-delete groups in any status
+### 1. Enforce canonical HTTPS for production cabinet traffic
 
-Change the admin delete authorization/UI so an eligible administrator may soft-delete any non-deleted group regardless of its status.
-
-Required rules:
-
-- keep soft delete; do not hard-delete groups;
-- keep the current safety rule: deletion is forbidden if the group has any succeeded payment, including soft-deleted historical payment rows, whose refund has not been recorded;
-- the payment safety applies to all statuses;
-- psychologist delete rules remain separate;
-- admin delete does not change the group status before deletion;
-- admin delete must not create fake status-history entries;
-- record the admin delete as a business audit entry (stable action code, e.g. `group_deleted`) with only minimal non-sensitive metadata such as current status;
-- the existing confirmation remains mandatory;
-- for an `active` group, show a clear warning that publication on `gruppa.info` must be removed manually before/when deleting;
-- for an `approved` group, show a warning to verify/remove any manual public-catalog publication if applicable;
-- warnings are operational guidance, not a new automatic external-site integration.
-
-Do not expose soft-deleted groups in the normal admin group list after an administrator deletes them.
-
-### 2. Psychologist deleting a rejected group hides it only from that psychologist
-
-Add an explicit nullable group field for the psychologist-side deletion/hide state, using a clear name such as:
-
-`psychologist_deleted_at`
-
-Semantics:
-
-- this is **not** Laravel soft delete;
-- only the psychologist-owner flow uses it;
-- when the owner deletes a `rejected` group:
-  - leave `gp_groups.deleted_at = null`;
-  - leave status exactly `rejected`;
-  - set `psychologist_deleted_at` to the current UTC time;
-  - do not remove payments, applications, status history, UUID or other related data;
-  - do not create a status transition;
-  - redirect successfully as today;
-- after that action the group must disappear from the psychologist's list and behave as nonexistent/inaccessible through psychologist group show/edit/delete/extension/application-management routes;
-- administrators must continue to see/open/search/filter the group normally as status `rejected`;
-- admin views must not silently filter on `psychologist_deleted_at`;
-- a psychologist deleting a `draft` group keeps the current real soft-delete behavior;
-- all existing succeeded/unrefunded-payment deletion safety remains: a rejected paid group cannot be psychologist-hidden until the refund is recorded;
-- a hidden rejected group may later be soft-deleted by an administrator under the new admin delete rule.
-
-Implement one reusable psychologist-visibility rule/scope rather than scattering inconsistent checks across routes.
-
-#### Existing-data migration
-
-Create an additive production-safe migration:
-
-- add nullable timestamp `psychologist_deleted_at` to `gp_groups`, with an index if useful for the owner-list query;
-- deterministically backfill existing rows that are currently soft-deleted **and** have status `rejected`:
-  - copy their old `deleted_at` value into `psychologist_deleted_at`;
-  - clear `deleted_at` so they become admin-visible again;
-  - keep status `rejected` and all related data unchanged;
-- do not restore soft-deleted groups in other statuses;
-- do not hard-delete anything.
-
-The migration must include a safe `down()`. Document any unavoidable information-loss limitation of rollback if needed.
-
-### 3. Administrator may manually edit placement dates
-
-Extend the existing admin group edit form for an existing group with:
-
-- `published_at`;
-- `expires_at`.
-
-Do **not** add `placement_days` as a manually editable field.
+Implement the smallest safe production-layer fix so requests to the cabinet over plain HTTP redirect permanently to the same cabinet URL on HTTPS.
 
 Required behavior:
 
-- only administrators can submit these fields;
-- psychologist-crafted requests cannot change them;
-- do not show them on admin group creation as required content;
-- use the existing display convention: human input is presented as `Europe/Minsk` local date/time and converted to UTC for storage;
-- prefill the fields from current stored values converted to `Europe/Minsk`;
-- allow nullable values where the current lifecycle legitimately has no placement dates;
-- when both are non-null, require `expires_at > published_at`;
-- editing these dates does **not** change group status automatically;
-- editing these dates does **not** change `placement_days`;
-- when `expires_at` changes, always set `expiry_warning_sent_at = null`;
-- when only `published_at` changes and `expires_at` does not, do not reset the warning marker solely for that reason;
-- keep the update transactional;
-- record a business audit entry with a stable action code such as `group_placement_dates_changed`;
-- audit metadata may contain only old/new UTC ISO timestamps for `published_at` / `expires_at`, not group questionnaire content or PII;
-- do not create group status-history rows for date-only edits.
+- `http://gruppa.info/cabinet/login` redirects to `https://gruppa.info/cabinet/login`;
+- arbitrary `/cabinet/*` paths preserve their path and query string when redirected;
+- already-HTTPS requests do not redirect again;
+- the redirect happens before Laravel authentication/session handling;
+- do not reflect an untrusted arbitrary `Host` value into the redirect target; the production canonical host is fixed as `gruppa.info`;
+- do not break local/test development on localhost or the existing `/cabinet` base-path behavior;
+- do not create a redirect loop if the real hosting topology uses a front proxy/TLS terminator;
+- if forwarded-proto handling is needed, trust it only in a way justified by the verified hosting topology; do not globally trust arbitrary client proxy headers.
 
-Lifecycle remains unchanged:
+Prefer a web-server/public-entry solution because HTTPS-only behavior must also protect requests that may be served without entering Laravel. Keep the change surgical.
 
-- active groups whose manually-set `expires_at` is due will still be handled by the existing expiration scheduler;
-- changing dates never performs `active -> expired` or any reverse transition synchronously;
-- free/paid extension logic continues using the stored `placement_days` snapshot exactly as before.
+### 2. Preserve auth/session behavior
 
-### 4. Public psychologist application may reuse a soft-deleted email
+Do not redesign login/session logic.
 
-Change the Stage 11 psychologist intake conflict logic.
+Verify that:
 
-Required matrix for a **new request ID**:
+- successful psychologist login still regenerates the session and redirects to the psychologist home;
+- successful admin login still redirects to the admin home;
+- failed login behavior remains unchanged;
+- secure-cookie production requirements remain intact;
+- named routes and generated production URLs stay under `https://gruppa.info/cabinet`.
 
-- no active user with the email, even if one or more soft-deleted historical users exist -> create a new pending psychologist with a new user ID;
-- active pending/rejected user -> keep current resubmission/update behavior;
-- active approved user -> `psychologist_conflict`;
-- active disabled user -> `psychologist_conflict`;
-- a soft-deleted historical row never gets restored or mutated by the new intake;
-- historical documents, trainings, groups, payments and other data continue pointing to the historical user;
-- the new user starts a fresh lifecycle and fresh related data;
-- same-ID idempotent replay behavior remains unchanged;
-- concurrent same-email intake must still be protected by the existing active-email uniqueness/concurrency handling and must not create two active users.
+Do not add `URL::forceScheme('https')`, trusted-proxy configuration, or application middleware merely as a workaround unless implementation evidence shows it is actually required in addition to the server-layer redirect.
 
-Do not change the public-site `form_cabinet.php` contract for this behavior.
+### 3. Tests and documentation
 
-### 5. UI and documentation
+Add focused regression coverage appropriate to the chosen implementation.
 
-Update the existing approved Blade pages only; do not create parallel pages.
+At minimum:
 
-Update relevant SPEC/docs to reflect the implemented behavior:
+- cover the HTTPS-only deployment contract deterministically without requiring a live production Apache instance;
+- keep/extend auth/base-path tests so generated production redirects remain HTTPS;
+- verify local/test URLs are not unintentionally forced to the production host;
+- update `docs/deployment.md` with the canonical HTTP -> HTTPS requirement and exact production smoke checks;
+- update other documentation only if the implementation changes an already documented fact.
 
-- admin delete is available for all statuses subject to payment safety;
-- psychologist "delete" for rejected means hide from psychologist cabinet while preserving the rejected group for admin;
-- draft psychologist delete remains real soft delete;
-- admin can edit placement publication/expiry dates, in Minsk UI time / UTC storage, without editing `placement_days`;
-- manual date correction does not itself change status;
-- soft-deleted psychologist email can be used for a fresh public application/new user;
-- existing group status transition matrix is unchanged;
-- generic manual admin status override is explicitly **not** part of this change.
+The production smoke procedure must include checks equivalent to:
+
+```bash
+curl -sS -D - -o /dev/null http://gruppa.info/cabinet/login
+curl -sS -D - -o /dev/null http://gruppa.info/cabinet/
+curl -sS -D - -o /dev/null 'http://gruppa.info/cabinet/login?probe=1'
+curl -sS -D - -o /dev/null https://gruppa.info/cabinet/login
+```
+
+Expected production result:
+
+- every HTTP cabinet request redirects to the same `https://gruppa.info/cabinet/...` URL;
+- HTTPS does not loop or downgrade;
+- mobile Chrome psychologist login completes without exposing or requiring an `http://` cabinet URL.
 
 ## Out Of Scope
 
 Do NOT:
 
-- add a generic admin status dropdown;
-- add arbitrary manual status transitions;
-- bypass the existing group status transition service;
-- change the enum transition matrix;
-- auto-publish or auto-unpublish anything on `gruppa.info`;
-- edit `placement_days` manually;
-- change payment/refund semantics;
-- auto-refund WEBPAY;
-- change extension pricing/tariff rules;
-- hard-delete groups/users/payments/documents/history;
-- restore a soft-deleted psychologist when their email is reused;
-- merge old and new psychologist histories;
-- change public intake payload fields;
-- change WEBPAY signing/trust;
-- change auth/session/password flows;
-- add dependencies.
+- investigate or modify the intermittent 405 / `route:cache` issue in this task;
+- remove `route:cache` from deployment instructions without the separate production isolation result;
+- change `.htaccess` front-controller behavior unrelated to HTTPS;
+- change login credentials, throttling, role checks, session invalidation, CSRF, password setup, or authorization semantics;
+- weaken `SESSION_SECURE_COOKIE`;
+- add HSTS for the whole `gruppa.info` host as a side effect; HSTS affects the entire hostname and requires a separate host-level decision;
+- change the main public site's code or redirects;
+- change WEBPAY behavior or callback trust;
+- add dependencies;
+- add secrets, hosting credentials, logs, or production data.
 
 ## Constraints
 
 - Laravel 12 / PHP ^8.2.
-- MySQL production compatibility remains required.
-- Migration must be additive and safe for retained production data.
-- All multi-row/state-changing operations remain transactional where applicable.
-- Status remains the sole group lifecycle source of truth.
-- Soft-delete semantics for admin group deletion remain intact.
-- Preserve private documents, payments, applications, status history and audit boundaries.
-- No real production PII, uploads, logs or credentials in tests/commits.
-- No real external WEBPAY/mail calls.
-- Keep the diff focused on these approved changes.
+- Production cabinet path remains `/cabinet`.
+- Canonical production origin remains `https://gruppa.info`.
+- Preserve the existing symlink/public-path deployment model.
+- Keep local development usable without redirecting localhost to production.
+- Use a fixed/safe redirect target rather than arbitrary Host-header reflection.
+- Avoid proxy-header trust expansion unless justified by verified infrastructure.
+- No production data changes or migrations are expected.
+- Keep the diff focused on HTTPS enforcement, relevant regression tests, deployment documentation, and `.ai/report.md`.
 - Do not edit `.ai/task.md`.
 
 ## Acceptance Criteria
 
-1. Admin can soft-delete a group in every group status when payment safety permits.
-2. Admin cannot delete any group with a succeeded payment lacking recorded refund.
-3. Admin deletion is audited and does not fabricate a status transition.
-4. Active/approved admin delete UI includes the required manual-publication warning.
-5. Psychologist deleting a draft still performs ordinary soft delete.
-6. Psychologist deleting a rejected group sets `psychologist_deleted_at`, keeps `deleted_at` null and keeps status `rejected`.
-7. That hidden rejected group disappears from all psychologist-owned group flows but remains fully visible/searchable/filterable to admin as rejected.
-8. Existing soft-deleted rejected groups are migrated to the new psychologist-hidden state and become visible to admin again.
-9. Other pre-existing soft-deleted group statuses remain soft-deleted.
-10. Admin may edit `published_at` and `expires_at` on an existing group using Minsk-local UI values stored as UTC.
-11. Psychologist requests cannot change placement dates.
-12. If both placement dates are present, expiry must be later than publication.
-13. Changing `expires_at` resets `expiry_warning_sent_at`; changing only publication date does not.
-14. Manual date edits do not change status or `placement_days`.
-15. Manual date edits are audited with minimal old/new timestamp metadata and do not create status-history rows.
-16. A fresh psychologist application may reuse the email of a soft-deleted psychologist and creates a distinct new pending user.
-17. The old soft-deleted psychologist and all historical relations remain unchanged.
-18. Active pending/rejected/approved/disabled email behavior remains correct.
-19. Same-ID replay and concurrent same-email safety remain correct.
-20. No generic admin manual-status control or transition-matrix change is introduced.
-21. Relevant migration, group workflow/policy/UI, intake and concurrency tests pass.
-22. Full MySQL suite passes.
-23. Pint and Larastan pass.
-24. Documentation matches implemented behavior.
-25. No secrets, logs, real PII/uploads or unrelated artifacts are committed.
+1. Plain HTTP access to `gruppa.info/cabinet/*` is redirected to the equivalent HTTPS URL before auth/session handling.
+2. Redirect preserves the cabinet path and query string.
+3. Redirect target cannot be changed to an arbitrary host through the request Host header.
+4. HTTPS requests are not downgraded and do not enter a redirect loop.
+5. Local/test development is not forced to `gruppa.info`.
+6. Successful psychologist/admin login behavior and session regeneration remain unchanged.
+7. Failed login semantics remain unchanged.
+8. Production-generated login/home URLs remain under `https://gruppa.info/cabinet`.
+9. Relevant focused tests pass.
+10. Full MySQL suite passes.
+11. Pint and Larastan pass.
+12. `composer check-platform-reqs` and `php artisan view:cache` pass.
+13. Deployment documentation contains the HTTP -> HTTPS smoke checks and expected results.
+14. No unrelated `route:cache`/405 change is included.
+15. No secrets, logs, production data, or unrelated artifacts are committed.
 
 ## Checks
 
 Run and report exact results for:
 
-1. migration/backfill test on disposable MySQL covering:
-   - rejected soft-deleted -> admin-visible + `psychologist_deleted_at` preserved from old delete time;
-   - non-rejected soft-deleted remains deleted;
-   - rollback behavior;
-2. focused `GroupWorkflowTest`;
-3. focused `GroupLifecycleTest`;
-4. relevant payment-era group tests proving succeeded/unrefunded deletion protection remains;
-5. admin/psychologist group page tests including direct-route access after psychologist hide;
-6. focused `IntegrationIntakeTest` for deleted-email reuse and active-user matrix;
-7. `IntegrationConcurrencyTest` for same-email/idempotency safety;
-8. relevant psychologist admin tests for email uniqueness consistency;
-9. focused audit-log assertions;
-10. full MySQL test suite;
-11. Pint;
-12. Larastan;
-13. `composer check-platform-reqs`;
-14. `php artisan view:cache`;
-15. browser smoke for the changed admin group form/delete warning and psychologist rejected-delete flow at desktop/mobile widths;
-16. `git diff --check`;
-17. final git/staged/secrets/artifact review.
+1. focused `AuthenticationTest`;
+2. focused `SharedHostingRuntimeTest`;
+3. focused deployment/HTTPS regression test(s) added or updated for this task;
+4. `DeploymentPreflightTest` if touched or affected;
+5. full MySQL test suite;
+6. `php ./vendor/bin/pint --test`;
+7. `php ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M`;
+8. `composer check-platform-reqs`;
+9. `php artisan view:cache`;
+10. any local web-server smoke available for HTTP/HTTPS rewrite behavior, clearly distinguishing it from real production acceptance;
+11. `git diff --check`;
+12. final `git status --short`, full diff, staged-file, secrets/artifact review.
 
-Database suites sharing the test database must run sequentially.
-
-Do not make real external mail or WEBPAY requests.
+After deployment, production acceptance is performed by the operator/user using the documented `curl` checks and a real mobile-Chrome psychologist login. If Codex has no production access, report those checks as **not run**, not as passed.
 
 ## Hard Workflow Gate
 
@@ -260,53 +173,49 @@ Before editing:
 
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm HEAD is this planner commit and its parent is `aff00f66d2dd75ac00025586bb03288d95abae28`;
+- confirm HEAD is this planner commit and its parent is `5ad0f13baabe79f02fca047bdbd515134e88ae5a`;
 - read `WORKFLOW.md`;
 - read `AGENTS.md`;
 - read this `.ai/task.md`;
 - read current `.ai/report.md`;
-- read relevant SPEC sections for deletion, group lifecycle/statuses, moderation, placement dates, admin groups and Stage 11 repeated psychologist intake;
+- read the relevant HTTPS/base-path/production deployment sections of `SPEC.md`;
 - inspect:
-  - `Group`;
-  - `GroupPolicy`;
-  - `GroupWorkflow`;
-  - `GroupLifecycleService`;
-  - `GroupStatusTransitionService`;
-  - admin and psychologist `GroupController`;
-  - `GroupRequest` and `GroupActionRequest`;
-  - group Blade list/detail/form/delete actions;
-  - `GroupPages` and date-time formatting helpers;
-  - `AuditService`;
-  - `IntakeService`;
-  - user email uniqueness migration/validation;
-  - group workflow/lifecycle/payment/intake/concurrency tests;
-- do not overwrite unknown local changes.
+  - `application/public/.htaccess`;
+  - `application/public/index.php`;
+  - `application/bootstrap/app.php`;
+  - `application/app/Http/Controllers/SessionController.php`;
+  - `application/config/app.php`;
+  - `application/config/session.php`;
+  - `application/resources/views/auth/login.blade.php`;
+  - `docs/deployment.md`;
+  - `AuthenticationTest`;
+  - `SharedHostingRuntimeTest`;
+  - `DeploymentPreflightTest`;
+- verify there are no unknown local changes before touching files.
 
 During implementation:
 
 - work only within this task;
 - do not edit `.ai/task.md`;
-- use a migration for the new group field/backfill;
-- keep admin delete and psychologist hide as distinct domain operations;
-- do not represent psychologist hide as a status transition;
-- do not let psychologist-hidden state leak into admin filtering;
-- keep all UI date conversions explicit between Minsk display/input and UTC storage;
-- do not add a manual status override;
-- preserve payment safety and WEBPAY behavior;
-- keep tests deterministic and synthetic.
+- keep HTTPS enforcement before auth/session processing;
+- preserve `/cabinet` path and query strings;
+- do not introduce Host-header open redirects;
+- do not expand trusted-proxy scope speculatively;
+- do not alter auth/session semantics;
+- do not touch the separate 405/`route:cache` issue;
+- keep tests deterministic and free of real external requests.
 
 Before commit:
 
 - run all applicable checks above;
-- inspect full diff and staged files;
-- verify the migration is production-safe and no `migrate:fresh` assumption is required;
-- verify no manual status dropdown/route/service bypass was added;
-- verify no `.env`, credentials, tokens, logs, real PII/uploads or unrelated artifacts are staged;
-- update `.ai/report.md` with factual results only, including migration/deployment notes.
+- inspect the complete diff and staged files;
+- verify no unrelated rewrite/auth/session/deployment changes are present;
+- verify no `.env`, credentials, tokens, logs, production data, uploads, caches, or temporary artifacts are staged;
+- update `.ai/report.md` with factual results only, explicitly separating local verification from production checks not actually run.
 
 If complete, commit with:
 
-`codex: TASK-2026-09-24-04 expand group admin controls and deleted-email reuse`
+`codex: TASK-2026-09-25-01 enforce HTTPS for production cabinet`
 
 If blocked/partial/failed, record the real status and reason in `.ai/report.md`; do not present incomplete work as done.
 
