@@ -14,6 +14,7 @@ class ProductionHttpsRedirectTest extends TestCase
         $rule = <<<'RULE'
     RewriteCond %{HTTP_HOST} ^gruppa\.info(?::80)?$ [NC]
     RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !^https$ [NC]
     RewriteRule ^ https://gruppa.info%{REQUEST_URI} [R=301,L]
 RULE;
         $this->assertStringContainsString($rule, $htaccess);
@@ -21,7 +22,6 @@ RULE;
             strpos($htaccess, '# Handle Authorization Header'),
             strpos($htaccess, 'RewriteCond %{HTTP_HOST} ^gruppa\.info'),
         );
-        $this->assertStringNotContainsString('X-Forwarded-Proto', $htaccess);
         $this->assertStringNotContainsString('SERVER_PORT', $htaccess);
 
         foreach (['gruppa.info', 'gruppa.info:80', 'GRUPPA.INFO'] as $host) {

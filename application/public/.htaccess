@@ -5,9 +5,11 @@
 
     RewriteEngine On
 
+    # HostER overwrites X-Forwarded-Proto; HTTPS can be off behind its TLS proxy.
     # Enforce the production cabinet origin before files or Laravel are served.
     RewriteCond %{HTTP_HOST} ^gruppa\.info(?::80)?$ [NC]
     RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !^https$ [NC]
     RewriteRule ^ https://gruppa.info%{REQUEST_URI} [R=301,L]
 
     # Handle Authorization Header

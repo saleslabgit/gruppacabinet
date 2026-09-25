@@ -76,9 +76,13 @@ Deploy the current `application/public/.htaccess` with the public files (or thro
 its symlink). For requests whose Host is `gruppa.info`, Apache redirects plain
 HTTP to the same path on `https://gruppa.info` before serving files or invoking
 Laravel. The original query string is retained. Local hosts are unaffected.
-The rule uses Apache's `HTTPS` variable, not the port or client-supplied proxy
-headers. A HostER web-PHP probe observed `HTTPS=on` for external HTTPS requests
-and no `HTTPS` value for HTTP requests, both with `SERVER_PORT=80`.
+The rule skips the redirect when either Apache's `HTTPS=on` or HostER's
+`X-Forwarded-Proto=https` reports HTTPS; it does not use `SERVER_PORT`. HostER's
+public proxy was verified to overwrite that header: an HTTP request with a
+client-supplied `X-Forwarded-Proto: https` still reached web PHP as `http`, and
+an HTTPS request with a client-supplied `X-Forwarded-Proto: http` reached it as
+`https`. The latter also had `HTTPS=on`; both protocols reported
+`SERVER_PORT=80`. This trust is specific to the verified HostER public endpoint.
 
 After deploying the public files, run these checks against production:
 
@@ -87,16 +91,19 @@ curl -sS -D - -o /dev/null http://gruppa.info/cabinet/login
 curl -sS -D - -o /dev/null http://gruppa.info/cabinet/
 curl -sS -D - -o /dev/null 'http://gruppa.info/cabinet/login?probe=1'
 curl -sS -D - -o /dev/null https://gruppa.info/cabinet/login
+curl -sS -D - -o /dev/null -H 'X-Forwarded-Proto: https' http://gruppa.info/cabinet/login
+curl -sS -D - -o /dev/null -H 'X-Forwarded-Proto: http' https://gruppa.info/cabinet/login
 ```
 
 The first three responses must be permanent redirects with `Location` set to
 `https://gruppa.info/cabinet/login`, `https://gruppa.info/cabinet/`, and
-`https://gruppa.info/cabinet/login?probe=1`, respectively. The HTTPS request
-must not redirect back to HTTP or loop. Check an arbitrary `/cabinet/*` path
-and a public asset as well. Finally, sign in as a psychologist in mobile Chrome;
-login and subsequent cabinet pages must stay on HTTPS. This operator check is
-required because local tests cannot verify the live host's parent rewrites or
-its deployed `.htaccess`.
+`https://gruppa.info/cabinet/login?probe=1`, respectively. The spoofed-header
+HTTP request must also redirect to HTTPS. Neither HTTPS request may loop,
+downgrade or redirect solely because of the supplied header. Check an arbitrary
+`/cabinet/*` path and a public asset as well. Finally, sign in as a psychologist
+in mobile Chrome; login and subsequent cabinet pages must stay on HTTPS.
+This operator check is required because local tests cannot verify the live
+host's parent rewrites or its deployed `.htaccess`.
 
 ## Configure and migrate
 
