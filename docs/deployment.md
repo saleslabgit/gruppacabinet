@@ -70,6 +70,34 @@ controller, preserve `/cabinet` as the request base path, and exclude it from th
 main site's redirects. Test assets, login redirects, setup links, return/cancel
 and notify URLs over real HTTPS; APP_URL alone cannot fix server rewrite errors.
 
+## Production cabinet HTTPS redirect
+
+Deploy the current `application/public/.htaccess` with the public files (or through
+its symlink). For requests whose Host is `gruppa.info`, Apache redirects plain
+HTTP to the same path on `https://gruppa.info` before serving files or invoking
+Laravel. The original query string is retained. Local hosts are unaffected.
+The rule uses Apache's `HTTPS` variable, not the port or client-supplied proxy
+headers. A HostER web-PHP probe observed `HTTPS=on` for external HTTPS requests
+and no `HTTPS` value for HTTP requests, both with `SERVER_PORT=80`.
+
+After deploying the public files, run these checks against production:
+
+```bash
+curl -sS -D - -o /dev/null http://gruppa.info/cabinet/login
+curl -sS -D - -o /dev/null http://gruppa.info/cabinet/
+curl -sS -D - -o /dev/null 'http://gruppa.info/cabinet/login?probe=1'
+curl -sS -D - -o /dev/null https://gruppa.info/cabinet/login
+```
+
+The first three responses must be permanent redirects with `Location` set to
+`https://gruppa.info/cabinet/login`, `https://gruppa.info/cabinet/`, and
+`https://gruppa.info/cabinet/login?probe=1`, respectively. The HTTPS request
+must not redirect back to HTTP or loop. Check an arbitrary `/cabinet/*` path
+and a public asset as well. Finally, sign in as a psychologist in mobile Chrome;
+login and subsequent cabinet pages must stay on HTTPS. This operator check is
+required because local tests cannot verify the live host's parent rewrites or
+its deployed `.htaccess`.
+
 ## Configure and migrate
 
 Use private runtime .env values supplied by the operator:

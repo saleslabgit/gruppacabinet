@@ -5,6 +5,11 @@
 
     RewriteEngine On
 
+    # Enforce the production cabinet origin before files or Laravel are served.
+    RewriteCond %{HTTP_HOST} ^gruppa\.info(?::80)?$ [NC]
+    RewriteCond %{HTTPS} !=on
+    RewriteRule ^ https://gruppa.info%{REQUEST_URI} [R=301,L]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

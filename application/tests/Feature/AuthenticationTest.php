@@ -161,6 +161,41 @@ class AuthenticationTest extends TestCase
         }
     }
 
+    public static function productionRoles(): array
+    {
+        return [[false, 'psychologist.home'], [true, 'admin.home']];
+    }
+
+    #[DataProvider('productionRoles')]
+    public function test_production_login_redirects_remain_https_for_each_role(bool $admin, string $route): void
+    {
+        config()->set('app.url', 'https://gruppa.info/cabinet');
+        URL::forceRootUrl(config('app.url'));
+        $user = $this->user(['admin' => $admin]);
+
+        $this->get('https://gruppa.info/login')->assertOk()
+            ->assertSee('action="https://gruppa.info/cabinet/login"', false);
+        $oldId = session()->getId();
+        $this->post('https://gruppa.info/login', [
+            'email' => $user->email, 'password' => 'password',
+        ])->assertRedirect(route($route));
+        $this->assertSame('https://gruppa.info/cabinet'.($admin ? '/admin' : ''), route($route));
+        $this->assertAuthenticatedAs($user);
+        $this->assertNotSame($oldId, session()->getId());
+    }
+
+    public function test_production_failed_login_redirect_remains_https(): void
+    {
+        config()->set('app.url', 'https://gruppa.info/cabinet');
+        URL::forceRootUrl(config('app.url'));
+
+        $this->post('https://gruppa.info/login', [
+            'email' => 'unknown@example.test', 'password' => 'wrong',
+        ])->assertRedirect('https://gruppa.info/cabinet/login')
+            ->assertSessionHas('login_state', 'error');
+        $this->assertGuest();
+    }
+
     public static function revokedStates(): array
     {
         return [['disabled'], ['rejected'], ['pending'], ['deleted'], ['missing']];
