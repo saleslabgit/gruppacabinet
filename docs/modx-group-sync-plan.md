@@ -1,10 +1,10 @@
 # MODX group synchronization implementation plan
 
-Status: **dictionary synchronization implemented; group-form and outbound phases planned**
+Status: **MODX dictionary synchronization, Cabinet group schema/form, HTML sanitizer, progressive rich-text editor and private cover storage implemented; MODX cover transport, payload mapper, outbound create/update job and end-to-end outbound synchronization planned**
 
-This document is the implementation order for the next Gruppa Cabinet milestone.
-It intentionally separates verified current infrastructure from planned Cabinet
-changes.
+This document records the implemented Cabinet milestones and the remaining
+MODX outbound implementation order. It separates current behavior from planned
+transport, mapping and synchronization work.
 
 ## Verified starting point
 
@@ -16,16 +16,25 @@ changes.
   TV values plus MIGX JSON.
 - Canonical group Resource target: parent **3**, template **8**, context
   `web`, `published=false`.
-- Current Cabinet group form still has one plain `description` textarea and
-  one free-text `schedule`; only format/gender are dictionary relations.
-- Current MODX outbound client/job does not exist in Cabinet.
+- MODX dictionary synchronization is implemented for format, gender, group type,
+  approaches and tags; the Cabinet form uses their local synchronized IDs.
+- Cabinet group schema and shared form are implemented: short `description`,
+  full HTML description, cover, structured meeting days/start time, frequency,
+  city, format/gender/group type and multiple approaches/tags.
+- Server-side HTML sanitizer, progressive rich-text editor and private Cabinet
+  cover storage with authorized previews are implemented.
+- Legacy free-text `schedule` remains only as a read-only fallback; it is not
+  editable, parsed or overwritten by the current form.
+- MODX cover transport, payload mapper, outbound create/update client/job and
+  end-to-end outbound synchronization remain planned. Approval does not dispatch
+  an outbound job, and no MODX resource-ID column exists in Cabinet yet.
 
 ## Target ownership model
 
 ### Cabinet is authoritative for group content
 
-Once implemented, the following are authored in Cabinet and outbound sync may
-overwrite their managed MODX TV values:
+Group content is authored in Cabinet. Once outbound synchronization is
+implemented, it may overwrite the following managed MODX TV values:
 
 - title;
 - short description;
@@ -56,12 +65,10 @@ MODX owns the selectable values and labels for:
 Cabinet stores local integer FKs for domain integrity and the exact MODX stored
 value as `modx_value`. Display label changes do not change local FK identity.
 
-## Target group schema
+## Group schema — implemented and planned
 
-Keep the current `description` column but redefine its UI/domain meaning as
-**short description**.
-
-Add to `gp_groups`:
+The existing `description` column is retained as **short description**.
+TASK-2026-10-01-02 added these nullable fields to `gp_groups`:
 
 ```text
 full_description_html
@@ -74,13 +81,13 @@ start_time             HH:MM
 frequency
 city
 group_type_id
-public_site_resource_id
 ```
 
-Keep legacy `schedule` nullable during migration; do not parse arbitrary old
-text automatically.
+`public_site_resource_id` remains planned for outbound synchronization; it is
+not part of the current schema. Legacy nullable `schedule` is preserved only
+as a read-only fallback, without automatic parsing or form writes.
 
-Add pivots:
+Implemented pivots:
 
 ```text
 gp_group_approaches(group_id, dictionary_item_id)
@@ -92,8 +99,8 @@ at outbound sync time.
 
 ## Target dictionary metadata
 
-For MODX-managed dictionaries, add enough metadata to identify the remote source
-without matching labels:
+TASK-2026-10-01-01 implemented the following MODX-managed dictionary metadata
+to identify the remote source without matching labels:
 
 ```text
 gp_dictionaries:
@@ -151,7 +158,8 @@ unambiguous ordered options for `format`, `gender`, `groupType`,
 Implemented by TASK-2026-10-01-01 (automated verification uses synthetic HTTP fakes):
 
 - schema metadata above;
-- five managed dictionary containers; no new group relations or pivots;
+- five managed dictionary containers; group relations/pivots were added later
+  in Phase 3;
 - mxHeadless read client;
 - `ModxDictionarySyncService`;
 - `php artisan modx:sync-dictionaries`;
@@ -207,8 +215,9 @@ Fields:
 - multiple tags;
 - existing duration/capacity/meeting price.
 
-Legacy groups with only free-text `schedule` are not guessed. They must fill the
-new structured schedule before a future moderation submission that requires it.
+Legacy free-text `schedule` is displayed only as a read-only fallback. Its
+contents are never parsed into structured values. The current moderation submit
+requires structured meeting days and start time; ordinary legacy saves remain possible.
 
 ## Phase 4 — HTML safety and cover storage
 
@@ -236,7 +245,7 @@ sync, extend the MODX endpoint to accept bounded image content (planned base64
 inside authenticated JSON for the low request volume) and raise/verify the
 mxHeadless/hosting request limit sufficiently for base64 overhead.
 
-## Phase 5 — Mapping builder
+## Phase 5 — Mapping builder (planned)
 
 Owner: Codex after exact MODX option/multiple serialization is known.
 
@@ -272,7 +281,7 @@ Unresolved until separately verified:
 - exact weekday serialization if the MODX `days` TV requires more than the
   verified single-value example.
 
-## Phase 6 — Outbound create/update job
+## Phase 6 — Outbound create/update job (planned)
 
 Owner: Codex.
 
@@ -288,7 +297,7 @@ After committed `moderation -> approved`:
 8. do not roll the group back from `approved` on transient MODX failure;
 9. expose safe admin sync status/retry diagnostics.
 
-## Phase 7 — End-to-end acceptance
+## Phase 7 — End-to-end outbound acceptance (planned)
 
 Use synthetic/non-public data and verify:
 

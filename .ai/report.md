@@ -138,3 +138,35 @@ select, отсутствие enhanced controls и schedule/leader; все чет
 Hard Workflow Gate пройден; разрешён task commit:
 `codex: TASK-2026-10-01-02 expand group content form`.
 Accept commit не создаётся.
+
+## Corrective documentation-only iteration — 2026-10-01
+
+По прямому запросу пользователя после успешного code review устранена
+документационная несогласованность, блокировавшая acceptance. Исходный HEAD —
+`94f8894` (`codex: TASK-2026-10-01-02 expand group content form`);
+`git log --oneline -5` и `git status --short` проверены до изменений,
+рабочая директория была чистой. Повторная итерация явно разрешена пользователем.
+
+Изменены только `docs/modx-group-sync-plan.md` и этот отчёт:
+
+- Верхний status и Verified starting point отражают реализованные dictionary
+  sync, Cabinet schema/form, HTML sanitizer, progressive rich-text editor и
+  private cover storage.
+- Удалено устаревшее описание формы как единственного plain textarea/free-text
+  schedule с одними format/gender связями.
+- Legacy `schedule` описан только как read-only fallback без parsing/form writes.
+- Раздел схемы отличает реализованные nullable поля/pivots от будущего
+  `public_site_resource_id`; уточнено, что group relations добавлены в Phase 3.
+- MODX cover transport, payload mapper, outbound create/update job и end-to-end
+  outbound synchronization остаются planned; заголовки Phases 5–7 это фиксируют.
+- Документ целиком проверен на согласованность status, исходной точки, схемы,
+  Phases 2–7 и Task ordering.
+
+`git diff --check` прошёл. Application code, tests и `.ai/task.md` не менялись.
+Тесты приложения повторно не запускались: текущая итерация меняет только Markdown;
+результаты предыдущей implementation-итерации выше не заявляются новым прогоном.
+MODX-запросы, runtime-действия и accept commit не выполнялись.
+
+Staged review: ровно два указанных Markdown-файла; staged-содержимое совпадает
+с просмотренным diff. `git diff --cached --check` прошёл; посторонних файлов,
+секретов и артефактов нет. Коммит разрешён после этой проверки.
