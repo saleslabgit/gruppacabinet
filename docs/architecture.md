@@ -465,6 +465,27 @@ file metadata, signatures or secrets are logged. Stage 11 has no email/password
 invitation, job, payment or group lifecycle effect. See `integration.md` for the
 external contract and deployment prerequisites.
 
+## Outbound MODX draft synchronization boundary
+
+A new outbound integration is specified for approved groups. The main site runs
+MODX 3 with mxHeadless and an externally managed `GruppaCabinetApi` plugin that
+registers protected `POST /api/v1/cabinet/resources/sync` with scope
+`cabinet.sync`. A manual production-site smoke has confirmed that the endpoint
+can create an unpublished Resource and persist ordinary TV values plus a MIGX
+JSON value.
+
+The endpoint accepts two transport sections: scalar `resource` fields and
+`tvs`. Array TV values are JSON-encoded for MIGX. It validates referenced TV
+names before writes and wraps Resource + TV persistence in one MODX database
+transaction. The canonical group container for future Cabinet sync is MODX
+Resource parent **3** (not 308), template **8**, context `web`, with
+`published=false` on create.
+
+This external endpoint exists, but the Cabinet outbound HTTP client, queue job,
+MODX resource-ID persistence and final field mapping are **not implemented yet**.
+Those belong to the dedicated follow-up stage in `SPEC.md`. Cabinet must never
+write directly to MODX database tables. See `docs/modx-api.md`.
+
 ## Stage 12 mail boundary
 
 `PasswordSetupService` creates a fresh framework broker/token repository using

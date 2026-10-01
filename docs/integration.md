@@ -1,4 +1,8 @@
-# Incoming integration v1
+# Integration
+
+> Этот документ описывает существующий входящий поток **public site → Cabinet**. Новый исходящий поток **Cabinet → MODX** для автоматического создания/обновления неопубликованного черновика описан отдельно в [`docs/modx-api.md`](modx-api.md). MODX endpoint уже установлен и проверен вручную; Cabinet-side клиент и mapping полей ещё не реализованы.
+
+## Incoming integration v1
 
 Stage 11 exposes **public submission endpoints**, normally called by the backend
 of the existing public site after a browser form submission. Direct callers can
@@ -166,13 +170,15 @@ text are accepted. The trimmed submitted value is preserved in `phone`.
 (with a leading international `00` removed); other text yields `''`. No country
 code is inferred or prepended. Raw admin phone search remains available.
 
-The public-site administrator copies **ID группы для gruppa.info** from the
-cabinet's group page into the public site's `cabinet_group_uuid` field (or its
-equivalent). That field should be nullable before linking and unique when filled.
-Send it as `group_uuid`. The cabinet looks up only immutable `public_uuid`, checks
-`status=active` and `disabled=false`, and derives ownership from the matched
-group's `owner_id`. **Never send `psychologist_id`, `owner_id`, `group_id`, IDs,
-status or processed flags**; unknown fields produce 422.
+Until the Cabinet-side outbound MODX synchronization is implemented, the existing
+public-site link may still be populated manually. The target flow is for Cabinet
+to create/update the MODX draft through mxHeadless, retain the returned MODX
+resource ID and write the approved mapping, including the Cabinet `public_uuid`,
+without manual re-entry. Regardless of how the MODX record is linked, the public
+site sends the Cabinet UUID as `group_uuid`. The cabinet looks up only immutable
+`public_uuid`, checks `status=active` and `disabled=false`, and derives ownership
+from the matched group's `owner_id`. **Never send `psychologist_id`, `owner_id`,
+`group_id`, IDs, status or processed flags**; unknown fields produce 422.
 
 Unknown/deleted UUID: 404 `group_not_found`. Non-active or disabled group: 422
 `group_not_accepting_applications`. Success: 201, one unprocessed application,

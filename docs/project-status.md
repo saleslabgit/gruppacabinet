@@ -196,6 +196,22 @@ The public-site contract is `docs/integration.md`. Stage 11 itself adds no mail
 or payment effects. Public-site implementation/deployment is external; Stage 12
 adds the email flows described below.
 
+## MODX outbound API preparation
+
+The public MODX site now has mxHeadless installed and an external
+`GruppaCabinetApi` extension endpoint at
+`POST /api/v1/cabinet/resources/sync`, protected by the `cabinet.sync`
+scope. Manual smoke verification confirmed creation of an unpublished Resource
+and persistence/read-back of ordinary TV values and a MIGX JSON value. The
+canonical MODX group parent for future integration is Resource ID **3**;
+template ID **8** and context `web` are currently confirmed.
+
+No Cabinet application code for this outbound flow has been implemented yet:
+there is no HTTP client/job, no stored MODX resource ID, and the final field
+mapping has not been approved. Current inbound Stage 11 APIs are unchanged.
+The verified endpoint contract and remaining boundaries are documented in
+`docs/modx-api.md`.
+
 ## Stage 12 email and onboarding
 
 Stage 12 is complete and verified locally; verification details are in `.ai/report.md`.
