@@ -6,6 +6,7 @@ use App\Enums\GroupStatus;
 use App\Models\Group;
 use App\Models\User;
 use App\Services\DictionaryUsage;
+use App\Services\GroupModxPayloadBuilder;
 use App\Services\GroupStatusTransitionService;
 use App\Services\GroupWorkflow;
 use App\Services\SettingService;
@@ -175,5 +176,53 @@ class GroupContentTest extends TestCase
         $this->assertSame($this->fields['approach_ids'], $this->group->fresh()->approaches->modelKeys());
         $this->assertSame($this->fields['tag_ids'], $this->group->fresh()->tags->modelKeys());
         $this->assertSame(1, $this->group->statusHistory()->count());
+    }
+
+    public function test_optional_currency_validation_old_input_detail_and_modx_mapping(): void
+    {
+        $this->assertNull($this->group->fresh()->meeting_price_currency);
+        $fields = $this->fields + ['meeting_price_currency' => '  2500 RUB, 30 USD  '];
+        $this->actingAs($this->owner)->put('/groups/'.$this->group->id, $fields)->assertSessionHasNoErrors();
+        $group = $this->group->fresh();
+        $this->assertSame('2500 RUB, 30 USD', $group->meeting_price_currency);
+        $this->assertSame(3500, $group->meeting_price);
+        $this->get('/groups/'.$group->id)->assertSee('Стоимость встречи (В валюте)')->assertSee('2500 RUB, 30 USD');
+        $this->get('/groups/'.$group->id.'/edit')->assertSee('Цена одной встречи с указанием валюты')->assertSee('2500 RUB, 30 USD');
+        $body = json_decode(app(GroupModxPayloadBuilder::class)->build($group)['body'], true);
+        $this->assertSame('2500 RUB, 30 USD', $body['tvs']['price_usd']);
+        $this->assertSame('35', $body['tvs']['price']);
+        $fields['meeting_price_currency'] = '0';
+        $this->put('/groups/'.$group->id, $fields)->assertSessionHasNoErrors();
+        $this->get('/groups/'.$group->id)->assertSee('Стоимость встречи (В валюте)');
+        $fields['meeting_price_currency'] = str_repeat('x', 256);
+        $this->from('/groups/'.$group->id.'/edit')->put('/groups/'.$group->id, $fields)->assertSessionHasErrors('meeting_price_currency');
+        $this->get('/groups/'.$group->id.'/edit')->assertSee(str_repeat('x', 256));
+        foreach (['   ', null, ''] as $empty) {
+            $fields['meeting_price_currency'] = $empty;
+            $this->put('/groups/'.$group->id, $fields)->assertSessionHasNoErrors();
+            $group = $group->fresh();
+            $this->assertNull($group->meeting_price_currency);
+            $this->get('/groups/'.$group->id)->assertDontSee('Стоимость встречи (В валюте)');
+            $body = json_decode(app(GroupModxPayloadBuilder::class)->build($group)['body'], true);
+            $this->assertArrayNotHasKey('price_usd', $body['tvs']);
+        }
+    }
+
+    public function test_reduced_editor_keeps_native_controls_and_safe_legacy_html(): void
+    {
+        $legacy = '<h2>Heading</h2><h3>Subheading</h3><blockquote>Quote</blockquote><p><a href="https://example.test">Link</a></p>';
+        $fields = array_replace($this->fields, ['full_description_html' => $legacy]);
+        $this->actingAs($this->owner)->put('/groups/'.$this->group->id, $fields)->assertSessionHasNoErrors();
+        $this->get('/groups/'.$this->group->id)->assertSee($legacy, false);
+        $this->get('/groups/'.$this->group->id.'/edit')->assertSee('name="full_description_html"', false)
+            ->assertSee('name="approach_ids[]"', false)->assertSee(' multiple', false)
+            ->assertDontSee('Без JavaScript доступен')->assertDontSee('Без JavaScript используйте');
+        $js = file_get_contents(public_path('ui.js'));
+        foreach (["['Жирный', 'bold']", "['Курсив', 'italic']", "['Список', 'insertUnorderedList']", "['Нумерация', 'insertOrderedList']", "['Убрать форматирование', 'removeFormat']"] as $control) {
+            $this->assertStringContainsString($control, $js);
+        }
+        foreach (["['Абзац'", "['H2'", "['H3'", "['Цитата'", "['Ссылка'"] as $control) {
+            $this->assertStringNotContainsString($control, $js);
+        }
     }
 }

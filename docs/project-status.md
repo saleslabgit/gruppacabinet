@@ -100,8 +100,8 @@ revision/rejection comments. History retains every comment and actor.
 
 Manual activation snapshots current configured duration, calculates UTC dates
 from activation, resets the warning marker and records admin history. UUID
-copy/reminder is available before activation. Owner draft/rejected deletion and
-admin abandoned-draft deletion are soft deletes with historical payment safety.
+copy/reminder is available before activation. Owner deletion hides any visible group while retaining admin access; admin deletion
+soft-deletes and audits. Historical payments survive and do not block deletion.
 Lists use eager loading, filters/search, deterministic sorting and pagination;
 payment queries are excluded from normal listing. Stage 10 adds aggregate
 application counters and real application links; payment operations have no real routes or links. Stage 9 connects free extension.
@@ -295,8 +295,8 @@ real get_transaction and manual Sandbox refund are NOT VERIFIED locally.
 
 ## WEBPAY admin corrections and shared-hosting baseline
 
-Admin abandoned filtering/deletion includes old awaiting_payment and draft groups,
-with successful-unrefunded payment protection preserved. The real successful
+Admin abandoned filtering includes old awaiting_payment and draft groups.
+Deletion accepts any visible status and preserves payments without requiring refund. The real successful
 payment filter composes with other group filters. Awaiting-payment copy describes
 the current payment flow and retains the placement-payment detail link.
 
@@ -320,3 +320,13 @@ HostER PCNTL and local MTA acceptance are reported by the task; downstream relay
 inbox delivery, DNS/reputation and available MTA logs remain external unknowns.
 Transport acceptance does not establish inbox delivery. See email.md and
 deployment.md for timeout limits and manual staging verification.
+
+## TASK-2026-10-01-04 — pause/publication lifecycle
+
+Cabinet implementation adds form polish, optional currency → price_usd, paused
+lifecycle with frozen placement time, asynchronous resume of the same Resource,
+and automatic unpublication on pause/delete/expiry. Revision guards and shared
+content/publication locks protect queued work. Any visible group can be deleted;
+payments/history remain and no automatic refund occurs. Initial approved publication
+and expired renewal remain manual. External publication endpoint is operator-managed;
+live acceptance is still pending. Exact verification results are in `.ai/report.md`.

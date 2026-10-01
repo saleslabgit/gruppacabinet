@@ -18,5 +18,17 @@
 <x-button type="submit" kind="secondary" icon="arrow-repeat">Синхронизировать повторно</x-button>
 </form>
 @endcan
-<p class="small mt-3">Синхронизация обновляет содержимое. Публикация на основном сайте выполняется вручную.</p>
+<p class="small mt-3">Синхронизация обновляет содержимое. Первоначальная публикация и публикация после продления законченной группы выполняются вручную.</p>
+<h3>Публикация на основном сайте</h3>
+<dl class="detail-grid">
+<div><dt>Запрошено состояние</dt><dd>{{ ['published' => 'Опубликована', 'unpublished' => 'Снята с публикации'][$groupModel->modx_publication_desired] ?? 'Не запрашивалось' }}</dd></div>
+<div><dt>Состояние публикации</dt><dd>{{ ['pending' => 'В очереди', 'syncing' => 'Выполняется', 'published' => 'Опубликована', 'unpublished' => 'Снята с публикации', 'failed' => 'Ошибка', 'conflict' => 'Конфликт'][$groupModel->modx_publication_status] ?? 'Не подтверждено' }}</dd></div>
+@foreach(['requested' => 'Запрошено', 'started' => 'Начало попытки', 'synced' => 'Подтверждено', 'failed' => 'Ошибка'] as $event => $label)
+@php($field = 'modx_publication_'.$event.'_at')
+@if($groupModel->$field)<div><dt>{{ $label }}</dt><dd><x-date :value="$groupModel->$field" /></dd></div>@endif
+@endforeach
+</dl>
+@if($groupModel->modx_publication_error_code)
+<x-alert tone="warning">{{ \App\Support\GroupModxStatus::error($groupModel->modx_publication_error_code) }}</x-alert>
+@endif
 </x-panel>

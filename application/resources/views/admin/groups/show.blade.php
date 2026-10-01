@@ -19,13 +19,9 @@
 @endif
 <x-button icon="pencil" kind="secondary" :href="($realGroups ?? false) ? route('admin.groups.edit', $group['id']) : route('prototype.admin-group-form',['variant'=>'edit'])">Редактировать</x-button>
 @if(!($realGroups ?? false) || $canDelete)
-<x-button icon="trash" kind="danger" :disabled="$group['has_unrefunded_payment'] ?? false" data-bs-toggle="modal" data-bs-target="#delete-group">Удалить</x-button>
+<x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-group">Удалить</x-button>
 @endif
 </div>
-@if(!($realGroups ?? false) && $group['has_unrefunded_payment'])
-<x-alert tone="warning" class="mt-4">Есть успешный платёж без отметки возврата. Удаление недоступно. @if($group['status'] === 'rejected')Сначала выполните ручной возврат в WEBPAY и отметьте его в кабинете.@endif
-</x-alert>
-@endif
 </div>
 @endsection
 @section('content')

@@ -459,4 +459,18 @@ class ModxGroupSyncTest extends TestCase
             $this->assertStringNotContainsString($private, $failed->exception.$failed->payload);
         }
     }
+
+    public function test_paused_admin_content_update_preserves_resource_and_publication(): void
+    {
+        $this->approve();
+        $this->runJob();
+        $this->group->refresh()->update(['status' => 'paused', 'paused_at' => now(), 'modx_publication_desired' => 'unpublished', 'modx_publication_status' => 'unpublished']);
+        $this->fakeHttp(['*' => Http::response($this->response(412, false))]);
+        app(GroupWorkflow::class)->save($this->group, $this->admin, ['title' => 'Paused content']);
+        $this->runJob();
+        $this->assertSame('paused', $this->group->fresh()->status->value);
+        $this->assertSame('unpublished', $this->group->fresh()->modx_publication_status);
+        Http::assertSent(fn ($r) => $r['resource_id'] === 412 && ! isset($r['resource']['published']) && ! isset($r['published']));
+        $this->actingAs($this->admin)->post('/admin/groups/'.$this->group->id.'/sync-modx')->assertSessionHasNoErrors();
+    }
 }

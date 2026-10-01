@@ -75,7 +75,7 @@ inside 191 characters. Updates omit alias to preserve the public URL.
 The installed endpoint enforces parent **3**, template **8**, context `web`,
 `published=false` on create; Cabinet does not send or override those fields.
 Updates require the same parent/template/context and preserve publication.
-Cabinet never publishes, unpublishes or deletes a MODX Resource.
+Content sync preserves publication. A separate publication endpoint handles pause/resume/delete/expiry; Cabinet never deletes a MODX Resource.
 
 ## TV and MIGX values
 
@@ -337,3 +337,29 @@ External deployment checklist (operator verification required):
 
 The external MODX plugin is maintained outside this repository. Automated tests
 use synthetic HTTP/storage fakes; live upload/create/update has not been verified.
+
+## Publication endpoint (TASK-2026-10-01-04)
+
+Operator-managed prerequisite: POST `/api/v1/cabinet/resources/publication`, scope
+`cabinet.sync`, HTTPS, same Bearer config/timeouts, no redirects. External plugin
+source is outside this repository; live acceptance has not been performed.
+
+Exact JSON: `{"resource_id":123,"published":false}` (or true).
+Idempotency-Key: `group-publication:<public_uuid>:<resource_id>:<revision>`.
+Each logical intent increments revision; retries keep identical key and raw body.
+Success: `{"data":{"resource_id":123,"published":false,"changed":true},"meta":[]}`.
+Positive integer ID must match request; published must match requested boolean;
+boolean-compatible flags are accepted. Already-correct changed=false is success.
+Endpoint must enforce parent=3/template=8/context=web, never delete Resource,
+apply standard publish/unpublish metadata, clear scheduled dates, run equivalent
+MODX events/cache clearing and validate publishability/alias collisions on publish.
+
+Connection/timeout, 429, 5xx and known in-progress 409 retry (4 tries, backoff
+60/300/900). Auth, validation, not-found, malformed success and body-conflict 409
+are permanent. Safe codes only are stored; no raw responses/request snapshots.
+Conflicting keys are not automatically rotated. Shared content/publication lock
+serializes remote writes; row-locked revision checks reject stale local results.
+
+`meeting_price_currency` → TV price_usd only when nonempty; omission preserves any
+manual/legacy TV. Primary price remains whole BYN. Initial manual publication and
+expired renewal are unchanged; only paused resume automatically publishes.

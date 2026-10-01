@@ -30,7 +30,7 @@ final class PrototypeFixtures
         $admin = str_starts_with($slug, 'admin-');
         $long = $variant === 'long';
         $date = CarbonImmutable::parse('2026-09-20 09:00:00', 'UTC');
-        $groupStatuses = ['awaiting_payment', 'draft', 'moderation', 'revision', 'rejected', 'approved', 'active', 'expired'];
+        $groupStatuses = ['awaiting_payment', 'draft', 'moderation', 'revision', 'rejected', 'approved', 'active', 'paused', 'expired'];
         $status = in_array($variant, $groupStatuses, true) ? $variant : 'active';
         if (in_array($variant, ['outside-window', 'free-expired', 'paid-expired'], true)) {
             $status = 'expired';
@@ -50,8 +50,11 @@ final class PrototypeFixtures
         if ($variant === 'validation' && $slug === 'admin-group') {
             $status = 'moderation';
         }
-        if (in_array($variant, ['confirmation', 'paid-delete-blocked'], true)) {
+        if (in_array($variant, ['confirmation', 'paid-delete-allowed'], true)) {
             $status = 'draft';
+        }
+        if (str_starts_with($variant, 'resume-')) {
+            $status = 'paused';
         }
         $group = [
             'id' => 101, 'title' => $long ? str_repeat('Демонстрационная группа поддержки и бережного общения ', 5) : 'Быть собой: группа поддержки',
@@ -61,16 +64,19 @@ final class PrototypeFixtures
             'group_type_id' => 'demo', 'group_type' => 'Терапевтическая · пример',
             'approach_ids' => ['demo'], 'tag_ids' => ['demo'], 'approaches' => ['Подход · пример'], 'tags' => ['Отношения · пример'],
             'schedule' => 'По средам, 19:00–21:00 (Минск)', 'format' => 'Очно · пример справочника', 'format_id' => 'demo',
-            'meeting_duration_minutes' => 120, 'participant_capacity' => 8, 'gender_id' => 'demo', 'gender' => 'Любой · пример справочника', 'meeting_price' => 3500,
-            'status' => $status, 'disabled' => $variant === 'disabled', 'free' => ! in_array($variant, ['awaiting_payment', 'paid-rejected', 'paid-delete-blocked', 'paid', 'successful-payment'], true),
+            'meeting_duration_minutes' => 120, 'participant_capacity' => 8, 'gender_id' => 'demo', 'gender' => 'Любой · пример справочника', 'meeting_price' => 3500, 'meeting_price_currency' => '30 USD',
+            'paused_at' => $status === 'paused' ? $date->subDay() : null,
+            'modx_publication_desired' => str_starts_with($variant, 'resume-') ? 'published' : ($status === 'paused' ? 'unpublished' : null),
+            'modx_publication_status' => str_starts_with($variant, 'resume-') ? substr($variant, 7) : ($status === 'paused' ? 'unpublished' : null),
+            'status' => $status, 'disabled' => $variant === 'disabled', 'free' => ! in_array($variant, ['awaiting_payment', 'paid-rejected', 'paid-delete-allowed', 'paid', 'successful-payment'], true),
             'public_uuid' => '11111111-2222-4333-8444-555555555555',
-            'has_unrefunded_payment' => in_array($variant, ['paid-rejected', 'paid-delete-blocked', 'paid', 'successful-payment'], true),
-            'created_at' => $date->subDays(80), 'published_at' => $status === 'active' ? $date->subDays($variant === 'warning' ? 27 : 15) : ($status === 'expired' ? $date->subDays($variant === 'outside-window' ? 70 : 35) : null),
-            'expires_at' => $status === 'active' ? $date->addDays($variant === 'warning' ? 3 : 15) : ($status === 'expired' ? $date->subDays($variant === 'outside-window' ? 40 : 5) : null),
+            'has_unrefunded_payment' => in_array($variant, ['paid-rejected', 'paid-delete-allowed', 'paid', 'successful-payment'], true),
+            'created_at' => $date->subDays(80), 'published_at' => in_array($status, ['active', 'paused'], true) ? $date->subDays($variant === 'warning' ? 27 : 15) : ($status === 'expired' ? $date->subDays($variant === 'outside-window' ? 70 : 35) : null),
+            'expires_at' => in_array($status, ['active', 'paused'], true) ? $date->addDays($variant === 'warning' ? 3 : 15) : ($status === 'expired' ? $date->subDays($variant === 'outside-window' ? 40 : 5) : null),
             'warning' => $variant === 'warning', 'outside_window' => $variant === 'outside-window',
             'moderator_comment' => 'Уточните расписание и опишите, кому подходит группа.'.($long ? str_repeat(' Добавьте подробности о формате встреч.', 12) : ''),
             'rejection_reason' => 'Описание группы не соответствует условиям размещения.',
-            'new_count' => in_array($status, ['active', 'expired'], true) ? 2 : 0, 'processed_count' => in_array($status, ['active', 'expired'], true) ? 3 : 0, 'all_count' => in_array($status, ['active', 'expired'], true) ? 5 : 0,
+            'new_count' => in_array($status, ['active', 'paused', 'expired'], true) ? 2 : 0, 'processed_count' => in_array($status, ['active', 'paused', 'expired'], true) ? 3 : 0, 'all_count' => in_array($status, ['active', 'paused', 'expired'], true) ? 5 : 0,
         ];
         if ($variant === 'empty' && in_array($slug, ['applications', 'admin-applications'], true)) {
             $group['new_count'] = $group['processed_count'] = $group['all_count'] = 0;
@@ -83,11 +89,11 @@ final class PrototypeFixtures
                 $item['status'] = $itemStatus;
                 $item['id'] += $index;
                 $item['free'] = $itemStatus !== 'awaiting_payment';
-                $item['new_count'] = in_array($itemStatus, ['active', 'expired'], true) ? 2 : 0;
-                $item['processed_count'] = in_array($itemStatus, ['active', 'expired'], true) ? 3 : 0;
+                $item['new_count'] = in_array($itemStatus, ['active', 'paused', 'expired'], true) ? 2 : 0;
+                $item['processed_count'] = in_array($itemStatus, ['active', 'paused', 'expired'], true) ? 3 : 0;
                 $item['all_count'] = $item['new_count'] + $item['processed_count'];
-                $item['published_at'] = in_array($itemStatus, ['active', 'expired'], true) ? $date->subDays(31) : null;
-                $item['expires_at'] = $itemStatus === 'active' ? $date->addDays(3) : ($itemStatus === 'expired' ? $date->subDay() : null);
+                $item['published_at'] = in_array($itemStatus, ['active', 'paused', 'expired'], true) ? $date->subDays(31) : null;
+                $item['expires_at'] = in_array($itemStatus, ['active', 'paused'], true) ? $date->addDays(3) : ($itemStatus === 'expired' ? $date->subDay() : null);
                 $groups[] = $item;
             }
         }

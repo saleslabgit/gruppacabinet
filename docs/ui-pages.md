@@ -90,6 +90,7 @@ View: `application/resources/views/psychologist/groups/index.blade.php`.
 - `/cabinet/_prototype/groups/rejected`
 - `/cabinet/_prototype/groups/approved`
 - `/cabinet/_prototype/groups/active`
+- `/cabinet/_prototype/groups/paused`
 - `/cabinet/_prototype/groups/warning`
 - `/cabinet/_prototype/groups/expired`
 - `/cabinet/_prototype/groups/outside-window`
@@ -128,6 +129,10 @@ View: `application/resources/views/psychologist/groups/show.blade.php`.
 - `/cabinet/_prototype/group/rejected`
 - `/cabinet/_prototype/group/approved`
 - `/cabinet/_prototype/group/active`
+- `/cabinet/_prototype/group/paused`
+- `/cabinet/_prototype/group/resume-pending`
+- `/cabinet/_prototype/group/resume-failed`
+- `/cabinet/_prototype/group/resume-conflict`
 - `/cabinet/_prototype/group/warning`
 - `/cabinet/_prototype/group/expired`
 - `/cabinet/_prototype/group/outside-window`
@@ -135,7 +140,7 @@ View: `application/resources/views/psychologist/groups/show.blade.php`.
 - `/cabinet/_prototype/group/long`
 - `/cabinet/_prototype/group/permission`
 - `/cabinet/_prototype/group/confirmation`
-- `/cabinet/_prototype/group/paid-delete-blocked`
+- `/cabinet/_prototype/group/paid-delete-allowed`
 
 ## 9. Оплата размещения
 
@@ -319,6 +324,7 @@ View: `application/resources/views/admin/groups/index.blade.php`.
 - `/cabinet/_prototype/admin-groups/rejected`
 - `/cabinet/_prototype/admin-groups/approved`
 - `/cabinet/_prototype/admin-groups/active`
+- `/cabinet/_prototype/admin-groups/paused`
 - `/cabinet/_prototype/admin-groups/warning`
 - `/cabinet/_prototype/admin-groups/expired`
 - `/cabinet/_prototype/admin-groups/outside-window`
@@ -347,6 +353,10 @@ View: `application/resources/views/admin/groups/show.blade.php`.
 - `/cabinet/_prototype/admin-group/rejected`
 - `/cabinet/_prototype/admin-group/approved`
 - `/cabinet/_prototype/admin-group/active`
+- `/cabinet/_prototype/admin-group/paused`
+- `/cabinet/_prototype/admin-group/resume-pending`
+- `/cabinet/_prototype/admin-group/resume-failed`
+- `/cabinet/_prototype/admin-group/resume-conflict`
 - `/cabinet/_prototype/admin-group/warning`
 - `/cabinet/_prototype/admin-group/expired`
 - `/cabinet/_prototype/admin-group/outside-window`
@@ -354,7 +364,7 @@ View: `application/resources/views/admin/groups/show.blade.php`.
 - `/cabinet/_prototype/admin-group/validation`
 - `/cabinet/_prototype/admin-group/confirmation`
 - `/cabinet/_prototype/admin-group/paid-rejected`
-- `/cabinet/_prototype/admin-group/paid-delete-blocked`
+- `/cabinet/_prototype/admin-group/paid-delete-allowed`
 - `/cabinet/_prototype/admin-group/long`
 - `/cabinet/_prototype/admin-group/permission`
 - `/cabinet/_prototype/admin-group/success`
@@ -546,8 +556,8 @@ CSRF-защищённые действия. Поиск и фильтры сох�
   Комментарии связаны с реальными формами подтверждения; ошибки сохраняют ввод.
 
 Удаление подтверждается на карточке; из списка психолог открывает «Подробнее».
-Admin удаляет группы во всех статусах при отсутствии succeeded-платежей без
-отметки возврата, включая soft-deleted платежи. Фильтр брошенных групп сохраняет
+Admin удаляет группы во всех статусах независимо от succeeded-платежей;
+исторические платежи сохраняются без автоматического возврата. Фильтр брошенных групп сохраняет
 порог 30 дней; доступность удаления от него не зависит.
 Формы показывают предупреждение, если нет доступных значений справочников.
 Нет вымышленных платежей/заявок и активных ссылок на будущие функции.
@@ -673,11 +683,10 @@ validation-ошибки первого блока и длинные значен
 
 ## TASK-2026-09-24-04 — удаление и даты групп
 
-В существующем подтверждении удаления admin для active показано требование
-вручную снять публикацию на gruppa.info; для approved — проверить публикацию
-и снять её при наличии. Удаление admin — soft delete без смены статуса.
-Психолог удаляет draft через soft delete, rejected — скрывает только в своём
-кабинете; карточка объясняет сохранение отклонённой группы у администратора.
+Подтверждение удаления объясняет автоматическое снятие синхронизированной группы
+с публикации и отсутствие автоматического возврата. Удаление admin — soft delete
+без смены статуса. Психолог скрывает группу любого статуса только в своём кабинете;
+карточка объясняет сохранение группы и платежей у администратора.
 Все прямые маршруты скрытой группы и её заявок для психолога недоступны.
 
 В существующий admin edit добавлены nullable `published_at` и `expires_at`,
@@ -710,7 +719,23 @@ layout are retained.
 Existing admin group detail adds one shared-style panel: pending/syncing/synced/
 failed/conflict, Resource ID, request/start/success/failure timestamps, localized
 allowlisted error and optional cleanup warning. POST `/{group}/sync-modx` queues
-manual resync for approved/active/expired, including after success. It validates
+manual resync for approved/active/paused/expired, including after success. It validates
 locally and never calls MODX inline. Psychologists have no panel/action access.
 No token, raw remote response or private cover path is exposed. Existing panels,
 confirmation dialogs, responsive primitives and prototype catalogue are retained.
+
+## Pause, currency and deletion (TASK-2026-10-01-04)
+
+Existing psychologist detail adds confirmed pause for eligible active groups and
+resume for paused. Pending resume is disabled; safe failure allows retry; conflict
+asks for administrator review. The paused summary explains frozen time and excludes
+extension. Admin MODX panel adds desired/status, timestamps and safe diagnostics.
+The catalogue now contains 31 page groups / 259 variants. All four group list/detail
+catalogues include `paused`; detail pages add resume-pending/failed/conflict; paid-delete-allowed replaces
+the obsolete paid-delete-blocked prototype. Native textarea/multiple select remain;
+removed helper copy is absent. Toolbar keeps Bold/Italic/UL/OL/Remove formatting;
+safe stored headings, quotes and links are preserved.
+
+Under «Условия участия», optional «Стоимость встречи (В валюте)» uses the existing
+input/grid with «Цена одной встречи с указанием валюты». Detail shows nonempty values.
+Deletion confirms automatic unpublication and no automatic refund in every status.

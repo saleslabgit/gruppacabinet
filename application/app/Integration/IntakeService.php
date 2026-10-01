@@ -77,7 +77,7 @@ class IntakeService
         if ($group === null) {
             throw new IntegrationException('group_not_found', 404);
         }
-        if ($group->status !== GroupStatus::Active || $group->disabled) {
+        if ($group->status !== GroupStatus::Active || $group->disabled || $group->psychologist_deleted_at !== null) {
             throw new IntegrationException('group_not_accepting_applications', 422);
         }
         unset($fields['group_uuid']);

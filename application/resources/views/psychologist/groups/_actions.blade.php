@@ -16,6 +16,16 @@
 @unless($detail ?? false)
 <x-button icon="arrow-up-right" kind="ghost" :href="route('psychologist.groups.show', $group['id'])">Подробнее</x-button>
 @endunless
+@if(($detail ?? false) && ($canPause ?? false))
+<x-button kind="secondary" data-bs-toggle="modal" data-bs-target="#pause-group">Поставить на паузу</x-button>
+@endif
+@if(($detail ?? false) && ($canResume ?? false) && ($group['modx_publication_status'] ?? null) !== 'conflict')
+@if(($group['modx_publication_desired'] ?? null) === 'published' && in_array($group['modx_publication_status'] ?? null, ['pending', 'syncing'], true))
+<x-button :disabled="true">Возобновление выполняется</x-button>
+@else
+<x-button data-bs-toggle="modal" data-bs-target="#resume-group">Возобновить публикацию</x-button>
+@endif
+@endif
 @if($canDelete ?? false)
 <x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-group">Удалить</x-button>
 @endif
@@ -36,8 +46,15 @@
 @unless($detail ?? false)
 <x-button icon="arrow-up-right" kind="ghost" :href="route('prototype.group', ['variant' => $group['status']])">Подробнее</x-button>
 @endunless
-@if(in_array($group['status'], ['draft','rejected']) && !$group['disabled'])
-<x-button icon="trash" kind="danger" :disabled="$group['has_unrefunded_payment']" data-bs-toggle="modal" data-bs-target="#delete-group">Удалить</x-button>
+@if(($detail ?? false) && !$group['disabled'] && $group['status'] === 'active')
+<x-button kind="secondary" data-bs-toggle="modal" data-bs-target="#pause-group">Поставить на паузу</x-button>
+@elseif(($detail ?? false) && !$group['disabled'] && $group['status'] === 'paused' && ($group['modx_publication_status'] ?? null) !== 'conflict')
+@if(($group['modx_publication_desired'] ?? null) === 'published' && in_array($group['modx_publication_status'] ?? null, ['pending', 'syncing'], true))
+<x-button :disabled="true">Возобновление выполняется</x-button>
+@else
+<x-button data-bs-toggle="modal" data-bs-target="#resume-group">Возобновить публикацию</x-button>
 @endif
+@endif
+<x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-group">Удалить</x-button>
 </div>
 @endif

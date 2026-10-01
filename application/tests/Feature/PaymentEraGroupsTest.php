@@ -74,14 +74,14 @@ class PaymentEraGroupsTest extends TestCase
         $group = $this->group();
         $payment = $this->payment($group, 'succeeded');
         $payment->delete();
-        $this->actingAs($this->admin)->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
-        $payment->update(['status' => 'refunded', 'refunded_at' => now()]);
+        $this->actingAs($this->admin);
         $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
         $young = $this->group(days: 0);
         $this->payment($young, 'refunded', true);
         $this->delete('/admin/groups/'.$young->id, ['confirmed' => 1])->assertRedirect();
         $young = $this->group(days: 0);
-        $this->actingAs($this->owner)->delete('/groups/'.$young->id, ['confirmed' => 1])->assertForbidden();
+        $this->actingAs($this->owner)->delete('/groups/'.$young->id, ['confirmed' => 1])->assertRedirect();
+        $this->assertNotNull($young->fresh()->psychologist_deleted_at);
         foreach (['draft', 'rejected'] as $status) {
             $owned = $this->group($status, 0);
             $this->delete('/groups/'.$owned->id, ['confirmed' => 1])->assertRedirect();

@@ -7,6 +7,6 @@
 <option value="{{ $key }}" @selected(in_array((string) $key, array_map('strval', $values), true))>{{ $text }}</option>
 @endforeach
 </select>
-<div class="form-text" id="{{ $name }}-help">Можно выбрать несколько значений. Без JavaScript используйте Ctrl/Command или Shift.</div>
+<div class="form-text" id="{{ $name }}-help">Можно выбрать несколько значений.</div>
 <x-validation-error :name="$name" :error="$error" />
 </div>

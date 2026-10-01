@@ -98,6 +98,18 @@ class GroupController extends Controller
         return redirect()->route('psychologist.groups.show', $group)->with('success', 'Изменения сохранены.');
     }
 
+    public function publication(GroupActionRequest $request, GroupWorkflow $workflow): RedirectResponse
+    {
+        $group = $request->group();
+        if ($request->routeIs('*.pause')) {
+            $workflow->pause($group, $request->user());
+        } else {
+            $workflow->resume($group, $request->user());
+        }
+
+        return redirect()->route('psychologist.groups.show', $group);
+    }
+
     public function destroy(GroupActionRequest $request, GroupWorkflow $workflow): RedirectResponse
     {
         $workflow->delete($request->group(), $request->user());

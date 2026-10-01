@@ -37,6 +37,9 @@ class GroupModxPayloadBuilder
             'price' => (string) intdiv($group->meeting_price, 100),
             'tags' => $group->tags->pluck('modx_value')->implode('||'),
         ]];
+        if (trim($group->meeting_price_currency ?? '') !== '') {
+            $body['tvs']['price_usd'] = trim($group->meeting_price_currency);
+        }
         if ($group->public_site_resource_id !== null) {
             $body['resource_id'] = $group->public_site_resource_id;
         }

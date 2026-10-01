@@ -32,7 +32,7 @@ Production-адреса фиксированы:
 - получение заявок участников;
 - административное управление пользователями, группами, платежами и справочниками.
 
-Автоматическая публикация групп в существующий каталог **не входит в MVP**. После успешной модерации (`moderation → approved`) кабинет должен автоматически создать или обновить **неопубликованный черновик** соответствующей группы на основном MODX-сайте через защищённый mxHeadless API. Финальная публикация на основном сайте остаётся ручным действием администратора; после неё администратор отмечает группу активной в кабинете.
+Автоматическая первоначальная публикация групп в существующий каталог **не входит в MVP**. Возобновление ранее активной группы после паузы выполняется автоматически по правилам ниже. После успешной модерации (`moderation → approved`) кабинет должен автоматически создать или обновить **неопубликованный черновик** соответствующей группы на основном MODX-сайте через защищённый mxHeadless API. Финальная публикация на основном сайте остаётся ручным действием администратора; после неё администратор отмечает группу активной в кабинете.
 
 ---
 
@@ -240,7 +240,7 @@ Production:
 - просматривать свои группы;
 - создавать группы;
 - редактировать группу на разрешённых этапах;
-- удалять черновые/неактивные группы;
+- удалять любую собственную видимую группу, включая активную и приостановленную;
 - отправлять группу на модерацию;
 - оплачивать размещение, если он платный;
 - продлевать размещение;
@@ -721,7 +721,7 @@ runtime их не читает, не записывает и не синхрон
 
 - фильтр списка групп по статусу и дате создания, позволяющий быстро найти брошенные записи;
 - возможность удалить такую группу вручную (soft delete);
-- запрет на удаление группы, по которой существует успешный платёж без отметки о возврате — в этом случае показывается предупреждение с требованием сначала обработать платёж.
+- удаление независимо от наличия успешного платежа; платежи сохраняются, автоматический возврат не выполняется.
 
 # 11. Поля группы
 
@@ -748,13 +748,15 @@ runtime их не читает, не записывает и не синхрон
 - `meeting_duration_minutes` — длительность одной встречи в минутах, integer;
 - `participant_capacity` — количество участников, integer;
 - `gender_id` — ссылка на MODX-синхронизируемый справочник пола участников;
-- `meeting_price` — стоимость одной встречи, целое число в копейках; точный mapping в MODX `price`/`price_usd` фиксируется отдельно после проверки семантики этих TV;
+- `meeting_price` — обязательная стоимость в копейках BYN, в MODX `price` передаётся целая строка BYN;
+- `meeting_price_currency` — nullable string(255), необязательная валютная строка с trim; непустое значение → `price_usd`, пустое не отправляется;
+- `paused_at` — nullable UTC-время начала паузы;
 - `schedule` — legacy nullable поле старого свободного расписания; новые/редактируемые группы не должны использовать его как источник структурированного расписания;
 - `moderator_comment` — последний комментарий модератора, полная история в `gp_group_status_history`;
 - `rejection_reason` — причина отклонения;
 - `published_at`;
 - `expires_at`;
-- `psychologist_deleted_at` — nullable UTC-время скрытия отклонённой группы из кабинета психолога;
+- `psychologist_deleted_at` — nullable UTC-время скрытия группы любого статуса из кабинета психолога;
 - `expiry_warning_sent_at` — дата отправки предупреждения об окончании;
 - `placement_days` — фактический срок размещения, зафиксированный на момент активации;
 - timestamps;
@@ -862,6 +864,11 @@ runtime их не читает, не записывает и не синхрон
 
 Отображение: **Активная**
 
+## `paused`
+Группа на паузе. Время размещения заморожено, заявки не принимаются.
+
+Отображение: **На паузе**
+
 ## `expired`
 Срок размещения закончился.
 
@@ -879,6 +886,8 @@ runtime их не читает, не записывает и не синхрон
 | `revision` | `moderation` | психолог |
 | `approved` | `active` | администратор |
 | `active` | `expired` | система, по расписанию |
+| `active` | `paused` | психолог-владелец |
+| `paused` | `active` | система, только после подтверждённой публикации MODX |
 | `expired` | `approved` | система, после успешной оплаты продления (см. §16) |
 
 Любой другой переход недопустим и должен приводить к ошибке независимо от того, как он инициирован — через интерфейс, подделанный POST или прямой вызов сервиса.
@@ -949,23 +958,17 @@ runtime их не читает, не записывает и не синхрон
 
 Просмотр доступен для всех его групп, кроме soft-deleted и скрытых через `psychologist_deleted_at`.
 
-В `moderation`, `approved`, `active`, `expired` редактирование блокируется, чтобы данные кабинета не расходились с данными, которые проверяет или уже опубликовал администратор.
+В `moderation`, `approved`, `active`, `paused`, `expired` редактирование блокируется, чтобы данные кабинета не расходились с данными, которые проверяет или уже опубликовал администратор.
 
-Удалять психолог может только группы в статусах `draft` и `rejected`, по которым нет успешного неотозванного платежа.
-
-Для `draft` удаление психологом является soft delete. Для `rejected` оно устанавливает
-`psychologist_deleted_at` в текущее UTC-время, сохраняя `deleted_at = null` и статус
-`rejected`. Группа недоступна во всех маршрутах психолога, включая заявки и
-продление, но остаётся в обычных списках, поиске и карточке администратора.
-Связанные данные и история сохраняются, переход статуса не создаётся.
-
-Администратор имеет полный доступ независимо от статуса. Он может удалить
-группу в любом статусе через подтверждённый soft delete, если нет succeeded-платежа
-без `refunded_at`, включая исторические soft-deleted платежи. Удалённая им группа
-исчезает из обычного admin-списка. Аудит `group_deleted` содержит текущий статус;
-история переходов не меняется. Для active подтверждение требует вручную снять
-публикацию на gruppa.info; для approved — проверить и снять её при наличии.
-Произвольная ручная смена статуса администратором не предусмотрена, матрица прежняя.
+Удалять психолог может любую собственную видимую группу, включая `paused`,
+независимо от disabled и платежей. Всегда устанавливается `psychologist_deleted_at`,
+`deleted_at` и статус не меняются. Группа и её история остаются у администратора,
+но недоступны в маршрутах психолога и для новых заявок участников.
+Администратор удаляет любую видимую группу через soft delete и аудит `group_deleted`.
+Удаление не изменяет платежи и не выполняет возврат.
+Если есть MODX Resource ID, в той же транзакции запрашивается unpublished, после
+commit запускается очередь. Resource никогда не удаляется. Ошибка очереди/MODX
+не отменяет локальное удаление; UI показывает безопасное состояние публикации.
 
 ---
 
@@ -1001,7 +1004,7 @@ runtime их не читает, не записывает и не синхрон
 
 Психолог видит статус **Закончена** и кнопку **«Продлить размещение»**.
 
-Поскольку публикация в каталоге выполняется вручную, автоматическое удаление группы с публичного сайта в MVP не выполняется. Администратор видит такие группы в отдельном фильтре и снимает их с публикации вручную.
+При истечении срока Resource автоматически снимается с публикации через очередь после commit. Локальный expired сохраняется при сбое MODX. Paused исключён из expiration: срок заморожен. Resource не удаляется.
 
 ---
 
@@ -1051,7 +1054,7 @@ runtime их не читает, не записывает и не синхрон
 - администратор видит группу в списке ожидающих публикации с пометкой «Продление», публикует её в каталоге вручную и нажимает «Отметить активной»;
 - при активации даты рассчитываются как при первичной публикации.
 
-Причина: снятие группы с публикации при истечении срока выполняется администратором вручную, поэтому возврат в каталог тоже требует ручного действия. Повторная модерация при этом не производится — администратор только публикует.
+Продление expired сохраняет ручную повторную публикацию. Автоматическое возобновление применяется только к paused; повторная модерация expired не производится.
 
 Продление группы в статусе `expired` доступно в течение срока, заданного настройкой (по умолчанию 30 дней после `expires_at`). После этого кнопка продления скрывается и психолог создаёт новую группу.
 
@@ -1627,7 +1630,7 @@ Cancel return не является достаточным доказатель�
 Отдельные быстрые фильтры:
 
 - ожидают публикации (`approved`);
-- завершённые, требующие снятия с публикации (`expired`);
+- завершённые (`expired`), с автоматическим снятием с публикации;
 - брошенные черновики (`awaiting_payment` и `draft` старше N дней).
 
 Сортировка: дата создания, дата публикации, дата окончания.
@@ -1943,7 +1946,7 @@ Muted text и border должны быть нейтральными произв
     - новые анкеты `pending`;
     - группы `moderation`;
     - `approved`, ожидающие ручной публикации;
-    - `expired`, требующие снятия с публикации;
+    - `expired`, с автоматическим снятием с публикации;
     - зависшие `pending` платежи, требующие внимания после WEBPAY-этапа;
     - быстрые ссылки в соответствующие фильтры.
 
@@ -2280,8 +2283,8 @@ Laravel Scheduler используется для:
 
 Не реализовывать без отдельной задачи:
 
-- автоматическую публикацию в существующий каталог;
-- автоматическое удаление публикации из существующего каталога;
+- автоматическую первоначальную публикацию в существующий каталог;
+- удаление MODX Resource (снятие с публикации при паузе/удалении/истечении реализуется);
 - постоянный polling/полную фоновую сверку всех платежей WEBPAY; допускается только ограниченная recovery-проверка зависших `pending` согласно §19.10;
 - автоматический возврат средств через WEBPAY API;
 - двухстадийные WEBPAY платежи (`Authorized → capture/void`);
@@ -2634,7 +2637,7 @@ Laravel Scheduler используется для:
 
 - scheduler `active → expired`;
 - remaining time/date;
-- filter expired requiring manual unpublish;
+- filter expired with asynchronous publication state;
 - бесплатное продление active/expired для владельцев с текущим `gp_users.free=true`;
 - active: shift expiry/reset warning;
 - expired: `expired → approved`, manual republish;
@@ -2848,7 +2851,7 @@ Production credentials на этом этапе запрещены.
 - административный учёт возврата;
 - интерфейс «Отметить возврат выполненным в WEBPAY»;
 - запись действия возврата в `gp_audit_log`;
-- запрет удаления группы с `succeeded`-платежом без отметки возврата;
+- удаление группы независимо от `succeeded`-платежа, с сохранением истории и без автоматического возврата;
 - при возможности выполнить тестовый ручной refund в Sandbox-кабинете WEBPAY и затем отметить его в приложении.
 
 ### Приёмка
@@ -2863,7 +2866,7 @@ Production credentials на этом этапе запрещены.
 8. Для отклонённой оплаченной группы показываются идентификаторы WEBPAY и предупреждение о возврате.
 9. Администратор после фактического ручного возврата отмечает платёж как `refunded`.
 10. Действие отметки возврата не вызывает WEBPAY refund API.
-11. Группа с `succeeded`-платежом без возврата не удаляется.
+11. Группа с `succeeded`-платежом допускает удаление; платёж не меняется и автоматически не возвращается.
 12. У психолога по-прежнему нет отдельного раздела истории платежей.
 13. Смена тарифа после создания группы влияет на следующую попытку продления: `free → paid` требует оплаты, `paid → free` продлевается без платежа; историческое `gp_groups.free` не переопределяет текущий тариф.
 
@@ -3076,7 +3079,8 @@ Production credentials на этом этапе запрещены.
 `public_uuid` передаётся в TV `groupid` (84, text). `meeting_price` хранится в
 копейках BYN и передаётся в TV `price` (34, number, allowDecimals=0) как целая
 десятичная строка BYN; требуется делимость на 100. `price_usd` (81, text) — отдельная
-валютная строка без источника в Cabinet; она, SEO и showOnMainPage не изменяются.
+валютная строка из `meeting_price_currency`, только если непустая. Пустое значение
+сохраняет прежний TV; SEO и showOnMainPage не изменяются.
 `days` (45, tag): mon→пн, tue→вт, wed→ср, thu→чт, fri→пт, sat→сб, sun→вс,
 через запятую без пробелов в порядке понедельник–воскресенье. `startAt` — HH:MM
 без преобразования. Approaches/tags — точные modx_value через || в sort_order/id.
@@ -3106,7 +3110,7 @@ Create использует постоянный `group-create:<public_uuid>`, u
 повторная попытка проверяет хеш точных JSON-байтов. MODX ID сохраняется даже при
 устаревшем успешном ответе; более новая редакция остаётся pending. Администратор
 видит статус/безопасную ошибку и может поставить новую синхронизацию в очередь.
-Публикацией, снятием публикации и удалением MODX Cabinet не управляет.
+Content sync не управляет публикацией. Отдельный publication job снимает публикацию при паузе/удалении/истечении и восстанавливает её при resume; MODX Resource никогда не удаляется.
 
 Production checklist: mxheadless_max_body_bytes >= 8388608, upload_maxsize >=
 5242880, PHP/hosting body limit >= ~10 MiB, writable Media Source, приватный API
@@ -3174,3 +3178,40 @@ credential, работающие database queue worker и scheduler. Реаль�
 Основной принцип проекта:
 
 **простая Laravel-архитектура без лишней абстракции; Docker только для локального окружения; интерфейс заранее утверждается как набор реальных Blade-шаблонов; бизнес-статусы, авторизация, интеграции и WEBPAY изолированы; Sandbox полностью принимается до появления production credentials.**
+
+## Pause and publication lifecycle (TASK-2026-10-01-04)
+
+Only the non-admin owner can pause an enabled active group with an existing MODX
+Resource and future expires_at. POST `/groups/{group}/pause` confirms active → paused,
+records paused_at and requests unpublished after commit. Paused groups do not expire,
+accept participant applications, receive expiry warnings or permit extensions.
+
+POST `/groups/{group}/resume` requests published for the same immutable Resource ID.
+Local status stays paused during pending/retry/failure. Only a successful current
+publication job transitions paused → active as system, clears paused_at and the
+warning marker, and adds `now - paused_at` in exact stored seconds to expires_at.
+The time change, history and publication success marker commit atomically; retries
+cannot extend twice. Duplicate pending resume requests reuse the current revision.
+Initial approved activation and expired renewal still require manual publication;
+manual activation records published locally without HTTP.
+
+Pause/delete/expiry request unpublished; Resource deletion is never used. Owner
+delete hides any visible group with psychologist_deleted_at; admin delete is soft
+with audit. Payments/history survive; no automatic refund or payment blocker.
+
+Publication intent has an incrementing revision, desired published/unpublished,
+status pending/syncing/published/unpublished/failed/conflict and safe timestamps/code.
+Jobs carry group ID/revision/expected Resource ID, run after commit on the database
+queue, and share the `modx-group:<id>` lock across job classes via shared(). No DB
+transaction crosses HTTP. Stale revisions skip before HTTP and cannot overwrite
+newer intent afterward; delete wins over pending resume. Queue failure preserves
+the local lifecycle and marks safe failure. Conflicts require operator reconciliation;
+resume never rotates a conflicting revision key to hide an error.
+
+The form keeps Bold/Italic/UL/OL/Remove formatting, accessible native fallback and
+safe legacy headings/quotes/links. Optional `meeting_price_currency` is trimmed,
+nullable, max 255; nonempty maps to price_usd, empty omits the TV. BYN is unchanged.
+
+The external publication endpoint is maintained by the MODX operator outside this
+repository. Automated work uses HTTP fakes only. Live endpoint acceptance remains
+manual and unverified.

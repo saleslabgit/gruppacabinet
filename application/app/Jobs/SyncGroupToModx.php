@@ -33,7 +33,7 @@ class SyncGroupToModx implements ShouldQueue
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping('modx-group:'.$this->groupId))->releaseAfter(60)->expireAfter(120)];
+        return [(new WithoutOverlapping('modx-group:'.$this->groupId))->shared()->releaseAfter(60)->expireAfter(120)];
     }
 
     public function handle(GroupModxPayloadBuilder $builder, GroupClient $client): void
@@ -42,7 +42,8 @@ class SyncGroupToModx implements ShouldQueue
             $request = DB::transaction(function () use ($builder): ?array {
                 $group = Group::query()->lockForUpdate()->find($this->groupId);
                 if (! $group || $group->modx_sync_revision !== $this->revision
-                    || ! in_array($group->status, [GroupStatus::Approved, GroupStatus::Active, GroupStatus::Expired], true)
+                    || ($group->status === GroupStatus::Paused && $group->public_site_resource_id === null)
+                    || ! in_array($group->status, [GroupStatus::Approved, GroupStatus::Active, GroupStatus::Paused, GroupStatus::Expired], true)
                     || in_array($group->modx_sync_status, ['synced', 'failed', 'conflict'], true)) {
                     return null;
                 }

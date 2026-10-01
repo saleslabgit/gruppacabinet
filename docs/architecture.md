@@ -255,10 +255,10 @@ Lists paginate 20 rows, eagerly load dictionaries/owners and never query
 payments or applications. Admin search supports ID/title/owner name/email,
 status/tariff filters, allowlisted descending date sorting with ID tie-break,
 and approved/abandoned quick filters. `GroupIndexRequest` validates filters.
-Deletion alone checks historical succeeded, unrefunded payments, including
-soft-deleted payment records. Owner deletion requires enabled draft/rejected;
-admin deletion requires draft created at or before the configured abandoned
-cutoff. Both are soft deletes preserving all related records.
+Deletion accepts any visible lifecycle status, regardless of payments or group disabled.
+Owner deletion sets psychologist_deleted_at and preserves admin visibility; admin
+deletion uses soft delete and audit. Neither changes payments or refunds money.
+A remote ID schedules unpublished after commit; all related records survive.
 
 The technical cleanup threshold is `config/groups.php: abandoned_draft_days`
 (default 30), separate from placement business settings. All destructive and
@@ -345,10 +345,10 @@ Presentation computes `max(0, ceil((expires_at - now) / 86400))` remaining days.
 Warning applies to future expiry within the current `expiry_warning_days`.
 Overdue active rows explicitly show that expiry has passed and status is awaiting
 update. Page rendering and expiration never write `expiry_warning_sent_at`, send
-mail, or queue jobs. Lists read the two lifecycle settings once per calculation
+mail. Expiration queues unpublished when a remote ID exists. Lists read the two lifecycle settings once per calculation
 and use loaded owners (the authenticated current owner for the owner list).
-The admin `quick=expired` filter remains paginated/sortable and reminds the admin
-to unpublish on gruppa.info manually; no separate unpublication state is stored.
+The admin `quick=expired` filter remains paginated/sortable. Publication intent/status
+is persisted separately, and the detail panel shows truthful asynchronous results.
 
 Owner-scoped GET/POST `/groups/{group}/extension` use account/psychologist
 middleware and `GroupPolicy::extend`. Confirmation and CSRF protect the POST.
@@ -505,7 +505,7 @@ Remote identity is unique and immutable once set. No payload snapshots are store
 
 Cover source/path tracking belongs to successful uploaded bytes. Unchanged covers
 reassert remote image path. Cleanup warnings are boolean-only admin diagnostics.
-No publication/deletion/payment/lifecycle side effects were added. Cabinet never
+Content sync does not change publication; the separate publication job controls it. Cabinet never
 writes directly to MODX database tables. See `modx-api.md` for mapping, transport,
 external idempotency TTL limitations and production acceptance still unverified.
 
@@ -589,3 +589,40 @@ validation errors (a post-commit cleanup error reports that data already saved).
 Cover metadata is never accepted directly from form input. Owner/admin previews
 reuse group/account authorization with inline validated MIME, nosniff and private
 no-store headers; no public storage link or outbound transport is involved.
+
+## Pause and publication lifecycle (TASK-2026-10-01-04)
+
+Only the non-admin owner can pause an enabled active group with an existing MODX
+Resource and future expires_at. POST `/groups/{group}/pause` confirms active → paused,
+records paused_at and requests unpublished after commit. Paused groups do not expire,
+accept participant applications, receive expiry warnings or permit extensions.
+
+POST `/groups/{group}/resume` requests published for the same immutable Resource ID.
+Local status stays paused during pending/retry/failure. Only a successful current
+publication job transitions paused → active as system, clears paused_at and the
+warning marker, and adds `now - paused_at` in exact stored seconds to expires_at.
+The time change, history and publication success marker commit atomically; retries
+cannot extend twice. Duplicate pending resume requests reuse the current revision.
+Initial approved activation and expired renewal still require manual publication;
+manual activation records published locally without HTTP.
+
+Pause/delete/expiry request unpublished; Resource deletion is never used. Owner
+delete hides any visible group with psychologist_deleted_at; admin delete is soft
+with audit. Payments/history survive; no automatic refund or payment blocker.
+
+Publication intent has an incrementing revision, desired published/unpublished,
+status pending/syncing/published/unpublished/failed/conflict and safe timestamps/code.
+Jobs carry group ID/revision/expected Resource ID, run after commit on the database
+queue, and share the `modx-group:<id>` lock across job classes via shared(). No DB
+transaction crosses HTTP. Stale revisions skip before HTTP and cannot overwrite
+newer intent afterward; delete wins over pending resume. Queue failure preserves
+the local lifecycle and marks safe failure. Conflicts require operator reconciliation;
+resume never rotates a conflicting revision key to hide an error.
+
+The form keeps Bold/Italic/UL/OL/Remove formatting, accessible native fallback and
+safe legacy headings/quotes/links. Optional `meeting_price_currency` is trimmed,
+nullable, max 255; nonempty maps to price_usd, empty omits the TV. BYN is unchanged.
+
+The external publication endpoint is maintained by the MODX operator outside this
+repository. Automated work uses HTTP fakes only. Live endpoint acceptance remains
+manual and unverified.

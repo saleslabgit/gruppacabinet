@@ -56,4 +56,30 @@ class GroupContentMigrationTest extends TestCase
         $migration->up();
         $this->assertDatabaseHas('gp_dictionary_items', ['id' => $type->id]);
     }
+
+    public function test_publication_upgrade_is_additive_and_currency_is_nullable(): void
+    {
+        $migration = require database_path('migrations/2026_10_01_000004_add_group_publication_lifecycle.php');
+        $migration->down();
+        $owner = DB::table('gp_users')->insertGetId(['email' => 'legacy-publication@example.test', 'status' => 'approved']);
+        $id = DB::table('gp_groups')->insertGetId(['owner_id' => $owner, 'public_uuid' => (string) Str::uuid(), 'status' => 'active',
+            'meeting_price' => 3500, 'public_site_resource_id' => 789]);
+        $before = (array) DB::table('gp_groups')->find($id);
+        $migration->up();
+        $group = Group::findOrFail($id);
+        foreach ($before as $field => $value) {
+            $this->assertEquals($value, $group->getRawOriginal($field));
+        }
+        $this->assertNull($group->meeting_price_currency);
+        $this->assertNull($group->paused_at);
+        $this->assertNull($group->modx_publication_desired);
+        $this->assertNull($group->modx_publication_status);
+        $this->assertSame(0, $group->modx_publication_revision);
+        $group->update(['meeting_price_currency' => str_repeat('x', 255)]);
+        $this->assertSame(255, strlen($group->fresh()->meeting_price_currency));
+        $migration->down();
+        $migration->up();
+        $this->assertSame(789, $group->fresh()->public_site_resource_id);
+        $this->assertSame(3500, $group->fresh()->meeting_price);
+    }
 }

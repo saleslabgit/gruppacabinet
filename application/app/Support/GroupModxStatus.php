@@ -7,10 +7,11 @@ class GroupModxStatus
     public static function error(string $code): string
     {
         return match ($code) {
+            'resume_unavailable' => 'resume_unavailable: группа больше не допускает возобновление. Проверьте её состояние.',
             'configuration' => 'configuration: администратору необходимо проверить настройки подключения.',
             'authorization' => 'authorization: MODX отклонил доступ. Проверьте настройки доступа.',
             'not_sync_ready' => 'not_sync_ready: проверьте заполнение группы, справочники и обложку.',
-            'idempotency_conflict' => 'idempotency_conflict: содержимое изменилось после попытки отправки. Требуется сверка с MODX; новый ключ создания автоматически не выдаётся.',
+            'idempotency_conflict' => 'idempotency_conflict: параметры запроса не совпадают с ранее отправленными. Требуется сверка с MODX; конфликтующий ключ не заменяется автоматически.',
             'resource_id_conflict' => 'resource_id_conflict: MODX вернул другой Resource ID. Требуется сверка с MODX.',
             'resource_not_found' => 'resource_not_found: ресурс не найден на основном сайте.',
             'queue_unavailable' => 'queue_unavailable: очередь недоступна. Повторите после восстановления очереди.',

@@ -13,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 
 class GroupWorkflow
 {
-    public const FIELDS = ['title', 'description', 'full_description_html', 'meeting_days', 'start_time', 'frequency', 'city', 'group_type_id', 'format_id', 'meeting_duration_minutes', 'participant_capacity', 'gender_id', 'meeting_price'];
+    public const FIELDS = ['title', 'description', 'full_description_html', 'meeting_days', 'start_time', 'frequency', 'city', 'group_type_id', 'format_id', 'meeting_duration_minutes', 'participant_capacity', 'gender_id', 'meeting_price', 'meeting_price_currency'];
 
     public function __construct(private GroupStatusTransitionService $transitions, private SettingService $settings) {}
 
@@ -146,7 +146,40 @@ class GroupWorkflow
             $locked->update(['published_at' => $published, 'placement_days' => $days,
                 'expires_at' => $published->copy()->addDays($days), 'expiry_warning_sent_at' => null]);
 
+            $locked->forceFill(['modx_publication_revision' => $locked->modx_publication_revision + 1,
+                'modx_publication_desired' => 'published', 'modx_publication_status' => 'published',
+                'modx_publication_synced_at' => $published, 'modx_publication_requested_at' => null,
+                'modx_publication_started_at' => null, 'modx_publication_failed_at' => null,
+                'modx_publication_error_code' => null])->save();
+
             return $this->transitions->transition($locked, GroupStatus::Active, $actor, 'user');
+        });
+    }
+
+    public function pause(Group $group, User $actor): void
+    {
+        DB::transaction(function () use ($group, $actor): void {
+            $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            Gate::forUser($actor)->authorize('pause', $locked);
+            $locked->update(['paused_at' => now()->utc()->startOfSecond()]);
+            $paused = $this->transitions->transition($locked, GroupStatus::Paused, $actor, 'user');
+            app(GroupModxPublicationScheduler::class)->schedule($paused, false);
+        });
+    }
+
+    public function resume(Group $group, User $actor): void
+    {
+        DB::transaction(function () use ($group, $actor): void {
+            $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            Gate::forUser($actor)->authorize('resume', $locked);
+            if ($locked->modx_publication_status === 'conflict') {
+                throw ValidationException::withMessages(['publication' => 'Требуется проверка публикации администратором.']);
+            }
+            if ($locked->modx_publication_desired === 'published'
+                && in_array($locked->modx_publication_status, ['pending', 'syncing'], true)) {
+                return;
+            }
+            app(GroupModxPublicationScheduler::class)->schedule($locked, true);
         });
     }
 
@@ -155,15 +188,13 @@ class GroupWorkflow
         DB::transaction(function () use ($group, $actor): void {
             $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
             Gate::forUser($actor)->authorize('delete', $locked);
-            if (! $actor->admin && $locked->status === GroupStatus::Rejected) {
+            if (! $actor->admin) {
                 $locked->update(['psychologist_deleted_at' => now()->utc()]);
-
-                return;
-            }
-            $locked->delete();
-            if ($actor->admin) {
+            } else {
+                $locked->delete();
                 app(AuditService::class)->record('group', $locked->id, 'group_deleted', ['status' => $locked->status->value], $actor);
             }
+            app(GroupModxPublicationScheduler::class)->schedule($locked, false);
         });
     }
 }

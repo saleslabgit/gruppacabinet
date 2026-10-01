@@ -44,5 +44,8 @@
 <x-money :value="$group['meeting_price']" />
 </dd>
 </div>
+@if(trim($group['meeting_price_currency'] ?? '') !== '')
+<div><dt>Стоимость встречи (В валюте)</dt><dd>{{ $group['meeting_price_currency'] }}</dd></div>
+@endif
 </dl>
 </x-panel>

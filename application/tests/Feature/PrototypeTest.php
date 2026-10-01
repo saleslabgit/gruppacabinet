@@ -26,7 +26,7 @@ class PrototypeTest extends TestCase
         config()->set('database.default', 'missing-prototype-database');
         $catalog = $this->get('http://localhost/_prototype')->assertOk();
         $this->assertCount(31, PrototypeCatalog::pages());
-        $this->assertSame(249, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
+        $this->assertSame(259, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
         foreach (PrototypeCatalog::pages() as $slug => $page) {
             foreach ($page['variants'] as $variant) {
                 $path = '/_prototype/'.$slug.'/'.$variant;
@@ -136,7 +136,7 @@ class PrototypeTest extends TestCase
         $data['group']['free'] = true;
         $data['group']['has_unrefunded_payment'] = true;
         $html = view('psychologist.groups._actions', $data)->render();
-        $this->assertMatchesRegularExpression('/<button[^>]*disabled[^>]*>(?:<i[^>]*><\/i>\s*)?<span class="control-label">Удалить<\/span><\/button>/', $html);
+        $this->assertDoesNotMatchRegularExpression('/<button[^>]*disabled[^>]*>(?:<i[^>]*><\/i>\s*)?<span class="control-label">Удалить<\/span><\/button>/', $html);
     }
 
     public function test_nested_pages_have_contextual_navigation(): void

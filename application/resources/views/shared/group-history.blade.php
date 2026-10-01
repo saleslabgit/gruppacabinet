@@ -42,7 +42,7 @@
 </p>
 </li>
 @endif
-@if(in_array($group['status'], ['approved','active','expired']))
+@if(in_array($group['status'], ['approved','active','paused','expired']))
 <li>
 <strong>Одобрена</strong>
 <p class="meta">Администратор · <x-date :value="$group['created_at']->addDays(2)" />
@@ -55,6 +55,9 @@
 <p class="meta">Администратор · <x-date :value="$group['published_at']" />
 </p>
 </li>
+@endif
+@if($group['status'] === 'paused')
+<li><strong>Поставлена на паузу</strong><p class="meta">Психолог · <x-date :value="$group['paused_at']" /></p></li>
 @endif
 @if($group['status'] === 'expired')
 <li>

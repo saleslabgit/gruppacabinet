@@ -111,4 +111,45 @@ class ModxGroupClientTest extends TestCase
         }
         Http::assertNothingSent();
     }
+
+    #[DataProvider('failures')]
+    public function test_publication_errors_are_classified(int $status, array|string $body, string $code, bool $retryable): void
+    {
+        Http::fake(['*' => Http::response($body, $status)]);
+        try {
+            app(GroupClient::class)->publication('{"resource_id":7,"published":true}', 'publication-key', 7, true);
+            $this->fail('Expected failure');
+        } catch (ModxGroupSyncException $e) {
+            $this->assertSame($code, $e->safeCode);
+            $this->assertSame($retryable, $e->retryable);
+            $this->assertNull($e->getPrevious());
+        }
+    }
+
+    public static function publicationResponses(): array
+    {
+        return [[7, true, false, null], [7, '1', '0', null], [7, false, true, 'invalid_response'],
+            [8, true, true, 'resource_id_conflict'], [7, true, 'yes', 'invalid_response'],
+            [7, null, true, 'invalid_response'], [0, true, true, 'invalid_response']];
+    }
+
+    #[DataProvider('publicationResponses')]
+    public function test_publication_response_identity_state_and_boolean_contract(int $id, mixed $published, mixed $changed, ?string $error): void
+    {
+        Http::fake(function ($request, $options) use ($id, $published, $changed) {
+            $this->assertSame('https://modx.example.test/api/v1/cabinet/resources/publication', $request->url());
+            $this->assertSame('{"resource_id":7,"published":true}', $request->body());
+            $this->assertSame(['publication-key'], $request->header('Idempotency-Key'));
+            $this->assertSame(['Bearer synthetic-token'], $request->header('Authorization'));
+            $this->assertFalse($options['allow_redirects']);
+
+            return Http::response(['data' => ['resource_id' => $id, 'published' => $published, 'changed' => $changed]]);
+        });
+        if ($error !== null) {
+            $this->expectException(ModxGroupSyncException::class);
+            $this->expectExceptionMessage($error);
+        }
+        $result = app(GroupClient::class)->publication('{"resource_id":7,"published":true}', 'publication-key', 7, true);
+        $this->assertSame(['resource_id' => 7, 'published' => true, 'changed' => false], $result);
+    }
 }

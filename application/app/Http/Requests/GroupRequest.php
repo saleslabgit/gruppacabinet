@@ -36,6 +36,10 @@ class GroupRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        if (is_string($this->input('meeting_price_currency'))) {
+            $value = trim($this->input('meeting_price_currency'));
+            $this->merge(['meeting_price_currency' => $value === '' ? null : $value]);
+        }
         foreach (['meeting_days', 'approach_ids', 'tag_ids'] as $field) {
             if ($this->exists($field) && in_array($this->input($field), ['', null], true)) {
                 $this->merge([$field => []]);
@@ -47,6 +51,7 @@ class GroupRequest extends FormRequest
     {
         $group = $this->group();
         $rules = [
+            'meeting_price_currency' => ['nullable', 'string', 'max:255'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'max:16000'],
             'meeting_duration_minutes' => ['required', 'integer', 'between:1,4294967295'],

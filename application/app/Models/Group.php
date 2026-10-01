@@ -18,6 +18,7 @@ use Illuminate\Support\Str;
  * @property list<string>|null $meeting_days
  * @property GroupStatus $status
  * @property Carbon|null $published_at
+ * @property Carbon|null $paused_at
  * @property Carbon|null $expires_at
  * @property int|null $all_count
  * @property int|null $new_count
@@ -70,6 +71,12 @@ class Group extends Model
             'meeting_days' => 'array',
             'cover_size' => 'integer',
             'public_site_resource_id' => 'integer',
+            'paused_at' => 'datetime',
+            'modx_publication_revision' => 'integer',
+            'modx_publication_requested_at' => 'datetime',
+            'modx_publication_started_at' => 'datetime',
+            'modx_publication_synced_at' => 'datetime',
+            'modx_publication_failed_at' => 'datetime',
             'modx_sync_revision' => 'integer',
             'modx_cover_cleanup_warning' => 'boolean',
             'modx_sync_requested_at' => 'datetime',

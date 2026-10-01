@@ -343,5 +343,27 @@ See `modx-api.md` for this external limitation and exact mapping/cover contract.
 Verify on a synthetic group: approval commits, worker creates parent 3/template 8/
 web/unpublished, local Resource ID persists, all owned TVs/MIGX/image match; admin
 edit updates the same ID and changed covers upload once. Cabinet never writes
-price_usd, SEO/showOnMainPage, publication/deletion flags. Publication stays manual.
+SEO/showOnMainPage or deletion flags. Nonempty `meeting_price_currency` writes price_usd; empty omits it. Content sync preserves publication; initial publication remains manual.
 No full JSON, HTML, leader names, paths, base64 or credentials belong in logs.
+
+## Publication control deployment (TASK-2026-10-01-04)
+
+Deploy additive migration 000004 and restart all content/publication workers together
+so both classes use the shared overlap lock. Do not roll back the migration while
+paused groups exist: it removes the clock/revision metadata. Use existing database
+queue/cache and timeouts. No new credentials or external plugin source are included.
+The operator must first supply `/cabinet/resources/publication` per modx-api.md.
+
+Manual external acceptance on a synthetic remote-backed group: pause/unpublish,
+resume/publish same ID, check exact remaining time and normal MODX events/cache;
+repeat and inspect stale work; delete/expire unpublish without Resource deletion or
+refund. Initial approved publication and expired renewal remain manual. Verify
+nonempty currency writes price_usd and empty preserves remote TV. These live checks
+were not executed by automated work.
+
+For queue_unavailable, restore the queue and dispatch the existing
+SetGroupModxPublication(group ID, current revision, expected Resource ID) on database
+from an operator console after verifying current desired/status. Set a failed current
+revision back to pending before replay; never rotate an idempotency-conflict key.
+For conflicts, reconcile the same key/body with the MODX operator first. No new
+admin recovery UI is introduced; deleted rows are handled with withTrashed().

@@ -95,7 +95,7 @@ class GroupLifecycleTest extends TestCase
         $null = $this->group(['expires_at' => null]);
         $deleted = $this->group(['expires_at' => now()->subDay()]);
         $deleted->delete();
-        foreach (['draft', 'moderation', 'revision', 'approved', 'rejected', 'expired', 'awaiting_payment'] as $status) {
+        foreach (['draft', 'moderation', 'revision', 'approved', 'rejected', 'expired', 'paused', 'awaiting_payment'] as $status) {
             $this->group(['status' => $status, 'expires_at' => now()->subDay()]);
         }
         $candidate = $this->group(['expires_at' => now()]);
@@ -350,7 +350,7 @@ class GroupLifecycleTest extends TestCase
                 }
                 $counts[$role][$size] = count($queries);
                 if ($role === 'admin') {
-                    $response->assertSee('Снять с публикации')->assertSee('Снимите группу с публикации')->assertDontSee('Active excluded')
+                    $response->assertSee('Законченные')->assertDontSee('Снимите группу с публикации')->assertDontSee('Active excluded')
                         ->assertViewHas('groups', fn ($groups) => $groups->every(fn ($group) => $group['status'] === 'expired'));
                 }
             }

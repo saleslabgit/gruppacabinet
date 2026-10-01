@@ -284,7 +284,7 @@ no middle name. Create-only deterministic alias is slug + `-g<local ID>`, max 19
 `groupid` stores the immutable UUID by integration decision; legacy samples did
 not use this field. Whole BYN price is an integer decimal string: minor price
 must be divisible by 100. `price_usd` (81, text) is a separate secondary currency
-line and intentionally unmanaged. SEO/showOnMainPage/other unlisted TVs are omitted.
+line from nullable `meeting_price_currency`: nonempty trimmed text is sent, empty values omit the TV and preserve its remote value. SEO/showOnMainPage/other unlisted TVs are omitted.
 
 Submit, admin create, approval and manual resync require complete content,
 owner first/last name, active correctly linked MODX dictionary values and a
@@ -341,3 +341,40 @@ before HTTP. Per-group cache overlap protection covers transport and persistence
 Stale successful responses still preserve learned Resource/cover identity; stale
 failures cannot overwrite a newer revision. Admin status/manual resync uses the
 same asynchronous pipeline, including after a successful sync.
+
+## Pause and publication lifecycle (TASK-2026-10-01-04)
+
+Only the non-admin owner can pause an enabled active group with an existing MODX
+Resource and future expires_at. POST `/groups/{group}/pause` confirms active → paused,
+records paused_at and requests unpublished after commit. Paused groups do not expire,
+accept participant applications, receive expiry warnings or permit extensions.
+
+POST `/groups/{group}/resume` requests published for the same immutable Resource ID.
+Local status stays paused during pending/retry/failure. Only a successful current
+publication job transitions paused → active as system, clears paused_at and the
+warning marker, and adds `now - paused_at` in exact stored seconds to expires_at.
+The time change, history and publication success marker commit atomically; retries
+cannot extend twice. Duplicate pending resume requests reuse the current revision.
+Initial approved activation and expired renewal still require manual publication;
+manual activation records published locally without HTTP.
+
+Pause/delete/expiry request unpublished; Resource deletion is never used. Owner
+delete hides any visible group with psychologist_deleted_at; admin delete is soft
+with audit. Payments/history survive; no automatic refund or payment blocker.
+
+Publication intent has an incrementing revision, desired published/unpublished,
+status pending/syncing/published/unpublished/failed/conflict and safe timestamps/code.
+Jobs carry group ID/revision/expected Resource ID, run after commit on the database
+queue, and share the `modx-group:<id>` lock across job classes via shared(). No DB
+transaction crosses HTTP. Stale revisions skip before HTTP and cannot overwrite
+newer intent afterward; delete wins over pending resume. Queue failure preserves
+the local lifecycle and marks safe failure. Conflicts require operator reconciliation;
+resume never rotates a conflicting revision key to hide an error.
+
+The form keeps Bold/Italic/UL/OL/Remove formatting, accessible native fallback and
+safe legacy headings/quotes/links. Optional `meeting_price_currency` is trimmed,
+nullable, max 255; nonempty maps to price_usd, empty omits the TV. BYN is unchanged.
+
+The external publication endpoint is maintained by the MODX operator outside this
+repository. Automated work uses HTTP fakes only. Live endpoint acceptance remains
+manual and unverified.

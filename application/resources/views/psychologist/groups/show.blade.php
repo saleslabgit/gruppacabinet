@@ -10,10 +10,7 @@
 @section('content')
 @if($realGroups ?? false)<x-validation-summary :errors="$errors" />@endif
 @if($group['disabled'])
-<x-alert tone="warning">Группа отключена администратором. Действия временно недоступны.</x-alert>
-@endif
-@if($variant === 'paid-delete-blocked')
-<x-alert tone="warning">Удаление недоступно: есть успешный платёж без отметки возврата. Обратитесь к администратору.</x-alert>
+<x-alert tone="warning">Группа отключена администратором. Редактирование, пауза и продление недоступны.</x-alert>
 @endif
 
 @include('shared.group-data')
@@ -35,5 +32,15 @@
 <a href="{{ $links['applications'] }}">Все заявки группы</a>
 @endif
 </x-panel>
+@if(($canPause ?? false) || (!($realGroups ?? false) && $group['status'] === 'active'))
+<x-confirmation id="pause-group" title="Поставить группу на паузу?" action="Поставить на паузу" kind="primary" :url="($realGroups ?? false) ? route('psychologist.groups.pause', $group['id']) : null">
+<p>Группа будет снята с публикации на основном сайте. Время размещения остановится, приём заявок прекратится.</p>
+</x-confirmation>
+@endif
+@if(($canResume ?? false) || (!($realGroups ?? false) && $group['status'] === 'paused'))
+<x-confirmation id="resume-group" title="Возобновить публикацию?" action="Возобновить публикацию" kind="primary" :url="($realGroups ?? false) ? route('psychologist.groups.resume', $group['id']) : null">
+<p>После подтверждения публикации на основном сайте группа станет активной. Оставшееся время размещения сохранится.</p>
+</x-confirmation>
+@endif
 @include('shared.group-history')@include('shared.group-delete')
 @endsection

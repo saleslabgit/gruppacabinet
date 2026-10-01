@@ -75,6 +75,9 @@ $weekdayOptions = $weekdayOptions ?? \App\Services\GroupContent::DAYS;
 <div class="col-md-6">
 <x-input name="meeting_price" label="Стоимость встречи, BYN" inputmode="decimal" :value="($realGroups ?? false) ? old('meeting_price', $priceInput) : '35,00'" :required="true" :help="($realGroups ?? false) ? 'Цена одной встречи для участника.' : 'Цена одной встречи для участника. Демонстрационная сумма.'" :error="$errors['meeting_price'] ?? null" />
 </div>
+<div class="col-md-6">
+<x-input name="meeting_price_currency" label="Стоимость встречи (В валюте)" maxlength="255" :value="$real ? old('meeting_price_currency', $group['meeting_price_currency']) : ($group['meeting_price_currency'] ?? '')" help="Цена одной встречи с указанием валюты" :error="$errors['meeting_price_currency'] ?? null" />
+</div>
 </div>
 </x-panel>
 @if($admin && ($realGroups ?? false) && !$creating)

@@ -281,11 +281,13 @@ class GroupWorkflowTest extends TestCase
         $group = $this->draft();
         $payment = Payment::query()->create(['owner_id' => $this->owner->id, 'group_id' => $group->id, 'type' => 'placement', 'order_number' => 'test-order', 'amount' => 3500, 'status' => 'succeeded']);
         $payment->delete();
-        $this->actingAs($this->owner)->delete('/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
-        $payment->update(['status' => 'refunded', 'refunded_at' => now()]);
+        $this->actingAs($this->owner);
         $this->delete('/groups/'.$group->id)->assertSessionHasErrors('confirmed');
         $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
-        $this->assertSoftDeleted($group);
+        $this->assertNotNull($group->fresh()->psychologist_deleted_at);
+        $this->assertNull($group->fresh()->deleted_at);
+        $this->assertSame('succeeded', $payment->fresh()->status->value);
+        $this->assertNull($payment->fresh()->refunded_at);
         $this->assertSame(1, $group->statusHistory()->count());
         $this->assertSame(1, Payment::withTrashed()->count());
         $this->get('/groups/'.$group->id)->assertNotFound();
@@ -413,37 +415,33 @@ class GroupWorkflowTest extends TestCase
         $this->assertSame(1, $group->statusHistory()->count());
     }
 
-    public function test_disabled_group_and_non_deletable_statuses_are_protected(): void
+    public function test_disabled_group_edit_is_protected_but_owner_can_hide_every_status(): void
     {
         $group = $this->draft();
         $group->update(['disabled' => true]);
         $this->actingAs($this->owner)->put('/groups/'.$group->id, $this->fields)->assertForbidden();
         $this->post('/groups/'.$group->id.'/submit', $this->fields)->assertForbidden();
-        $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
-        foreach (['moderation', 'revision', 'approved', 'active', 'expired', 'awaiting_payment'] as $status) {
-            $group->update(['disabled' => false, 'status' => $status]);
-            $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
+        $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
+        foreach (['moderation', 'revision', 'approved', 'active', 'paused', 'expired', 'awaiting_payment'] as $status) {
+            $group = $this->draft();
+            $group->update(['status' => $status]);
+            $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
+            $this->assertNotNull($group->fresh()->psychologist_deleted_at);
         }
         $this->assertFalse($group->fresh()->trashed());
     }
 
     #[DataProvider('statuses')]
-    public function test_admin_deletion_in_every_status_requires_confirmation_refund_and_audit(string $status): void
+    public function test_admin_deletion_in_every_status_requires_confirmation_and_preserves_payment_and_audit(string $status): void
     {
         $group = $this->draft();
         $group->update(['status' => $status]);
         $this->actingAs($this->admin)->get('/admin/groups/'.$group->id)->assertOk()->assertSee('data-bs-target="#delete-group"', false);
-        if ($status === 'active') {
-            $this->get('/admin/groups/'.$group->id)->assertSee('вручную снимите публикацию');
-        } elseif ($status === 'approved') {
-            $this->get('/admin/groups/'.$group->id)->assertSee('Проверьте, опубликована ли группа');
-        }
+        $this->get('/admin/groups/'.$group->id)->assertSee('Возврат оплаты автоматически не выполняется');
         $this->delete('/admin/groups/'.$group->id)->assertSessionHasErrors('confirmed');
         $payment = Payment::create(['owner_id' => $this->owner->id, 'group_id' => $group->id, 'type' => 'placement', 'order_number' => 'historical', 'amount' => 1, 'status' => 'succeeded']);
         $payment->delete();
-        $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
         $this->assertDatabaseCount('gp_audit_log', 0);
-        $payment->update(['refunded_at' => now()]);
         $this->delete('/admin/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();
         $this->assertSoftDeleted($group);
         $this->assertSame($status, $group->fresh()->status->value);
@@ -462,9 +460,8 @@ class GroupWorkflowTest extends TestCase
         $application = $group->applications()->create(['first_name' => 'Synthetic', 'last_name' => 'Participant', 'phone' => 'test', 'phone_normalized' => '']);
         $payment = Payment::create(['owner_id' => $this->owner->id, 'group_id' => $group->id, 'type' => 'placement', 'order_number' => 'hidden', 'amount' => 1, 'status' => 'succeeded']);
         $payment->delete();
-        $this->actingAs($this->owner)->delete('/groups/'.$group->id, ['confirmed' => 1])->assertForbidden();
+        $this->actingAs($this->owner);
         $this->assertNull($group->fresh()->psychologist_deleted_at);
-        $payment->update(['refunded_at' => now()]);
         $this->travelTo(now()->utc()->startOfSecond());
         $before = $group->fresh()->getAttributes();
         $this->delete('/groups/'.$group->id, ['confirmed' => 1])->assertRedirect();

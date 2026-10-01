@@ -34,7 +34,7 @@ class GroupPages
     {
         return $group->only(['id', 'public_uuid', 'owner_id', 'disabled', 'free', 'description', 'schedule', 'format_id', 'gender_id',
             'full_description_html', 'meeting_days', 'start_time', 'frequency', 'city', 'group_type_id', 'cover_original_name', 'cover_size',
-            'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at', 'placement_days']) + [
+            'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'meeting_price_currency', 'paused_at', 'modx_publication_desired', 'modx_publication_status', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at', 'placement_days']) + [
                 'title' => $group->title ?: 'Новая группа', 'status' => $group->status->value,
                 'group_type' => $group->relationLoaded('groupType') ? ($group->groupType->name ?? 'Не указан') : 'Не указан',
                 'approaches' => $group->relationLoaded('approaches') ? $group->approaches->pluck('name')->all() : [],
@@ -69,6 +69,8 @@ class GroupPages
                 && $lastTransition->to_status === GroupStatus::Approved,
             'placementPayment' => $placement, 'payment' => $placement ? PaymentPages::data($placement) : null,
             'history' => $group->statusHistory, 'user' => $group->owner ? PsychologistPages::profile($group->owner) : null,
+            'canPause' => $group->exists && request()->user()->can('pause', $group),
+            'canResume' => $group->exists && request()->user()->can('resume', $group),
             'canDelete' => $checkDeletion && $group->exists && request()->user()->can('delete', $group)]);
     }
 

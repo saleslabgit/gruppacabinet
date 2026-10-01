@@ -396,7 +396,7 @@ class WebpayTest extends TestCase
         $this->travel(20)->minutes();
         app(PaymentRecovery::class)->check($payment->id);
         $this->assertSame(PaymentStatus::Succeeded, $payment->fresh()->status);
-        $this->assertFalse($this->owner->can('delete', $payment->group->fresh()));
+        $this->assertTrue($this->owner->can('delete', $payment->group->fresh()));
         $this->actingAs($this->owner)->post('/admin/payments/'.$payment->id.'/refund', ['refund_comment' => 'Done', 'confirmed' => '1'])->assertForbidden();
         $this->actingAs($this->admin)->post('/admin/payments/'.$payment->id.'/refund', ['confirmed' => '1'])->assertSessionHasErrors('refund_comment');
         $this->fakeHttp([]);

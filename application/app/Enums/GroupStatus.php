@@ -11,6 +11,7 @@ enum GroupStatus: string
     case Rejected = 'rejected';
     case Approved = 'approved';
     case Active = 'active';
+    case Paused = 'paused';
     case Expired = 'expired';
 
     public function canTransitionTo(self $target): bool
@@ -21,7 +22,8 @@ enum GroupStatus: string
             self::Moderation => in_array($target, [self::Approved, self::Revision, self::Rejected], true),
             self::Revision => $target === self::Moderation,
             self::Approved => $target === self::Active,
-            self::Active => $target === self::Expired,
+            self::Active => in_array($target, [self::Expired, self::Paused], true),
+            self::Paused => $target === self::Active,
             self::Expired => $target === self::Approved,
             self::Rejected => false,
         };

@@ -8,7 +8,7 @@
 <x-input name="search" label="ID, название или психолог" :value="$filters['search'] ?? ($variant === 'no-results' ? 'Нет совпадений' : '')" />
 <div class="row">
 <div class="col-md-4">
-<x-select name="status" label="Статус" :options="[''=>'Все','awaiting_payment'=>'Ожидает оплаты','draft'=>'Черновик','moderation'=>'На модерации','revision'=>'На доработке','rejected'=>'Отклонена','approved'=>'Ожидает публикации','active'=>'Активная','expired'=>'Закончена']" :value="$filters['status'] ?? (in_array($variant,['normal','empty','long','pagination']) ? '' : $group['status'])" />
+<x-select name="status" label="Статус" :options="[''=>'Все','awaiting_payment'=>'Ожидает оплаты','draft'=>'Черновик','moderation'=>'На модерации','revision'=>'На доработке','rejected'=>'Отклонена','approved'=>'Ожидает публикации','active'=>'Активная','paused'=>'На паузе','expired'=>'Закончена']" :value="$filters['status'] ?? (in_array($variant,['normal','empty','long','pagination']) ? '' : $group['status'])" />
 </div>
 <div class="col-md-4">
 <x-select name="free" label="Тариф группы" :options="[''=>'Все','free'=>'Бесплатная','paid'=>'Платная']" :value="$filters['free'] ?? $variant" />
@@ -34,7 +34,7 @@
 @endif
 </form>
 <div class="actions quick-filters mt-3">
-@foreach(['approved'=>'Ожидают публикации','expired'=>'Снять с публикации','abandoned'=>'Брошенные группы'] as $state=>$label)
+@foreach(['approved'=>'Ожидают публикации','expired'=>'Законченные','abandoned'=>'Брошенные группы'] as $state=>$label)
 <a href="{{ ($realGroups ?? false) ? route('admin.groups.index',['quick'=>$state]) : route('prototype.admin-groups',['variant'=>$state]) }}">{{ $label }}</a>
 @endforeach
 </div>

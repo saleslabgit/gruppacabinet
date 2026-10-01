@@ -26,9 +26,7 @@
 <p class="meta">До окончания размещения: {{ $group['remaining_days'] }} дн.</p>
 @endif
 @endif
-@if($group['status'] === 'expired' && ($admin ?? false))
-<x-alert tone="warning">Снимите группу с публикации на gruppa.info вручную.</x-alert>
-@elseif($group['status'] === 'expired' && !$group['outside_window'] && $group['extension_deadline'])
+@if($group['status'] === 'expired' && !$group['outside_window'] && $group['extension_deadline'])
 <p>Продление доступно до: <x-date :value="$group['extension_deadline']" /></p>
 @endif
 @elseif($group['warning'])
@@ -36,6 +34,16 @@
 @endif
 @if($group['outside_window'])
 <x-alert tone="warning">Срок продления закончился. Создайте новую группу.</x-alert>
+@endif
+@if(($group['modx_publication_desired'] ?? null) && in_array($group['status'], ['paused', 'expired']))
+<p role="status">{{ match($group['modx_publication_status'] ?? null) {
+    'pending', 'syncing' => $group['modx_publication_desired'] === 'published' ? 'Возобновление публикации выполняется. До подтверждения группа остаётся на паузе.' : 'Снятие с публикации выполняется.',
+    'published' => 'Публикация подтверждена.',
+    'unpublished' => 'Группа снята с публикации.',
+    'failed' => 'Не удалось изменить публикацию. '.($group['modx_publication_desired'] === 'published' ? 'Можно повторить возобновление.' : 'Обратитесь к администратору.'),
+    'conflict' => 'Требуется проверка публикации администратором.',
+    default => 'Состояние публикации ещё не подтверждено.',
+} }}</p>
 @endif
 <dl class="detail-grid">
 <div>
@@ -70,5 +78,6 @@
     'rejected' => 'Группа не будет опубликована. Причина указана выше.',
     'approved' => 'Группа одобрена и ожидает ручной публикации. Срок размещения начнётся после публикации.',
     'active' => ($realGroups ?? false) ? 'Группа опубликована.' : 'Группа опубликована и принимает заявки.',
+    'paused' => 'Группа на паузе. Заявки не принимаются, оставшееся время размещения сохранено. Дата окончания будет сдвинута после возобновления.',
     'expired' => ($realGroups ?? false) ? 'Размещение завершено.' : 'Размещение завершено. После продления потребуется ручная повторная публикация.',
 } }}</p>

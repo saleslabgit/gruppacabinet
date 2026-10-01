@@ -234,9 +234,9 @@ List search/filter/sort preserve query parameters across 20-row pages.
 
 `config/groups.php` sets `abandoned_draft_days = 30`; this is an administrative
 cleanup threshold, not placement duration and not a `gp_settings` value.
-The abandoned filter and admin delete use the same inclusive cutoff. Drafts on
-the newer side of the cutoff cannot be deleted by admin. Historical succeeded
-unrefunded payments block deletion, even when a payment was soft-deleted.
+The abandoned filter uses the inclusive cutoff. Deletion is available in every
+visible status regardless of age or successful unrefunded payments. Owner deletion
+hides locally; admin deletion soft-deletes and audits. No automatic refund occurs.
 No automatic cleanup is scheduled. Confirmed deletion retains group history.
 
 Focused MySQL checks:
@@ -302,7 +302,7 @@ Use synthetic local accounts/groups to check the full flow:
    warning must leave the warning marker unchanged and create no mail/job.
 3. Run `groups:expire` before expiry (unchanged), then at/after expiry (expired).
    Repeat: the expiration history must remain one system transition.
-4. Open admin Groups → «Снять с публикации» and check the manual-unpublish reminder.
+4. Open admin Groups → «Законченные» and check the asynchronous publication state for a remote-backed group.
 5. Extend another active group through its confirmation. It adds its stored
    placement duration, even when the current global setting differs.
 6. Extend an expired group within its window. It becomes approved with old dates;
@@ -565,3 +565,15 @@ External live acceptance remains pending: deploy, create synthetic complete grou
 submit/approve, run worker, inspect unpublished Resource/TV/MIGX/image and saved ID;
 edit/resync and verify same ID, unchanged/replaced cover and manual publication.
 Codex and automated tests do not execute this external scenario.
+
+## Pause/publication verification (TASK-2026-10-01-04)
+
+Use `php artisan test --compact --filter="GroupPublication|ModxGroup|GroupContent"`
+with the isolated MySQL test database and HTTP fakes. The full suite covers deletion,
+lifecycle concurrency, participant intake, expiry warnings and prototype regressions.
+Synthetic flow: activate manually, pause, confirm local paused immediately, process
+unpublish, advance time, resume (still paused), process publish and check exact saved
+remaining duration. Repeat; retry and delete while resume is pending. A failed
+publish must leave the clock frozen. Test paid deletion without refund and admin
+visibility. Currency old input/empty/max and legacy safe HTML must remain readable.
+No automated real MODX calls; external endpoint acceptance is operator-managed.

@@ -33,7 +33,8 @@ class GroupLifecycleService
             if (! $group || $group->status !== GroupStatus::Active || ! $group->expires_at || $group->expires_at->gt(now()->utc())) {
                 return false;
             }
-            $this->transitions->transition($group, GroupStatus::Expired);
+            $expired = $this->transitions->transition($group, GroupStatus::Expired);
+            app(GroupModxPublicationScheduler::class)->schedule($expired, false);
 
             return true;
         });

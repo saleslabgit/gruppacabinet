@@ -43,6 +43,8 @@ class StatusTransitionMatrixTest extends TestCase
                 'revision:moderation',
                 'approved:active',
                 'active:expired',
+                'active:paused',
+                'paused:active',
                 'expired:approved',
             ]),
             ...self::pairs(PaymentStatus::cases(), [

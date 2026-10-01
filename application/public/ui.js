@@ -352,10 +352,8 @@ document.querySelectorAll('[data-rich-editor]').forEach(wrapper => {
         }
     };
     const controls = [
-        ['Абзац', 'formatBlock', 'p'], ['H2', 'formatBlock', 'h2'], ['H3', 'formatBlock', 'h3'],
         ['Жирный', 'bold'], ['Курсив', 'italic'], ['Список', 'insertUnorderedList'],
-        ['Нумерация', 'insertOrderedList'], ['Цитата', 'formatBlock', 'blockquote'],
-        ['Ссылка', 'createLink'], ['Убрать форматирование', 'removeFormat']
+        ['Нумерация', 'insertOrderedList'], ['Убрать форматирование', 'removeFormat']
     ];
     controls.forEach(([label, command, value]) => {
         const button = document.createElement('button');
@@ -364,10 +362,6 @@ document.querySelectorAll('[data-rich-editor]').forEach(wrapper => {
         button.textContent = label;
         button.addEventListener('pointerdown', event => event.preventDefault());
         button.addEventListener('click', () => {
-            if (command === 'createLink') {
-                value = window.prompt('Адрес ссылки: https://, http://, mailto: или /путь');
-                if (!safeHref(value)) return;
-            }
             restore();
             document.execCommand('styleWithCSS', false, false);
             document.execCommand(command, false, value);

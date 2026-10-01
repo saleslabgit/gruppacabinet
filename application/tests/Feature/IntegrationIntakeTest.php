@@ -186,10 +186,12 @@ class IntegrationIntakeTest extends TestCase
 
     public function test_group_rejections_and_protected_fields(): void
     {
-        foreach (['draft', 'moderation', 'revision', 'rejected', 'approved', 'expired', 'awaiting_payment'] as $status) {
+        foreach (['draft', 'moderation', 'revision', 'rejected', 'approved', 'paused', 'expired', 'awaiting_payment'] as $status) {
             $this->group->update(['status' => $status]);
             $this->application()->assertStatus(422)->assertJsonPath('code', 'group_not_accepting_applications');
         }
+        $this->group->update(['status' => 'active', 'psychologist_deleted_at' => now()]);
+        $this->application()->assertStatus(422)->assertJsonPath('code', 'group_not_accepting_applications');
         $this->group->update(['status' => 'active', 'disabled' => true]);
         $this->application()->assertStatus(422);
         $this->group->delete();

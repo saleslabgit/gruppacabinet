@@ -48,7 +48,8 @@ class GroupPolicy
     public function syncModx(User $actor, Group $group): bool
     {
         return $actor->admin && $this->view($actor, $group)
-            && in_array($group->status, [GroupStatus::Approved, GroupStatus::Active, GroupStatus::Expired], true);
+            && ($group->status !== GroupStatus::Paused || $group->public_site_resource_id !== null)
+            && in_array($group->status, [GroupStatus::Approved, GroupStatus::Active, GroupStatus::Paused, GroupStatus::Expired], true);
     }
 
     public function activate(User $actor, Group $group): bool
@@ -56,15 +57,22 @@ class GroupPolicy
         return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Approved;
     }
 
+    public function pause(User $actor, Group $group): bool
+    {
+        return ! $actor->admin && $this->view($actor, $group) && ! $group->disabled
+            && $group->status === GroupStatus::Active && $group->public_site_resource_id !== null
+            && $group->expires_at !== null && $group->expires_at->isFuture();
+    }
+
+    public function resume(User $actor, Group $group): bool
+    {
+        return ! $actor->admin && $this->view($actor, $group) && ! $group->disabled
+            && $group->status === GroupStatus::Paused && $group->public_site_resource_id !== null
+            && $group->paused_at !== null && $group->expires_at !== null;
+    }
+
     public function delete(User $actor, Group $group): bool
     {
-        if (! $this->view($actor, $group)) {
-            return false;
-        }
-        $eligible = $actor->admin
-            ? true
-            : ! $group->disabled && in_array($group->status, [GroupStatus::Draft, GroupStatus::Rejected], true);
-
-        return $eligible && ! $group->payments()->withTrashed()->where('status', 'succeeded')->whereNull('refunded_at')->exists();
+        return $this->view($actor, $group);
     }
 }
