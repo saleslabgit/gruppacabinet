@@ -1,7 +1,7 @@
 # Task: TASK-2026-10-01-01
 
 Status: planned
-Created from: 621d26aa4c555a2578c9a6cd773a984d32d7e678 (main)
+Created from: 39085428a15ea6a94836612ee4e61f69cbaaefd2 (main; corrective planner iteration after blocked contract-shape check)
 
 ## Title
 
@@ -24,12 +24,89 @@ this task.
 
 ## Facts
 
-- Current base commit is `621d26aa4c555a2578c9a6cd773a984d32d7e678`.
+- Current task base before this corrective planner commit is `39085428a15ea6a94836612ee4e61f69cbaaefd2`; implementation must start from the corrective planner HEAD.
 - The public site runs MODX 3 with mxHeadless and the external
   `GruppaCabinetApi` plugin.
 - The operator manually verified
   `GET https://gruppa.info/api/v1/cabinet/dictionaries`.
 - The endpoint returned `data.complete=true`.
+- Exact verified JSON nesting is:
+
+```json
+{
+  "data": {
+    "complete": true,
+    "dictionaries": {
+      "format": {
+        "tv_id": 35,
+        "tv_name": "format",
+        "type": "listbox",
+        "options": [
+          {
+            "value": "Офлайн",
+            "label": "Офлайн",
+            "position": 0
+          }
+        ]
+      },
+      "gender": {
+        "tv_id": 39,
+        "tv_name": "gender",
+        "type": "listbox",
+        "options": [
+          {
+            "value": "Смешанная",
+            "label": "Смешанная",
+            "position": 0
+          }
+        ]
+      },
+      "groupType": {
+        "tv_id": 37,
+        "tv_name": "groupType",
+        "type": "listbox",
+        "options": [
+          {
+            "value": "17",
+            "label": "Супервизорская группа",
+            "position": 8
+          }
+        ]
+      },
+      "approaches": {
+        "tv_id": 36,
+        "tv_name": "approaches",
+        "type": "listbox-multiple",
+        "options": [
+          {
+            "value": "2",
+            "label": "Гештальт-терапия",
+            "position": 11
+          }
+        ]
+      },
+      "tags": {
+        "tv_id": 30,
+        "tv_name": "tags",
+        "type": "listbox-multiple",
+        "options": [
+          {
+            "value": "77",
+            "label": "гештальт",
+            "position": 80
+          }
+        ]
+      }
+    }
+  },
+  "meta": []
+}
+```
+
+This is the authoritative response shape for implementation. Tests may use a
+smaller synthetic option set, but must preserve this exact nesting and field
+names. Do not invent wrappers such as `data.data`, `items`, `results`,
+or top-level dictionary keys.
 - Verified definitions:
   - `format`: TV 35, type `listbox`, 2 options;
   - `gender`: TV 39, type `listbox`, 3 options;
@@ -305,8 +382,8 @@ Before editing:
 
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm HEAD is this planner commit and its parent is
-  `621d26aa4c555a2578c9a6cd773a984d32d7e678`;
+- confirm HEAD is this corrective planner commit and its parent is
+  `39085428a15ea6a94836612ee4e61f69cbaaefd2`;
 - read `WORKFLOW.md`, `AGENTS.md`, this task and current report;
 - read Stage 17 in `SPEC.md`, `docs/modx-api.md`,
   `docs/modx-group-sync-plan.md`, and `docs/project-status.md`;
