@@ -486,6 +486,11 @@ MODX resource-ID persistence and final field mapping are **not implemented yet**
 Those belong to the dedicated follow-up stage in `SPEC.md`. Cabinet must never
 write directly to MODX database tables. See `docs/modx-api.md`.
 
+The planned form/schema expansion, MODX-managed dictionary synchronization,
+rich-HTML policy, cover transport and staged implementation order are recorded
+in `docs/modx-group-sync-plan.md`. That document is a design plan, not a claim
+that those Cabinet changes already exist.
+
 ## Stage 12 mail boundary
 
 `PasswordSetupService` creates a fresh framework broker/token repository using

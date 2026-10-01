@@ -212,6 +212,13 @@ mapping has not been approved. Current inbound Stage 11 APIs are unchanged.
 The verified endpoint contract and remaining boundaries are documented in
 `docs/modx-api.md`.
 
+The target design has now been expanded in `docs/modx-group-sync-plan.md`: the
+future group form adds short/full descriptions, cover, structured schedule,
+frequency, city, group type, multiple approaches and tags; MODX will be the
+source of truth for `format`, `gender`, `groupType`, `approaches` and `tags`
+option lists. This is documentation/planning only; none of those Cabinet schema,
+UI or synchronization changes are implemented at the current HEAD.
+
 ## Stage 12 email and onboarding
 
 Stage 12 is complete and verified locally; verification details are in `.ai/report.md`.

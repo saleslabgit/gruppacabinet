@@ -272,6 +272,89 @@ The follow-up Cabinet implementation must:
 8. Keep `approved → active` in Cabinet as the action that starts placement dates.
 9. Never access MODX database tables directly.
 
+## Planned dictionary endpoint
+
+The next external prerequisite is a protected read endpoint:
+
+```http
+GET /api/v1/cabinet/dictionaries
+Authorization: Bearer <mxHeadless API key>
+```
+
+Scope: `cabinet.sync`.
+
+It will expose only the fixed whitelist:
+
+```text
+format
+gender
+groupType
+approaches
+tags
+```
+
+The endpoint must return the **resolved** MODX input options, not raw TV
+`elements` or binding source text. MODX input rendering resolves TV elements
+through `processBindings(...)` and then parses `||` options; an option
+`Label==storedValue` has a display label and an exact stored value. Cabinet
+needs those two values separately.
+
+Target response shape:
+
+```json
+{
+  "data": {
+    "complete": true,
+    "dictionaries": {
+      "format": {
+        "tv_id": 1,
+        "type": "listbox",
+        "options": [
+          {"value": "Офлайн", "label": "Офлайн", "position": 0}
+        ]
+      },
+      "tags": {
+        "tv_id": 2,
+        "type": "listbox-multiple",
+        "options": [
+          {"value": "77", "label": "Example tag", "position": 0}
+        ]
+      }
+    }
+  }
+}
+```
+
+If a required TV is missing, its binding cannot be resolved, or duplicate stored
+values make the result ambiguous, the request must fail rather than return a
+partial response marked complete. The endpoint must not accept an arbitrary TV
+name from the caller.
+
+Cabinet-side synchronization of these options is planned in
+`docs/modx-group-sync-plan.md`; it is not implemented yet.
+
+## Planned cover transport
+
+The current sync endpoint is JSON-only. mxHeadless
+`ContentNegotiationMiddleware` accepts JSON/form-urlencoded mutations but not
+multipart, and `BodyLimitMiddleware` defaults
+`mxheadless_max_body_bytes` to **1 MiB**.
+
+The target group form allows JPEG/PNG/WebP covers up to 5 MiB. Therefore cover
+transport must be explicitly added before Cabinet outbound sync. The preferred
+low-volume design is bounded base64 image data inside the authenticated JSON
+sync request, with:
+
+- decoded-size validation at 5 MiB;
+- MIME verification from bytes;
+- a managed MODX image directory and collision-safe filename;
+- TV `image` set to the resulting relative path;
+- cleanup/compensation when the associated DB operation fails;
+- an mxHeadless body limit large enough for base64 overhead (at least 8 MiB for
+  a 5 MiB product limit), after verifying the actual hosting/PHP request limits.
+
+This extension is planned, not installed/verified yet.
+
 ## Out of scope for this API document
 
 - deciding which Cabinet field maps to each MODX TV;
