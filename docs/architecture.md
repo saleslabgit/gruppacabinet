@@ -490,10 +490,8 @@ MODX resource-ID persistence and final field mapping are **not implemented yet**
 Those belong to the dedicated follow-up stage in `SPEC.md`. Cabinet must never
 write directly to MODX database tables. See `docs/modx-api.md`.
 
-The planned form/schema expansion, MODX-managed dictionary synchronization,
-rich-HTML policy, cover transport and staged implementation order are recorded
-in `docs/modx-group-sync-plan.md`. That document is a design plan, not a claim
-that those Cabinet changes already exist.
+The implemented local dictionary/form milestones and planned outbound phases
+are distinguished in `docs/modx-group-sync-plan.md`.
 
 ## Stage 12 mail boundary
 
@@ -549,3 +547,29 @@ uses sanitized errors. Admin refund takes a payment row lock, validates the
 succeeded state and required confirmation/comment, records audit, and makes no
 HTTP call. Normal admin list/detail also make no provider calls. Eager loading
 keeps list query counts independent of rows; journals and lists are paginated.
+
+## Cabinet group content
+
+`GroupContent` validates local dictionary ownership, active/current selections,
+canonical weekday order, exact HH:MM and completeness. `GroupWorkflow` locks the
+group and saves scalars, approach/tag pivots and submit/history in one transaction.
+Missing new fields on ordinary updates preserve existing content. Legacy
+`schedule` is never parsed or written by the form; details display it when no
+structured schedule exists. Historical/soft-deleted relations count as dictionary usage.
+
+`GroupHtmlSanitizer` uses PHP DOM with network access disabled, rebuilds an explicit
+semantic grammar and escapes every text node. It never serializes an untrusted
+subtree. Only safe link href survives; dangerous subtrees are discarded. Both raw
+and clean HTML have a 100000-character ceiling; invisible-only content fails.
+The shared form's progressive contenteditable/textarea editor is convenience;
+the server sanitizer is authoritative. The searchable checkbox selectors submit
+through native multiple selects using local IDs. Detail eager loading preserves
+constant-query listings.
+
+`GroupCovers` validates real JPEG/PNG/WebP content, stores a fresh random private
+path and compensates a failed DB/domain operation by deleting its new upload.
+An old cover is deleted only after commit; cleanup/storage failures become explicit
+validation errors (a post-commit cleanup error reports that data already saved).
+Cover metadata is never accepted directly from form input. Owner/admin previews
+reuse group/account authorization with inline validated MIME, nosniff and private
+no-store headers; no public storage link or outbound transport is involved.

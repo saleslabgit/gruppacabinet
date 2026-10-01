@@ -58,6 +58,7 @@ Route::middleware(['account', 'role:psychologist'])->prefix('groups')->name('psy
     $controller = GroupController::class;
     Route::post('/', [$controller, 'store'])->name('store');
     Route::get('/{group}', [$controller, 'show'])->name('show');
+    Route::get('/{group}/cover', [$controller, 'cover'])->name('cover');
     Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
     Route::put('/{group}', [$controller, 'update'])->name('update');
     Route::post('/{group}/submit', [$controller, 'update'])->name('submit');
@@ -83,6 +84,7 @@ Route::middleware(['account', 'role:admin'])->prefix('admin/groups')->name('admi
     Route::get('/create', [$controller, 'create'])->name('create');
     Route::post('/', [$controller, 'store'])->name('store');
     Route::get('/{group}', [$controller, 'show'])->name('show');
+    Route::get('/{group}/cover', [$controller, 'cover'])->name('cover');
     Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
     Route::put('/{group}', [$controller, 'update'])->name('update');
     foreach (['approve', 'revision', 'reject', 'activate'] as $action) {

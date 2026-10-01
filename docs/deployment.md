@@ -31,6 +31,13 @@ composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 composer check-platform-reqs --no-dev
 ```
 
+The selected CLI and web PHP runtimes must include `ext-dom` (now explicitly
+required by Composer for group HTML sanitization), alongside the other locked
+platform requirements. Apply the additive group-content migration before serving
+new code. Preserve private `storage/app/private/group-covers/` during releases and
+back it up with group metadata. `GROUP_COVER_MAX_KB` defaults to 5120; web/PHP
+upload and request limits must accommodate this plus form content.
+
 Upload the resulting application **including vendor/**. No Node build is needed;
 public assets are committed. Do not copy local .env, cached config/routes/views,
 logs, sessions, test artifacts or local uploads. Keep runtime storage and private

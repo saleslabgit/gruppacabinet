@@ -9,12 +9,14 @@ use App\Http\Requests\GroupIndexRequest;
 use App\Http\Requests\GroupRequest;
 use App\Models\Group;
 use App\Models\User;
+use App\Services\GroupCovers;
 use App\Services\GroupWorkflow;
 use App\Support\GroupPages;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class GroupController extends Controller
 {
@@ -83,6 +85,13 @@ class GroupController extends Controller
         Gate::authorize('view', $group);
 
         return view('admin.groups.show', GroupPages::detail($group, true));
+    }
+
+    public function cover(Group $group, GroupCovers $covers): StreamedResponse
+    {
+        Gate::authorize('view', $group);
+
+        return $covers->response($group);
     }
 
     public function edit(Group $group): View

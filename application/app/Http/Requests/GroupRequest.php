@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\DictionaryItem;
 use App\Models\Group;
+use App\Services\GroupContent;
 use App\Services\GroupWorkflow;
 use App\Support\DateTimeFormatter;
 use Carbon\CarbonImmutable;
@@ -33,13 +34,21 @@ class GroupRequest extends FormRequest
         return $group ? $this->user()->can($this->routeIs('*.submit') ? 'submit' : 'update', $group) : $this->user()->can('viewAny', Group::class);
     }
 
+    protected function prepareForValidation(): void
+    {
+        foreach (['meeting_days', 'approach_ids', 'tag_ids'] as $field) {
+            if ($this->exists($field) && in_array($this->input($field), ['', null], true)) {
+                $this->merge([$field => []]);
+            }
+        }
+    }
+
     public function rules(): array
     {
         $group = $this->group();
         $rules = [
             'title' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'max:16000'],
-            'schedule' => ['required', 'string', 'max:16000'],
             'meeting_duration_minutes' => ['required', 'integer', 'between:1,4294967295'],
             'participant_capacity' => ['required', 'integer', 'between:1,4294967295'],
             // 16 whole digits stay within PHP's signed integer range after conversion.
@@ -66,12 +75,12 @@ class GroupRequest extends FormRequest
             }
         }
 
-        return $rules;
+        return $rules + app(GroupContent::class)->rules($group, $group === null || $this->routeIs('*.submit'));
     }
 
     public function content(): array
     {
-        $data = Arr::only($this->validated(), GroupWorkflow::FIELDS);
+        $data = Arr::only($this->validated(), [...GroupWorkflow::FIELDS, ...GroupContent::FIELDS]);
         $parts = preg_split('/[.,]/', $data['meeting_price']);
         $data['meeting_price'] = (int) $parts[0] * 100 + (int) str_pad($parts[1] ?? '', 2, '0');
 

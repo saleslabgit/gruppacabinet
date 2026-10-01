@@ -183,11 +183,12 @@ and last-success state. Education and custom dictionaries keep local CRUD.
 Runtime configuration and operations are in `docs/modx-api.md`. No real MODX
 request or production deployment is part of automated verification.
 
-## Phase 3 — Group schema and form
+## Phase 3 — Group schema and form (implemented)
 
-Owner: Codex.
-
-Update the real existing Blade form rather than creating a parallel UI.
+Implemented in TASK-2026-10-01-02 through the existing shared Blade form.
+Nullable additions preserve legacy rows; group type uses a local FK and
+approaches/tags use local-ID pivots. Complete content is required for owner
+moderation submit and admin create; ordinary legacy updates remain possible.
 
 Fields:
 
@@ -211,7 +212,8 @@ new structured schedule before a future moderation submission that requires it.
 
 ## Phase 4 — HTML safety and cover storage
 
-Owner: Codex for Cabinet, MODX operator for cover API extension.
+Cabinet HTML sanitization, progressive editor and private cover storage are
+implemented in TASK-2026-10-01-02. MODX cover transport remains planned.
 
 Rich HTML:
 
@@ -307,5 +309,6 @@ Use synthetic/non-public data and verify:
 ## Task ordering
 
 Phase 1 contract is recorded in TASK-2026-10-01-01 and Phase 2 is implemented.
-Phases 3–7 remain separate work; this milestone adds no group-form fields,
-HTML/image handling, payload mapper or outbound group request.
+Phase 3 and the Cabinet portion of Phase 4 are implemented in TASK-2026-10-01-02.
+MODX cover transport and Phases 5–7 remain planned. No outbound payload mapper,
+approval job, resource-ID column or group HTTP request exists.

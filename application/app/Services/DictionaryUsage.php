@@ -17,6 +17,9 @@ class DictionaryUsage
             'education_type' => DB::table('gp_users')->select('education_type_id as item_id')->whereNotNull('education_type_id'),
             'group_format' => DB::table('gp_groups')->select('format_id as item_id')->whereNotNull('format_id'),
             'gender' => DB::table('gp_groups')->select('gender_id as item_id')->whereNotNull('gender_id'),
+            'group_type' => DB::table('gp_groups')->select('group_type_id as item_id')->whereNotNull('group_type_id'),
+            'group_approach' => DB::table('gp_group_approaches')->select('dictionary_item_id as item_id'),
+            'group_tag' => DB::table('gp_group_tags')->select('dictionary_item_id as item_id'),
             default => null,
         };
     }

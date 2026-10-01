@@ -1,3 +1,8 @@
+@php
+$real = $realGroups ?? false;
+$complete = $admin && ($creating ?? false);
+$weekdayOptions = $weekdayOptions ?? \App\Services\GroupContent::DAYS;
+@endphp
 @if($variant === 'revision')
 <x-alert tone="warning" title="Доработайте описание">
 <p>{{ $group['moderator_comment'] }}</p>
@@ -6,11 +11,11 @@
 @if($admin)
 <x-alert tone="warning">Администратор может редактировать группу независимо от статуса. Изменения опубликованной группы необходимо вручную перенести в каталог.</x-alert>
 @endif
-<form class="editor-form" @if($realGroups ?? false) method="POST" action="{{ $formAction }}" @else data-prototype-form @endif>
+<form class="editor-form" enctype="multipart/form-data" @if($realGroups ?? false) method="POST" action="{{ $formAction }}" @else data-prototype-form @endif>
 @if($realGroups ?? false)
 @csrf
 @endif
-<x-validation-summary :errors="array_intersect_key($errors, array_flip(['owner_id','title','description','schedule','format_id','meeting_duration_minutes','participant_capacity','gender_id','meeting_price','published_at','expires_at']))" />
+<x-validation-summary :errors="$errors" />
 <x-panel title="Основная информация">
 @if($admin)
 @if(($realGroups ?? false) && ! $creating)
@@ -20,12 +25,32 @@
 @endif
 @endif
 <x-input name="title" label="Название группы" :value="($realGroups ?? false) ? old('title', $group['title']) : ($variant === 'create' ? '' : $group['title'])" :required="true" help="Короткое название, которое увидят участники." :error="$errors['title'] ?? null" />
-<x-textarea name="description" label="Описание" :value="($realGroups ?? false) ? old('description', $group['description']) : ($variant === 'create' ? '' : $group['description'])" :required="true" help="Для кого группа и с какими темами вы работаете." :error="$errors['description'] ?? null" />
-<x-textarea name="schedule" label="Расписание" :value="($realGroups ?? false) ? old('schedule', $group['schedule']) : $group['schedule']" :required="true" help="Дни недели и время встреч по Минску." :error="$errors['schedule'] ?? null" />
+<x-textarea name="description" label="Краткое описание" :value="($realGroups ?? false) ? old('description', $group['description']) : ($variant === 'create' ? '' : $group['description'])" :required="true" help="Для кого группа и с какими темами вы работаете." :error="$errors['description'] ?? null" />
+<x-rich-text name="full_description_html" label="Полное описание" :value="$real ? old('full_description_html', $group['full_description_html']) : ($group['full_description_html'] ?? '')" :required="$complete" :error="$errors['full_description_html'] ?? null" />
+<x-input name="cover" label="Обложка группы" type="file" accept="image/jpeg,image/png,image/webp" :required="$complete" :help="'JPEG, PNG или WebP, до '.config('groups.cover_max_kb').' КБ. Повторная загрузка заменяет обложку.'" :error="$errors['cover'] ?? null" />
+@if($coverUrl ?? null)<a href="{{ $coverUrl }}"><img class="group-cover" src="{{ $coverUrl }}" alt="Текущая обложка группы" loading="lazy"></a>@endif
+<fieldset class="field">
+<legend class="form-label">Дни недели</legend>
+<input type="hidden" name="meeting_days" value="">
+<div class="weekday-options">
+@foreach($weekdayOptions as $code => $label)
+<label class="form-check"><input class="form-check-input" type="checkbox" name="meeting_days[]" value="{{ $code }}" @checked(in_array($code, $real ? (array) old('meeting_days', $group['meeting_days'] ?? []) : ($group['meeting_days'] ?? []), true))> {{ $label }}</label>
+@endforeach
+</div>
+<x-validation-error name="meeting_days" :error="$errors['meeting_days'] ?? null" />
+</fieldset>
+<div class="row">
+<div class="col-md-6"><x-input name="start_time" label="Время начала, Минск" type="time" step="60" :value="$real ? old('start_time', $group['start_time']) : ($group['start_time'] ?? '')" :required="$complete" :error="$errors['start_time'] ?? null" /></div>
+<div class="col-md-6"><x-input name="frequency" label="Периодичность" :value="$real ? old('frequency', $group['frequency']) : ($group['frequency'] ?? '')" :required="$complete" :error="$errors['frequency'] ?? null" /></div>
+<div class="col-md-6"><x-input name="city" label="Город" :value="$real ? old('city', $group['city']) : ($group['city'] ?? '')" :required="$complete" :error="$errors['city'] ?? null" /></div>
+</div>
+@if(empty($group['meeting_days']) && empty($group['start_time']) && !empty($group['schedule']))
+<p class="meta">Прежнее расписание: {{ $group['schedule'] }}. Перед отправкой на модерацию заполните дни и время выше.</p>
+@endif
 </x-panel>
 <x-panel title="Условия участия">
-@if(($realGroups ?? false) && (count($formatOptions) === 1 || count($genderOptions) === 1))
-<x-alert tone="warning">Для заполнения группы нужны доступные значения формата и пола участников. Обратитесь к администратору для настройки справочников.</x-alert>
+@if(($realGroups ?? false) && (count($formatOptions) === 1 || count($genderOptions) === 1 || count($groupTypeOptions) === 1 || !$approachesOptions || !$tagsOptions))
+<x-alert tone="warning">Отправка на модерацию или создание полной группы невозможны: нужные варианты справочников отсутствуют в Cabinet. Обратитесь к администратору для обновления справочников. Сохранение доступных полей черновика остаётся возможным.</x-alert>
 @endif
 <div class="row">
 <div class="col-md-6">
@@ -33,6 +58,13 @@
 </div>
 <div class="col-md-6">
 <x-select name="gender_id" label="Пол участников" :options="$genderOptions ?? ['' => 'Выберите значение', 'demo' => $group['gender']]" :value="($realGroups ?? false) ? old('gender_id', $group['gender_id']) : $group['gender_id']" :required="true" :error="$errors['gender_id'] ?? null" />
+</div>
+<div class="col-md-6">
+<x-select name="group_type_id" label="Тип группы" :options="$groupTypeOptions ?? ['' => 'Выберите тип', 'demo' => 'Тип · пример']" :value="$real ? old('group_type_id', $group['group_type_id']) : ($group['group_type_id'] ?? '')" :required="$complete" :error="$errors['group_type_id'] ?? null" />
+</div>
+<div class="col-12">
+<x-multi-select name="approach_ids" label="Подходы" :options="$approachesOptions ?? ['demo' => 'Подход · пример']" :values="$real ? (array) old('approach_ids', $group['approach_ids']) : ($group['approach_ids'] ?? [])" :required="$complete" :error="$errors['approach_ids'] ?? null" />
+<x-multi-select name="tag_ids" label="Теги" :options="$tagsOptions ?? ['demo' => 'Отношения · пример']" :values="$real ? (array) old('tag_ids', $group['tag_ids']) : ($group['tag_ids'] ?? [])" :required="$complete" :error="$errors['tag_ids'] ?? null" />
 </div>
 <div class="col-md-6">
 <x-input name="meeting_duration_minutes" label="Длительность встречи, минут" type="number" min="1" step="1" :value="($realGroups ?? false) ? old('meeting_duration_minutes', $group['meeting_duration_minutes']) : $group['meeting_duration_minutes']" :required="true" :error="$errors['meeting_duration_minutes'] ?? null" />

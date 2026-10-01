@@ -56,6 +56,10 @@ final class PrototypeFixtures
         $group = [
             'id' => 101, 'title' => $long ? str_repeat('Демонстрационная группа поддержки и бережного общения ', 5) : 'Быть собой: группа поддержки',
             'description' => $long ? str_repeat('Вымышленное описание: учимся замечать свои чувства и строить отношения. ', 15) : 'Безопасное пространство, чтобы лучше понимать себя и строить близкие отношения. Встречаемся в небольшой группе, обсуждаем важное и поддерживаем друг друга.',
+            'full_description_html' => '<h2>О встречах</h2><p>Вымышленный текст с <strong>поддержкой</strong> и уважением.</p>',
+            'meeting_days' => ['wed'], 'start_time' => '19:00', 'frequency' => 'Еженедельно', 'city' => 'Минск',
+            'group_type_id' => 'demo', 'group_type' => 'Терапевтическая · пример',
+            'approach_ids' => ['demo'], 'tag_ids' => ['demo'], 'approaches' => ['Подход · пример'], 'tags' => ['Отношения · пример'],
             'schedule' => 'По средам, 19:00–21:00 (Минск)', 'format' => 'Очно · пример справочника', 'format_id' => 'demo',
             'meeting_duration_minutes' => 120, 'participant_capacity' => 8, 'gender_id' => 'demo', 'gender' => 'Любой · пример справочника', 'meeting_price' => 3500,
             'status' => $status, 'disabled' => $variant === 'disabled', 'free' => ! in_array($variant, ['awaiting_payment', 'paid-rejected', 'paid-delete-blocked', 'paid', 'successful-payment'], true),

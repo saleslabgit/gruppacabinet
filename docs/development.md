@@ -527,3 +527,21 @@ for lock exclusion and the actual finite worker with fake mail/provider transpor
 Do not run parallel suites sharing that test database. Local preflight tolerates
 missing deployment secrets; staging/production requires their presence and secure
 runtime configuration. A pass does not verify provider credentials or delivery.
+
+## Group content and private covers
+
+PHP `ext-dom` is an explicit production dependency for `GroupHtmlSanitizer`; the
+current Docker PHP image already provides it. No editor package or build step is
+needed. Run `composer check-platform-reqs` after preparing dependencies.
+
+`GROUP_COVER_MAX_KB=5120` sets the default 5 MiB JPEG/PNG/WebP ceiling. Covers use
+the private local disk under `group-covers/`. Never use production uploads in
+tests: `GroupContentFixture` generates tiny synthetic files in temporary storage.
+Focused coverage is `php artisan test --filter='GroupContent|GroupCover|GroupHtmlSanitizer'`;
+HTTP fakes/stray-request prevention prohibit real MODX calls. Re-run
+`GroupWorkflowTest`, dictionary regressions and `PrototypeTest` after form changes.
+
+Legacy saves may omit new content; moderation submit and admin create require
+full HTML, cover, days/time, frequency/city and local dictionary selections.
+If dictionary options are missing, synchronize them through the existing
+administrator flow; opening/saving a group never fetches them remotely.

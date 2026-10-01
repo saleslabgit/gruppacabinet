@@ -6,6 +6,7 @@ use App\Enums\GroupStatus;
 use App\Models\DictionaryItem;
 use App\Models\Group;
 use App\Models\User;
+use App\Services\GroupContent;
 use App\Services\GroupLifecycleService;
 use Illuminate\Support\Collection;
 
@@ -32,8 +33,14 @@ class GroupPages
     public static function data(Group $group, ?array $context = null): array
     {
         return $group->only(['id', 'public_uuid', 'owner_id', 'disabled', 'free', 'description', 'schedule', 'format_id', 'gender_id',
+            'full_description_html', 'meeting_days', 'start_time', 'frequency', 'city', 'group_type_id', 'cover_original_name', 'cover_size',
             'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at', 'placement_days']) + [
                 'title' => $group->title ?: 'Новая группа', 'status' => $group->status->value,
+                'group_type' => $group->relationLoaded('groupType') ? ($group->groupType->name ?? 'Не указан') : 'Не указан',
+                'approaches' => $group->relationLoaded('approaches') ? $group->approaches->pluck('name')->all() : [],
+                'tags' => $group->relationLoaded('tags') ? $group->tags->pluck('name')->all() : [],
+                'approach_ids' => $group->relationLoaded('approaches') ? $group->approaches->modelKeys() : [],
+                'tag_ids' => $group->relationLoaded('tags') ? $group->tags->modelKeys() : [],
                 'format' => $group->format->name ?? 'Не указан', 'gender' => $group->gender->name ?? 'Не указан',
                 'all_count' => (int) $group->all_count, 'new_count' => (int) $group->new_count, 'processed_count' => (int) $group->processed_count,
                 'owner' => $group->relationLoaded('owner') && $group->owner ? PsychologistPages::profile($group->owner) : null,
@@ -42,9 +49,11 @@ class GroupPages
 
     public static function detail(Group $group, bool $admin, bool $checkDeletion = true): array
     {
-        $group->load(['format', 'gender', 'owner' => fn ($q) => $q->withTrashed(),
+        $group->load(['format', 'gender', 'groupType', 'approaches', 'tags', 'owner' => fn ($q) => $q->withTrashed(),
             'statusHistory' => fn ($q) => $q->orderBy('created_at')->orderBy('id'), 'statusHistory.actor' => fn ($q) => $q->withTrashed()]);
         $data = self::layout('Группа', $admin);
+        $data['coverUrl'] = $group->exists && $group->cover_path ? route($admin ? 'admin.groups.cover' : 'psychologist.groups.cover', $group) : null;
+        $data['weekdayOptions'] = GroupContent::DAYS;
         if ($group->exists) {
             $data['links']['admin-user'] = route('admin.psychologists.show', $group->owner_id);
         }
@@ -73,7 +82,7 @@ class GroupPages
             ? ($creating ? route('admin.groups.store') : route('admin.groups.update', $group))
             : route('psychologist.groups.update', $group);
         $data['group']['title'] = $group->title;
-        foreach (['format' => 'group_format', 'gender' => 'gender'] as $relation => $code) {
+        foreach (['format' => 'group_format', 'gender' => 'gender', 'groupType' => 'group_type'] as $relation => $code) {
             $options = DictionaryItem::query()->whereHas('dictionary', fn ($q) => $q->where('code', $code))
                 ->where('active', true)->orderBy('sort_order')->orderBy('id')->pluck('name', 'id')->all();
             /** @var DictionaryItem|null $current */
@@ -82,6 +91,16 @@ class GroupPages
                 $options[$current->id] = $current->name.' (неактивен)';
             }
             $data[$relation.'Options'] = ['' => 'Выберите значение'] + $options;
+        }
+        foreach (['approaches' => 'group_approach', 'tags' => 'group_tag'] as $relation => $code) {
+            $options = DictionaryItem::query()->whereHas('dictionary', fn ($q) => $q->where('code', $code))
+                ->where('active', true)->orderBy('sort_order')->orderBy('id')->pluck('name', 'id')->all();
+            foreach ($group->$relation as $current) {
+                if (! $current->active) {
+                    $options[$current->id] = $current->name.' (неактивен)';
+                }
+            }
+            $data[$relation.'Options'] = $options;
         }
         foreach (['published_at', 'expires_at'] as $field) {
             $data[$field.'Input'] = $group->$field ? DateTimeFormatter::format($group->$field, 'Y-m-d\\TH:i:s') : '';

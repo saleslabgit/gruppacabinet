@@ -213,7 +213,7 @@ The verified endpoint contract and remaining boundaries are documented in
 `docs/modx-api.md`.
 
 The target design has now been expanded in `docs/modx-group-sync-plan.md`: the
-future group form adds short/full descriptions, cover, structured schedule,
+group form now includes short/full descriptions, cover, structured schedule,
 frequency, city, group type, multiple approaches and tags; MODX will be the
 source of truth for `format`, `gender`, `groupType`, `approaches` and `tags`
 option lists. TASK-2026-10-01-01 implements only the local dictionary layer:
@@ -226,9 +226,13 @@ item mutations are blocked server-side; education/custom dictionaries stay local
 MySQL 8 NO PAD binary collation preserves case, accents and trailing spaces in
 remote identity. Configuration/operations are in `docs/modx-api.md`.
 
-Group-form changes, rich text, covers, new group relations and outbound group
-synchronization remain unimplemented. No production MODX call or deployment was
-performed for this dictionary milestone; verification uses Laravel HTTP fakes.
+TASK-2026-10-01-02 implements the Cabinet form/schema, sanitized semantic HTML,
+private covers, structured schedule and local group type/approach/tag relations.
+Complete new content is required on moderation submission/admin creation; legacy
+ordinary edits remain supported. Approval and payment/lifecycle rules are unchanged.
+Outbound group synchronization and MODX cover transport remain unimplemented.
+No production MODX call or deployment was performed for these milestones;
+verification uses Laravel HTTP fakes.
 
 ## Stage 12 email and onboarding
 

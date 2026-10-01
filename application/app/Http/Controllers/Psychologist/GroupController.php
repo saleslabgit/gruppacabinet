@@ -9,6 +9,7 @@ use App\Http\Requests\GroupRequest;
 use App\Models\Group;
 use App\Models\Payment;
 use App\Payments\PaymentAttempts;
+use App\Services\GroupCovers;
 use App\Services\GroupWorkflow;
 use App\Services\SettingService;
 use App\Support\GroupPages;
@@ -16,6 +17,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class GroupController extends Controller
 {
@@ -52,6 +54,14 @@ class GroupController extends Controller
         return view('psychologist.groups.show', GroupPages::detail($model, false) + [
             'latestApplication' => $model->applications()->orderByDesc('created_at')->orderByDesc('id')->first(),
         ]);
+    }
+
+    public function cover(Request $request, string $group, GroupCovers $covers): StreamedResponse
+    {
+        $model = Group::query()->visibleToPsychologist($request->user()->id)->findOrFail($group);
+        Gate::authorize('view', $model);
+
+        return $covers->response($model);
     }
 
     public function edit(Request $request, string $group): View

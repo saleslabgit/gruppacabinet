@@ -18,8 +18,10 @@ use App\Services\GroupWorkflow;
 use App\Services\SettingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\GroupContentFixture;
 use Tests\Support\WebpayFixture;
 use Tests\TestCase;
 
@@ -36,6 +38,7 @@ class GroupWorkflowTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Storage::fake('local');
         URL::forceRootUrl('http://localhost');
         $this->owner = User::query()->create(['email' => 'owner@example.test', 'first_name' => 'Owner', 'status' => 'approved', 'free' => false]);
         $this->admin = User::query()->create(['email' => 'admin@example.test', 'status' => 'approved', 'admin' => true]);
@@ -49,6 +52,7 @@ class GroupWorkflowTest extends TestCase
         $this->fields = ['title' => 'Тестовая группа', 'description' => 'Описание группы', 'schedule' => 'По средам в 19:00',
             'format_id' => $ids['group_format'], 'gender_id' => $ids['gender'], 'meeting_duration_minutes' => '90',
             'participant_capacity' => '10', 'meeting_price' => '35,01'];
+        $this->fields += GroupContentFixture::fields();
         Setting::query()->create(['key' => SettingService::PLACEMENT_DURATION_DAYS, 'type' => 'integer', 'value' => '37']);
         app(SettingService::class)->invalidate(SettingService::PLACEMENT_DURATION_DAYS);
         foreach ([SettingService::EXPIRY_WARNING_DAYS => '3', SettingService::EXPIRED_EXTENSION_WINDOW_DAYS => '30'] as $key => $value) {
@@ -364,7 +368,7 @@ class GroupWorkflowTest extends TestCase
         $transitions->shouldReceive('transition')->once()->andThrow(new \RuntimeException('Simulated history persistence failure'));
         $workflow = new GroupWorkflow($transitions, app(SettingService::class));
         try {
-            $workflow->save($group, $this->owner, ['title' => 'Must roll back'], true);
+            $workflow->save($group, $this->owner, array_replace($this->fields, ['title' => 'Must roll back', 'meeting_price' => 3501]), true);
             $this->fail('Expected a transition failure');
         } catch (\RuntimeException $exception) {
             $this->assertSame('Simulated history persistence failure', $exception->getMessage());

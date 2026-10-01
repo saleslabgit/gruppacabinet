@@ -8,6 +8,7 @@ use DomainException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
@@ -61,6 +62,8 @@ class Group extends Model
             'meeting_duration_minutes' => 'integer',
             'participant_capacity' => 'integer',
             'meeting_price' => 'integer',
+            'meeting_days' => 'array',
+            'cover_size' => 'integer',
             'placement_days' => 'integer',
             'published_at' => 'datetime',
             'expires_at' => 'datetime',
@@ -91,6 +94,24 @@ class Group extends Model
     public function gender(): BelongsTo
     {
         return $this->belongsTo(DictionaryItem::class, 'gender_id');
+    }
+
+    /** @return BelongsTo<DictionaryItem, $this> */
+    public function groupType(): BelongsTo
+    {
+        return $this->belongsTo(DictionaryItem::class, 'group_type_id');
+    }
+
+    /** @return BelongsToMany<DictionaryItem, $this> */
+    public function approaches(): BelongsToMany
+    {
+        return $this->belongsToMany(DictionaryItem::class, 'gp_group_approaches')->orderBy('sort_order')->orderBy('gp_dictionary_items.id');
+    }
+
+    /** @return BelongsToMany<DictionaryItem, $this> */
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany(DictionaryItem::class, 'gp_group_tags')->orderBy('sort_order')->orderBy('gp_dictionary_items.id');
     }
 
     /** @return HasMany<GroupApplication, $this> */

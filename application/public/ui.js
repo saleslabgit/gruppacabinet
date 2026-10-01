@@ -231,3 +231,180 @@ document.querySelectorAll('[data-trainings-editor]').forEach(editor => {
     });
     renumber();
 });
+
+// Searchable checkbox lists keep real local dictionary IDs in the native select.
+document.querySelectorAll('[data-multi-select]').forEach(wrapper => {
+    const select = wrapper.querySelector('select');
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.id = `${select.id}-search`;
+    search.className = 'form-control';
+    search.placeholder = 'Поиск вариантов';
+    search.setAttribute('aria-label', `Поиск: ${document.getElementById(`${select.id}-label`).textContent}`);
+    const summary = document.createElement('p');
+    summary.className = 'form-text';
+    summary.setAttribute('role', 'status');
+    const list = document.createElement('div');
+    list.className = 'multi-options';
+    list.setAttribute('role', 'group');
+    list.setAttribute('aria-labelledby', `${select.id}-label`);
+    const rows = Array.from(select.options).map(option => {
+        const label = document.createElement('label');
+        label.className = 'form-check';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'form-check-input';
+        checkbox.disabled = option.disabled;
+        label.append(checkbox, document.createTextNode(` ${option.text}`));
+        list.append(label);
+        checkbox.addEventListener('change', () => {
+            option.selected = checkbox.checked;
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        });
+        return {option, checkbox, label};
+    });
+    const sync = () => {
+        rows.forEach(row => { row.checkbox.checked = row.option.selected; });
+        summary.textContent = `Выбрано: ${select.selectedOptions.length}`;
+    };
+    search.addEventListener('input', () => {
+        const term = search.value.trim().toLocaleLowerCase('ru');
+        rows.forEach(row => { row.label.hidden = !row.option.text.toLocaleLowerCase('ru').includes(term); });
+        summary.textContent = `Выбрано: ${select.selectedOptions.length}. Найдено: ${rows.filter(row => !row.label.hidden).length}`;
+    });
+    select.addEventListener('change', sync);
+    select.addEventListener('invalid', event => {
+        event.preventDefault();
+        summary.textContent = select.validationMessage;
+        search.focus();
+    });
+    select.form?.addEventListener('reset', () => setTimeout(sync, 0));
+    select.after(search, summary, list);
+    select.classList.add('custom-select-native');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+    document.getElementById(`${select.id}-label`).setAttribute('for', search.id);
+    sync();
+});
+
+// Enhancement only. Server-side GroupHtmlSanitizer is the storage authority.
+document.querySelectorAll('[data-rich-editor]').forEach(wrapper => {
+    if (typeof document.execCommand !== 'function') return;
+    const textarea = wrapper.querySelector('textarea');
+    const allowed = new Set(['P', 'BR', 'STRONG', 'EM', 'UL', 'OL', 'LI', 'H2', 'H3', 'BLOCKQUOTE', 'A']);
+    const drop = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'INPUT', 'BUTTON', 'SVG', 'MATH', 'TEMPLATE', 'NOSCRIPT', 'TEXTAREA', 'SELECT', 'TITLE', 'HEAD', 'XMP', 'PLAINTEXT']);
+    const safeHref = href => {
+        if (!href || /[\s\u0000-\u001f\u007f\\]/u.test(href)) return false;
+        return (href.startsWith('/') && !href.startsWith('//')) || /^(https?:\/\/|mailto:).+/i.test(href);
+    };
+    const clean = html => {
+        // Template content is inert, including old input returned after validation.
+        const template = document.createElement('template');
+        template.innerHTML = html;
+        const result = document.createElement('div');
+        const append = (source, target) => {
+            Array.from(source.childNodes).forEach(node => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    target.append(document.createTextNode(node.textContent));
+                } else if (node.nodeType === Node.ELEMENT_NODE && !drop.has(node.tagName)) {
+                    const tag = node.tagName === 'B' ? 'STRONG' : (node.tagName === 'I' ? 'EM' : node.tagName);
+                    if (!allowed.has(tag)) {
+                        append(node, target);
+                        return;
+                    }
+                    const element = document.createElement(tag.toLowerCase());
+                    if (tag === 'A' && safeHref(node.getAttribute('href'))) element.setAttribute('href', node.getAttribute('href'));
+                    append(node, element);
+                    target.append(element);
+                }
+            });
+        };
+        append(template.content, result);
+        return result.innerHTML;
+    };
+    const toolbar = document.createElement('div');
+    toolbar.className = 'rich-toolbar';
+    toolbar.setAttribute('role', 'group');
+    toolbar.setAttribute('aria-label', 'Форматирование полного описания');
+    const editor = document.createElement('div');
+    editor.id = `${textarea.id}-editor`;
+    editor.className = 'form-control rich-editor';
+    editor.contentEditable = 'true';
+    editor.setAttribute('role', 'textbox');
+    editor.setAttribute('aria-multiline', 'true');
+    editor.setAttribute('aria-labelledby', `${textarea.id}-label`);
+    editor.setAttribute('aria-describedby', textarea.getAttribute('aria-describedby'));
+    editor.setAttribute('aria-required', String(textarea.required));
+    editor.setAttribute('aria-invalid', textarea.getAttribute('aria-invalid'));
+    editor.innerHTML = clean(textarea.value);
+    let savedRange = null;
+    const remember = () => {
+        const selection = window.getSelection();
+        if (selection.rangeCount && editor.contains(selection.anchorNode)) savedRange = selection.getRangeAt(0).cloneRange();
+    };
+    const sync = () => { textarea.value = clean(editor.innerHTML); };
+    const restore = () => {
+        editor.focus();
+        if (savedRange && editor.contains(savedRange.commonAncestorContainer)) {
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(savedRange);
+        }
+    };
+    const controls = [
+        ['Абзац', 'formatBlock', 'p'], ['H2', 'formatBlock', 'h2'], ['H3', 'formatBlock', 'h3'],
+        ['Жирный', 'bold'], ['Курсив', 'italic'], ['Список', 'insertUnorderedList'],
+        ['Нумерация', 'insertOrderedList'], ['Цитата', 'formatBlock', 'blockquote'],
+        ['Ссылка', 'createLink'], ['Убрать форматирование', 'removeFormat']
+    ];
+    controls.forEach(([label, command, value]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary';
+        button.textContent = label;
+        button.addEventListener('pointerdown', event => event.preventDefault());
+        button.addEventListener('click', () => {
+            if (command === 'createLink') {
+                value = window.prompt('Адрес ссылки: https://, http://, mailto: или /путь');
+                if (!safeHref(value)) return;
+            }
+            restore();
+            document.execCommand('styleWithCSS', false, false);
+            document.execCommand(command, false, value);
+            if (command === 'removeFormat') {
+                document.execCommand('unlink');
+                document.execCommand('formatBlock', false, 'p');
+            }
+            remember();
+            sync();
+        });
+        toolbar.append(button);
+    });
+    editor.addEventListener('input', sync);
+    editor.addEventListener('keyup', remember);
+    editor.addEventListener('pointerup', remember);
+    editor.addEventListener('focus', () => document.execCommand('defaultParagraphSeparator', false, 'p'));
+    editor.addEventListener('blur', remember);
+    editor.addEventListener('paste', event => {
+        event.preventDefault();
+        const clipboard = event.clipboardData;
+        const text = document.createElement('div');
+        text.textContent = clipboard.getData('text/plain');
+        document.execCommand('insertHTML', false, clean(clipboard.getData('text/html') || text.innerHTML));
+        sync();
+    });
+    // Do not insert dropped HTML/files into the editing surface.
+    editor.addEventListener('drop', event => event.preventDefault());
+    textarea.form?.addEventListener('submit', sync);
+    textarea.form?.addEventListener('reset', () => setTimeout(() => { editor.innerHTML = clean(textarea.value); }, 0));
+    textarea.addEventListener('invalid', event => {
+        event.preventDefault();
+        editor.setAttribute('aria-invalid', 'true');
+        editor.focus();
+    });
+    textarea.before(toolbar, editor);
+    textarea.classList.add('custom-select-native');
+    textarea.tabIndex = -1;
+    textarea.setAttribute('aria-hidden', 'true');
+    document.getElementById(`${textarea.id}-label`).setAttribute('for', editor.id);
+});

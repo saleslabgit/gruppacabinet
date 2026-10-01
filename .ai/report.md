@@ -1,138 +1,140 @@
-# Report: TASK-2026-10-01-01
+# Report: TASK-2026-10-01-02
 
 Status: done
 
 ## Summary
 
-Реализована только синхронизация пяти MODX-справочников в Cabinet:
-аддитивная миграция, строгий read-only HTTP-клиент, общий сервис с cache lock
-и одной транзакцией, CLI, hourly scheduler и ручной admin POST.
-Старые ID/коды/FK сохраняются при однозначном bootstrap; исчезнувшие и
-несопоставленные значения остаются в истории неактивными. Ручные изменения
-managed-элементов запрещены на сервере и скрыты в существующих Blade views.
-Education/custom CRUD сохранён. Group form и outbound group sync не менялись.
+Реализована Cabinet-часть формы и содержимого группы: аддитивная схема,
+санитизированное полное описание, приватная обложка, структурированное расписание,
+город/периодичность, локальные тип группы и множественные подходы/теги.
+Использованы существующие workflow, shared Blade views и CSS/JS без зависимостей.
+Отправка психологом на модерацию и admin create требуют полного нового содержимого;
+обычные legacy-изменения допускают отсутствие новых полей. Старый `schedule`
+не разбирается и не перезаписывается, остаётся read-only fallback.
+
+Outbound group sync, MODX upload, mapper, queue job при approval и неразрешённые
+MODX mappings не добавлены. Реальных MODX-запросов не выполнялось.
+
+## Hard Workflow Gate
+
+До изменений проверены `git log --oneline -5`, `git status --short`, HEAD и parent:
+
+- HEAD: `00131e1cb8b72d65ec2635f2eb5ff9cf11f0f569`, planner текущей задачи.
+- Parent: `af89db87412d31cf7787163bff67c919b7bccc20`, совпадает с task parent.
+- Начальная рабочая директория чистая; неизвестных локальных изменений нет.
+- Прочитаны WORKFLOW.md, AGENTS.md, текущие task/report, релевантные Stage 17 и
+  group-field разделы SPEC.md, modx-group-sync-plan/modx-api/project-status/ui-pages.
+- Проверены все перечисленные gate implementation-файлы: Group и миграции,
+  GroupRequest/Workflow/оба Controller/Policy/Pages, shared form/data/summary,
+  компоненты и CSS/JS, filesystem/PsychologistDocuments, dictionary models/usage/
+  managed behavior, workflow/prototype/dictionary tests, Composer и Docker PHP.
+- `.ai/task.md` не изменён. Изменения ограничены этой задачей.
 
 ## Changed Files
 
-- `application/database/migrations/2026_10_01_000001_add_modx_dictionary_metadata.php`
-  — nullable metadata, уникальность TV/value, пять контейнеров без изменения
-  существующих элементов и названий. NO PAD binary collation сохраняет точное
-  различие регистра, диакритики и конечных пробелов remote value.
-- `application/app/Models/Dictionary.php`, `DictionaryItem.php` — timestamp casts.
-- `application/database/seeders/DatabaseSeeder.php` — idempotent managed
-  containers, сохранение существующих названий и элементов.
-- `application/app/Services/Modx/DictionaryClient.php` — проверенный JSON
-  contract, конфигурация HTTPS/Bearer/timeouts, запрет redirects, полная валидация.
-- `application/app/Services/ModxDictionarySyncService.php` — общая блокировка,
-  bootstrap, upsert/deactivation, rollback всех пяти списков при ошибке.
-- `application/app/Exceptions/ModxDictionarySyncException.php` — безопасные
-  сообщения без исходного exception/body/credential.
-- `application/app/Services/DictionaryManagement.php`, `DictionaryUsage.php`
-  — запрет managed item CRUD и защита контейнеров.
-- `application/app/Console/Commands/SyncModxDictionaries.php` и
-  `application/routes/console.php` — команда и hourly withoutOverlapping.
-- `application/app/Http/Controllers/Admin/DictionaryController.php`,
-  `DictionaryItemController.php`, `application/routes/web.php` — admin-only
-  sync action, безопасный feedback, запрет managed edit page.
-- `application/resources/views/admin/dictionaries/index.blade.php`,
-  `items.blade.php` — кнопка, TV/value/timestamps, скрытые mutation controls.
-- `application/config/services.php`, `application/.env.example` — private
-  MODX configuration; примеры URL/token пустые.
-- `application/tests/Feature/ModxDictionarySyncTest.php`,
-  `ModxDictionaryMigrationTest.php`,
-  `application/tests/Support/ModxDictionaryFixture.php` — контракт, sync,
-  rollback, identity, upgrade, locks, CLI/schedule/admin/security coverage.
-- `application/tests/Feature/DictionaryAdminTest.php`,
-  `GroupWorkflowTest.php`, `Domain/SettingsAndSeedTest.php` — адаптация fixtures
-  к managed containers и сохранение регрессионных сценариев.
-- `application/tests/TestCase.php` — общий запрет stray Laravel HTTP requests.
-- `docs/modx-api.md`, `docs/modx-group-sync-plan.md`, `docs/project-status.md`
-  — реализованная dictionary milestone и оставшиеся отдельные этапы.
-- `docs/development.md`, `docs/architecture.md`, `docs/ui-pages.md` — исправлены
-  только факты об управлении справочниками, затронутые этой задачей.
-- `.ai/report.md` — этот отчет.
+- Новая `2026_10_01_000002_add_group_content.php`: nullable поля и два pivot,
+  restrict FK dictionary items, уникальные пары, cascade physical group deletion.
+- Group model, DictionaryUsage: связи/casts и учёт исторических ссылок.
+- GroupContent, GroupHtmlSanitizer, GroupCovers: общие правила новых полей,
+  DOM-реконструкция разрешённой HTML-грамматики, приватные случайные имена,
+  проверка MIME/содержимого/размера и явная компенсация ошибок хранения.
+- GroupRequest/GroupWorkflow: сохранение скаляров, pivot и submit/history в одной
+  транзакции; отсутствующие новые поля не стирают существующие. Lifecycle,
+  защищённые поля, payments и approval переход сохранены.
+- GroupPages, два GroupController и web routes: local options, eager loading,
+  owner/admin inline preview с MIME/nosniff/private no-store и 404 отсутствующего файла.
+- Shared group-form/group-data, rich-text/multi-select components, ui.js/ui.css,
+  PrototypeFixtures: новая общая форма/карточка, editor и поиск, native fallback.
+- groups.php, `.env.example`: HTML ceiling 100000 символов, JPEG/PNG/WebP,
+  приватный local disk, `GROUP_COVER_MAX_KB=5120`.
+- composer.json/lock: только explicit ext-dom и актуальный content-hash;
+  версии библиотек не менялись.
+- Четыре новых feature-test класса, синтетический GroupContentFixture,
+  адаптация complete-content fixtures существующего GroupWorkflowTest.
+- docs/modx-group-sync-plan, project-status, architecture, development,
+  deployment, ui-pages и этот отчёт.
 
 ## Checks
 
-Проверки выполнялись в PHP 8.2.32 / MySQL 8.4, в изолированной копии
-`/tmp/modx-dictionary-check` PHP-контейнера. Рабочие `.env*`, storage и caches
-не копировались; конфигурация стенда создана из `.env.example`.
-Test DB — `gruppa_cabinet_test`, как принудительно задано phpunit.xml.
-SHA-256 всех 25 изменённых/новых файлов application совпали с тестовой копией.
+PHP 8.2.32 / MySQL 8.4. DB-тесты выполнены последовательно в изолированной копии
+`/tmp/group-content-check` PHP-контейнера, с тестовой БД `gruppa_cabinet_test`.
+Рабочие `.env*`, storage и caches в неё не копировались; runtime создан из
+`.env.example`. Laravel HTTP fakes и глобальный preventStrayRequests запрещают
+реальный MODX transport. Обложки — синтетические изображения и Storage::fake.
+SHA-256 всех **29 изменённых/новых application-файлов** совпали с тестовой копией.
 
 Финальные результаты:
 
-1. `php artisan test --compact --filter=ModxDictionary`:
-   **45 passed, 371 assertions**, exit 0. Включает migration/unique constraints,
-   точные значения, повторные labels, bootstrap/FK, rename/deactivate/reactivate,
-   legacy ambiguity, code collision, реальную SQL-ошибку в последнем справочнике,
-   некорректные responses/config, database lock и потерю ownership.
-2. `php artisan test --compact --filter=DictionaryAdminTest`:
-   **6 passed, 177 assertions**, exit 0. Local/custom CRUD, исторические ссылки,
-   реальные Blade pages, pagination и role boundaries сохранены.
-3. `php artisan test --compact --filter=GroupWorkflowTest`:
-   **48 passed, 631 assertions**, exit 0; запущен весь класс.
-4. CLI success/failure, sanitized output, admin-only POST и hourly registration
-   проверены внутри ModxDictionarySyncTest. `php artisan schedule:list`:
-   exit 0, `0 * * * * php artisan modx:sync-dictionaries`; остальные задачи сохранены.
-5. `php artisan test --compact`: **515 passed, 6103 assertions**, exit 0,
-   209.09 s. После этого усилена только проверка lock внутри HTTP fake
-   (assert вынесен за catch boundary); финальный focused набор повторно прошёл
-   с теми же 45 tests / 371 assertions.
-6. `php ./vendor/bin/pint --test`: **PASS, 188 files**, exit 0, включая финальные файлы.
-7. `php ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M`:
-   **No errors**, exit 0.
-8. `composer check-platform-reqs`: все требования **success**, exit 0.
-9. `php artisan view:cache`: **Blade templates cached successfully**, exit 0.
-10. `git diff --check`: exit 0. Полный diff прочитан; изменения ограничены задачей.
-11. `git diff --cached --check`: exit 0. Проверены все 32 staged-файла:
-    содержимое совпадает с просмотренными рабочими файлами, состав — с явным
-    списком задачи. Секретов и посторонних артефактов не обнаружено;
-    из env-файлов включён только разрешённый `.env.example` с пустыми URL/token.
-    `.ai/task.md`, production/local config, logs, caches, uploads не staged.
+1. `php artisan test --compact --filter="GroupContent|GroupCover|GroupHtmlSanitizer"`:
+   **40 passed, 326 assertions**, 15.98 s. Upgrade/nullability/FK/unique/casts,
+   dictionary validation, completeness/legacy, HTML security, private upload/
+   preview/replacement/failures, scalar+pivot+cover rollback и real HTTP/Blade flow.
+2. `php artisan test --compact --filter="GroupWorkflowTest|PrototypeTest"`:
+   **57 passed, 1756 assertions**, 14.87 s. Весь GroupWorkflowTest и весь
+   PrototypeTest, включая все **249** документированных вариантов прототипов,
+   lifecycle/payment/deletion/date regressions и постоянное число list queries.
+3. `php artisan test --compact --filter="DictionaryAdminTest|ModxDictionary|AuthenticationTest|PsychologistDocumentTest"`:
+   **84 passed, 867 assertions**, 31.10 s. Local/managed dictionary regressions,
+   HTTP-fake MODX sync, authorization и существующие приватные документы.
+4. `php artisan test --compact`: **555 passed, 6442 assertions**, 293.88 s.
+   После полного прогона добавлена только защитная default-ветка MIME match для
+   PHPStan и CSS `clear:both` для нового weekday fieldset. Финальный focused
+   content/upload набор и workflow/prototype набор повторно прошли (пункты 1–2).
+5. `php ./vendor/bin/pint --test`: **PASS, 197 files**.
+6. `php ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M`:
+   **No errors**.
+7. `composer check-platform-reqs`: **все success**, в том числе ext-dom.
+8. `composer validate --no-check-publish`: **composer.json is valid**.
+9. `php artisan view:cache`: **Blade templates cached successfully**
+   в изолированной копии, без production runtime/cache изменений.
+10. `node --check application/public/ui.js`: **exit 0**; Node использован только
+    для синтаксической проверки, build pipeline/пакеты не добавлены.
+11. `git diff --check`: **exit 0**. Полный diff и новые файлы просмотрены.
 
-Промежуточные падения устранены: Blade directive рядом с текстом, неподходящий
-privileged trigger в тесте, кэш старой схемы Eloquent в upgrade-test,
-сравнение snapshot без DB defaults, тип cache lock для PHPStan и PHP formatting.
-Финальные успешные результаты приведены выше; незапущенных обязательных checks нет.
-Отдельный browser/responsive smoke не выполнялся; реальный request/render flow
-проверен feature-тестами, CSS/layout structure не менялись.
+Промежуточные ошибки исправлены: отсутствующий code у synthetic dictionary item,
+nullable admin flag у свежего Eloquent User, цена из HTTP fixture в прямом domain
+вызове, замечания PHPStan/Pint. Приведены результаты последних успешных прогонов.
 
-## Facts
+## Browser / Runtime Verification
 
-- Стартовый HEAD: `b722ced0113e114232abf71f575663673a5afb31`, corrective planner.
-  Parent: `39085428a15ea6a94836612ee4e61f69cbaaefd2`, как требует задача.
-- `git log --oneline -5`, HEAD/parent и status проверены до правок; рабочее дерево
-  было чистым. Прочитаны все файлы Hard Workflow Gate; предыдущие прочитанные
-  исходники/docs сверены с новым HEAD — corrective planner изменил только task.
-- `.ai/task.md` не изменялся. Состав и nesting response взяты из его точного контракта.
-- Клиент выполняет только GET dictionary endpoint, без retries/redirects;
-  scheduled, CLI и admin используют один сервис и один lock.
-- SQL-ошибка, неполный/неверный JSON, ambiguity и collision оставляют все пять
-  словарей и sync timestamps без частичных изменений.
-- **Реальные MODX-запросы Codex и тестами не выполнялись.** Все проверки MODX
-  использовали Http::fake с `modx.example.test`; включён preventStrayRequests.
-- Не добавлены group fields/pivots, HTML/images, outbound payload/job/resource ID,
-  зависимости, секреты, реальные response dumps или production data.
+Playwright MCP и Chrome DevTools MCP не запустились из-за отсутствующих Linux
+Chromium executables. Вместо них использован установленный Windows Chrome
+headless с временным отдельным профилем и автономной страницей, отрендеренной
+из настоящего shared Blade form с synthetic PrototypeFixtures и текущими assets.
+MODX/production URL не открывались. Временные HTML/profile удалены из репозитория.
 
-## Assumptions
+Автоматический Chrome smoke: **17 проверок прошли** на desktop (innerWidth 1424)
+и на **390 px** в локальном iframe. Проверены 121 вариант selector, поиск/выбор
+и запись native select, безопасное old input, bold/italic/H2/H3/оба списка/quote,
+ссылка, remove-format, синхронизация чистой textarea при submit, отсутствие
+schedule/leader input и горизонтального переполнения. На narrow-screen найдено
+и устранено наложение weekday fieldset из-за float legend Bootstrap.
+Отдельно без application JS проверены видимость textarea и обоих native multiple
+select, отсутствие enhanced controls и schedule/leader; все четыре проверки прошли.
 
-- В production web, cron и CLI используют общий cache store/prefix, как требует
-  существующая database-cache deployment схема. Lease общего lock — 600 секунд;
-  сетевой timeout ограничен 60 секундами, ownership проверяется перед commit.
-- TV numeric IDs информационные; identity — owning dictionary + точный value.
+Это автоматические browser/feature проверки, не ручная пользовательская приёмка.
+Живой authenticated browser POST с серверной сессией отдельно не выполнялся;
+полный save/submit/redirect/detail/preview flow проверен Laravel feature-тестами.
 
-## Unknowns
+## Risks / Remaining Work
 
-Production deployment и реальный endpoint не проверялись и не вызывались.
-Существующие production legacy labels остаются неизвестными; неоднозначность
-приведёт к безопасной ошибке, а не автоматическому выбору одного значения.
+- Применить миграцию и проверить ext-dom в CLI/web PHP целевого хостинга перед
+  rollout; production deployment этой задачей не выполнялся.
+- Приватные файлы и DB не образуют распределённую транзакцию: обработанные ошибки
+  компенсируются, а аварийное завершение процесса может оставить orphan-файл.
+  Неуспешная очистка после commit явно сообщает, что данные уже сохранены.
+- MODX cover transport, outbound mapper/job, serialization и неразрешённые
+  price/public_uuid/SEO mappings остаются отдельными будущими этапами.
 
-## Risks / Next Step
+## Git Review
 
-При deployment применить миграцию до обслуживания новым кодом; требуется MySQL 8
-с `utf8mb4_0900_bin`. Настроить private MODX_BASE_URL/MODX_TOKEN и общий cache,
-затем оператору выполнить первый import. Миграция сама не отключает legacy items;
-деактивация происходит только после полного успешного ответа MODX.
-Форма группы, rich text, image upload и outbound synchronization остаются
-отдельными невыполненными этапами. Accept commit не создаётся.
+Полный implementation/documentation diff и все новые файлы просмотрены.
+`git diff --cached --check` — exit 0. Staged manifest: **36 файлов**, ровно
+29 application-файлов, шесть документов и `.ai/report.md`; каждый staged blob
+совпадает с просмотренным рабочим файлом. Незастейдженных изменений нет.
+`.ai/task.md` совпадает с HEAD. Проверены отсутствие outbound HTTP/job/schema
+добавлений, секретов, uploads, storage/cache/log/vendor и временного Chrome
+профиля; из env-файлов staged только разрешённый `.env.example`.
+Hard Workflow Gate пройден; разрешён task commit:
+`codex: TASK-2026-10-01-02 expand group content form`.
+Accept commit не создаётся.

@@ -13,34 +13,38 @@ use Illuminate\Validation\ValidationException;
 
 class GroupWorkflow
 {
-    public const FIELDS = ['title', 'description', 'schedule', 'format_id', 'meeting_duration_minutes', 'participant_capacity', 'gender_id', 'meeting_price'];
+    public const FIELDS = ['title', 'description', 'full_description_html', 'meeting_days', 'start_time', 'frequency', 'city', 'group_type_id', 'format_id', 'meeting_duration_minutes', 'participant_capacity', 'gender_id', 'meeting_price'];
 
     public function __construct(private GroupStatusTransitionService $transitions, private SettingService $settings) {}
 
     public function create(User $owner, User $actor, array $data = []): Group
     {
-        return DB::transaction(function () use ($owner, $actor, $data): Group {
+        return app(GroupCovers::class)->persist($data['cover'] ?? null, function (?array $cover) use ($owner, $actor, $data): array {
             Gate::forUser($actor)->authorize('create', Group::class);
             $owner = User::query()->lockForUpdate()->findOrFail($owner->id);
             abort_unless(! $owner->admin && ! $owner->disabled && $owner->status->value === 'approved', 403);
             abort_unless($actor->admin || $actor->id === $owner->id, 403);
-            $group = Group::query()->create(Arr::only($data, self::FIELDS) + ['owner_id' => $owner->id]);
+            $data = app(GroupContent::class)->prepare($data, null, (bool) $actor->admin);
+            $group = Group::query()->create(Arr::only($data, self::FIELDS) + ($cover ?? []) + ['owner_id' => $owner->id]);
+            $this->syncRelations($group, $data);
             if (! $owner->free) {
                 $group->update(['status' => GroupStatus::AwaitingPayment]);
                 app(PaymentAttempts::class)->createPlacement($group);
             }
             $group->statusHistory()->create(['from_status' => null, 'to_status' => $group->status, 'actor_id' => $actor->id, 'actor_type' => 'user']);
 
-            return $group;
+            return [$group, null];
         });
     }
 
     public function save(Group $group, User $actor, array $data, bool $submit = false): Group
     {
-        return DB::transaction(function () use ($group, $actor, $data, $submit): Group {
+        return app(GroupCovers::class)->persist($data['cover'] ?? null, function (?array $cover) use ($group, $actor, $data, $submit): array {
             $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
             Gate::forUser($actor)->authorize($submit ? 'submit' : 'update', $locked);
-            $locked->fill(Arr::only($data, self::FIELDS));
+            $data = app(GroupContent::class)->prepare($data, $locked, $submit);
+            $oldCover = $locked->cover_path;
+            $locked->fill(Arr::only($data, self::FIELDS) + ($cover ?? []));
             if ($actor->admin) {
                 $before = [];
                 foreach (['published_at', 'expires_at'] as $field) {
@@ -64,8 +68,20 @@ class GroupWorkflow
             }
             $locked->save();
 
-            return $submit ? $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user') : $locked;
+            $this->syncRelations($locked, $data);
+            $saved = $submit ? $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user') : $locked;
+
+            return [$saved, $oldCover];
         });
+    }
+
+    private function syncRelations(Group $group, array $data): void
+    {
+        foreach (['approach_ids' => 'approaches', 'tag_ids' => 'tags'] as $field => $relation) {
+            if (array_key_exists($field, $data)) {
+                $group->$relation()->sync($data[$field]);
+            }
+        }
     }
 
     public function moderate(Group $group, User $actor, GroupStatus $target, ?string $comment = null): Group

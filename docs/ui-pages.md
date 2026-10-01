@@ -687,3 +687,20 @@ validation-ошибки первого блока и длинные значен
 и сетка из двух колонок на desktop, одной на mobile. Изменение дат не меняет
 статус или `placement_days`; новый срок окончания сбрасывает предупреждение.
 Произвольного выбора статуса не добавлено.
+
+## Shared group content form (TASK-2026-10-01-02)
+
+Psychologist/admin forms and synthetic prototypes reuse the same main/participation
+panels. Main content now includes short description, semantic full-description
+editor (paragraph/H2/H3/bold/italic/lists/quote/link/remove-format), private cover,
+weekday checkboxes, Minsk start time, frequency and city. Participation adds local
+group type and searchable multiple approaches/tags with checkbox selection.
+Textarea/native multiple selects remain usable without JavaScript. No editable
+leader or free-text schedule control exists. Failed validation retains old input
+except the file, which must be selected again; errors appear in the summary.
+
+Detail pages show sanitized full HTML, escaped short text, cover preview and the
+new structured fields. Legacy schedule remains visible if days/time are missing.
+Missing local managed options produce a blocking notice for complete submissions.
+Prototype business buttons remain no-op; the accepted panels and responsive
+layout are retained.

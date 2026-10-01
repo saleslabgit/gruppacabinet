@@ -1348,3 +1348,56 @@ textarea.form-control{
     grid-template-columns:minmax(0,1fr);
     justify-items:stretch
 }
+
+.rich-toolbar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:var(--s1);
+    margin-bottom:var(--s2)
+}
+.rich-toolbar .btn{
+    min-height:36px;
+    padding:var(--s1) var(--s2)
+}
+.rich-editor{
+    min-height:220px;
+    height:auto;
+    overflow-wrap:anywhere
+}
+.rich-description{
+    margin-bottom:var(--s6);
+    overflow-wrap:anywhere
+}
+.rich-editor blockquote,.rich-description blockquote{
+    padding-left:var(--s4);
+    border-left:3px solid var(--border)
+}
+.multi-options{
+    max-height:240px;
+    overflow-y:auto;
+    padding:var(--s3);
+    border:1px solid var(--border);
+    border-radius:var(--control-radius)
+}
+.multi-options .form-check{
+    display:block;
+    padding-top:var(--s1);
+    padding-bottom:var(--s1);
+    overflow-wrap:anywhere
+}
+.multi-options .form-check[hidden]{display:none}
+.weekday-options{
+    clear:both;
+    display:flex;
+    flex-wrap:wrap;
+    column-gap:var(--s6);
+    row-gap:var(--s2)
+}
+.group-cover{
+    display:block;
+    width:100%;
+    max-width:480px;
+    max-height:320px;
+    object-fit:contain;
+    margin-bottom:var(--s4)
+}
