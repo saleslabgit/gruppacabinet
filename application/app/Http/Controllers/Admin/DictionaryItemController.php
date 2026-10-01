@@ -20,6 +20,7 @@ class DictionaryItemController extends Controller
     public function index(Dictionary $dictionary, DictionaryUsage $usage, ?DictionaryItem $item = null): View
     {
         Gate::authorize('manage', Dictionary::class);
+        abort_if($item !== null && $dictionary->modx_tv_name !== null, 403);
         $query = $dictionary->items()->select('gp_dictionary_items.*');
         $references = $usage->references($dictionary);
         if ($references !== null) {

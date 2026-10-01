@@ -11,6 +11,11 @@ class Dictionary extends Model
 
     protected $guarded = ['id'];
 
+    protected function casts(): array
+    {
+        return ['last_synced_at' => 'datetime'];
+    }
+
     /** @return HasMany<DictionaryItem, $this> */
     public function items(): HasMany
     {

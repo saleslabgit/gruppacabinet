@@ -280,7 +280,11 @@ parent/item pair returns 404 before any mutation.
 
 Dictionary codes are create-only lowercase `[a-z0-9_]` identifiers (64 characters).
 Names remain editable. The core containers `education_type`, `group_format`,
-`gender` cannot be deleted; custom containers must be empty. Item codes are
+`gender`, `group_type`, `group_approach`, `group_tag` cannot be deleted; custom
+containers must be empty. Any container with non-null `modx_tv_name` is protected
+and DictionaryManagement rejects its manual item mutations under the parent
+row lock. The five MODX lists use the shared-lock/atomic import documented in
+modx-api.md; education/custom dictionaries retain local item CRUD. Item codes are
 unique within their parent and immutable through update requests. Explicit
 field allowlists exclude IDs, timestamps and foreign parent reassignment.
 Lists paginate 20 rows, with code/ID or sort_order/ID ordering; counts and usage

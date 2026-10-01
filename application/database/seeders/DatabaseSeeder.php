@@ -6,6 +6,7 @@ use App\Enums\UserStatus;
 use App\Models\Dictionary;
 use App\Models\Setting;
 use App\Models\User;
+use App\Services\Modx\DictionaryClient;
 use App\Services\SettingService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -21,12 +22,10 @@ class DatabaseSeeder extends Seeder
 
     private function seedDictionaries(): void
     {
-        foreach ([
-            'education_type' => 'Education type',
-            'group_format' => 'Group format',
-            'gender' => 'Gender',
-        ] as $code => $name) {
-            Dictionary::query()->updateOrCreate(['code' => $code], ['name' => $name]);
+        Dictionary::query()->firstOrCreate(['code' => 'education_type'], ['name' => 'Education type']);
+        foreach (DictionaryClient::DEFINITIONS as $code => $definition) {
+            $dictionary = Dictionary::query()->firstOrCreate(['code' => $code], ['name' => $definition['name']]);
+            $dictionary->update(['modx_tv_name' => $definition['tv']]);
         }
     }
 

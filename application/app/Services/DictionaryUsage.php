@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 
 class DictionaryUsage
 {
-    public const CORE_CODES = ['education_type', 'group_format', 'gender'];
+    public const CORE_CODES = ['education_type', 'group_format', 'gender', 'group_type', 'group_approach', 'group_tag'];
 
     public function references(Dictionary $dictionary): ?Builder
     {

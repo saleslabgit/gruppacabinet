@@ -1,80 +1,138 @@
-# Report: TASK-2026-09-25-01
+# Report: TASK-2026-10-01-01
 
 Status: done
 
 ## Summary
 
-Исправлена предыдущая HTTPS-переадресация. После развёртывания коммита
-`b9878954884de354a9f815ced64abe1d4b80a4ec` production HTTPS попал в
-`ERR_TOO_MANY_REDIRECTS`; оператор временно вернул production `.htaccess` к
-версии до задачи, и цикл исчез. Новый HostER probe подтвердил, что публичный
-прокси перезаписывает `X-Forwarded-Proto`. Теперь правило перенаправляет только
-при `HTTPS != on` **и** `X-Forwarded-Proto != https`. Целевой host остаётся
-фиксированным `gruppa.info`; путь и query string сохраняются. Laravel
-login/session-код не менялся.
+Реализована только синхронизация пяти MODX-справочников в Cabinet:
+аддитивная миграция, строгий read-only HTTP-клиент, общий сервис с cache lock
+и одной транзакцией, CLI, hourly scheduler и ручной admin POST.
+Старые ID/коды/FK сохраняются при однозначном bootstrap; исчезнувшие и
+несопоставленные значения остаются в истории неактивными. Ручные изменения
+managed-элементов запрещены на сервере и скрыты в существующих Blade views.
+Education/custom CRUD сохранён. Group form и outbound group sync не менялись.
 
 ## Changed Files
 
-- `application/public/.htaccess` — учитывает проверенный HostER proxy signal
-  наряду с Apache HTTPS; `SERVER_PORT` не используется.
-- `application/tests/Unit/ProductionHttpsRedirectTest.php` — проверяет оба
-  условия, фиксированный host, порядок правила и отсутствие зависимости от port.
-- `docs/deployment.md` — описывает новый probe и production smoke с подменой
-  клиентского `X-Forwarded-Proto` в обоих направлениях.
-- `.ai/report.md` — результаты исправляющей итерации.
+- `application/database/migrations/2026_10_01_000001_add_modx_dictionary_metadata.php`
+  — nullable metadata, уникальность TV/value, пять контейнеров без изменения
+  существующих элементов и названий. NO PAD binary collation сохраняет точное
+  различие регистра, диакритики и конечных пробелов remote value.
+- `application/app/Models/Dictionary.php`, `DictionaryItem.php` — timestamp casts.
+- `application/database/seeders/DatabaseSeeder.php` — idempotent managed
+  containers, сохранение существующих названий и элементов.
+- `application/app/Services/Modx/DictionaryClient.php` — проверенный JSON
+  contract, конфигурация HTTPS/Bearer/timeouts, запрет redirects, полная валидация.
+- `application/app/Services/ModxDictionarySyncService.php` — общая блокировка,
+  bootstrap, upsert/deactivation, rollback всех пяти списков при ошибке.
+- `application/app/Exceptions/ModxDictionarySyncException.php` — безопасные
+  сообщения без исходного exception/body/credential.
+- `application/app/Services/DictionaryManagement.php`, `DictionaryUsage.php`
+  — запрет managed item CRUD и защита контейнеров.
+- `application/app/Console/Commands/SyncModxDictionaries.php` и
+  `application/routes/console.php` — команда и hourly withoutOverlapping.
+- `application/app/Http/Controllers/Admin/DictionaryController.php`,
+  `DictionaryItemController.php`, `application/routes/web.php` — admin-only
+  sync action, безопасный feedback, запрет managed edit page.
+- `application/resources/views/admin/dictionaries/index.blade.php`,
+  `items.blade.php` — кнопка, TV/value/timestamps, скрытые mutation controls.
+- `application/config/services.php`, `application/.env.example` — private
+  MODX configuration; примеры URL/token пустые.
+- `application/tests/Feature/ModxDictionarySyncTest.php`,
+  `ModxDictionaryMigrationTest.php`,
+  `application/tests/Support/ModxDictionaryFixture.php` — контракт, sync,
+  rollback, identity, upgrade, locks, CLI/schedule/admin/security coverage.
+- `application/tests/Feature/DictionaryAdminTest.php`,
+  `GroupWorkflowTest.php`, `Domain/SettingsAndSeedTest.php` — адаптация fixtures
+  к managed containers и сохранение регрессионных сценариев.
+- `application/tests/TestCase.php` — общий запрет stray Laravel HTTP requests.
+- `docs/modx-api.md`, `docs/modx-group-sync-plan.md`, `docs/project-status.md`
+  — реализованная dictionary milestone и оставшиеся отдельные этапы.
+- `docs/development.md`, `docs/architecture.md`, `docs/ui-pages.md` — исправлены
+  только факты об управлении справочниками, затронутые этой задачей.
+- `.ai/report.md` — этот отчет.
 
 ## Checks
 
-Проверки выполнены в PHP 8.2.32 / MySQL 8.4 на временной копии
-`/tmp/task25-corrective-check` в PHP-контейнере. Рабочие `.env*` не копировались;
-для стенда использована `.env.example`. SHA-256 изменённого `.htaccess`,
-регрессионного теста и неизменённого `AuthenticationTest` совпали с рабочим
-репозиторием.
+Проверки выполнялись в PHP 8.2.32 / MySQL 8.4, в изолированной копии
+`/tmp/modx-dictionary-check` PHP-контейнера. Рабочие `.env*`, storage и caches
+не копировались; конфигурация стенда создана из `.env.example`.
+Test DB — `gruppa_cabinet_test`, как принудительно задано phpunit.xml.
+SHA-256 всех 25 изменённых/новых файлов application совпали с тестовой копией.
 
-- Focused `AuthenticationTest|SharedHostingRuntimeTest|DeploymentPreflightTest|ProductionHttpsRedirectTest`:
-  **49 passed, 397 assertions**, exit 0.
-- Full MySQL suite: **469 passed, 5712 assertions**, exit 0.
-- `php ./vendor/bin/pint --test`: **PASS, 180 files**.
-- `php ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M`:
-  **No errors**.
-- `composer check-platform-reqs`: все требования **success**.
-- `php artisan view:cache`: **Blade templates cached successfully**.
-- Локальный Apache 2.4.68 с текущим `.htaccess`: синтаксис OK; HTTP без XFP
-  и с `X-Forwarded-Proto: http` вернул 301 с фиксированным HTTPS Location,
-  сохранив путь/query. HTTP с `X-Forwarded-Proto: https` прошёл без редиректа
-  (модель сигнала после HostER proxy). Прямой TLS с
-  `X-Forwarded-Proto: http` вернул 200 без цикла. `Host: localhost` и
-  `Host: evil.example` не перенаправлялись на production.
-- `git diff --check` и `git diff --cached --check`: PASS. Итоговый diff и staged
-  файлы проверены перед коммитом; посторонние файлы и секреты не добавлены.
-- Исправленное правило **не развёртывалось и не проверялось на production** в
-  этой итерации. Production curl и mobile-Chrome login из документации — не
-  запускались после исправления.
+Финальные результаты:
+
+1. `php artisan test --compact --filter=ModxDictionary`:
+   **45 passed, 371 assertions**, exit 0. Включает migration/unique constraints,
+   точные значения, повторные labels, bootstrap/FK, rename/deactivate/reactivate,
+   legacy ambiguity, code collision, реальную SQL-ошибку в последнем справочнике,
+   некорректные responses/config, database lock и потерю ownership.
+2. `php artisan test --compact --filter=DictionaryAdminTest`:
+   **6 passed, 177 assertions**, exit 0. Local/custom CRUD, исторические ссылки,
+   реальные Blade pages, pagination и role boundaries сохранены.
+3. `php artisan test --compact --filter=GroupWorkflowTest`:
+   **48 passed, 631 assertions**, exit 0; запущен весь класс.
+4. CLI success/failure, sanitized output, admin-only POST и hourly registration
+   проверены внутри ModxDictionarySyncTest. `php artisan schedule:list`:
+   exit 0, `0 * * * * php artisan modx:sync-dictionaries`; остальные задачи сохранены.
+5. `php artisan test --compact`: **515 passed, 6103 assertions**, exit 0,
+   209.09 s. После этого усилена только проверка lock внутри HTTP fake
+   (assert вынесен за catch boundary); финальный focused набор повторно прошёл
+   с теми же 45 tests / 371 assertions.
+6. `php ./vendor/bin/pint --test`: **PASS, 188 files**, exit 0, включая финальные файлы.
+7. `php ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M`:
+   **No errors**, exit 0.
+8. `composer check-platform-reqs`: все требования **success**, exit 0.
+9. `php artisan view:cache`: **Blade templates cached successfully**, exit 0.
+10. `git diff --check`: exit 0. Полный diff прочитан; изменения ограничены задачей.
+11. `git diff --cached --check`: exit 0. Проверены все 32 staged-файла:
+    содержимое совпадает с просмотренными рабочими файлами, состав — с явным
+    списком задачи. Секретов и посторонних артефактов не обнаружено;
+    из env-файлов включён только разрешённый `.env.example` с пустыми URL/token.
+    `.ai/task.md`, production/local config, logs, caches, uploads не staged.
+
+Промежуточные падения устранены: Blade directive рядом с текстом, неподходящий
+privileged trigger в тесте, кэш старой схемы Eloquent в upgrade-test,
+сравнение snapshot без DB defaults, тип cache lock для PHPStan и PHP formatting.
+Финальные успешные результаты приведены выше; незапущенных обязательных checks нет.
+Отдельный browser/responsive smoke не выполнялся; реальный request/render flow
+проверен feature-тестами, CSS/layout structure не менялись.
 
 ## Facts
 
-- HEAD до исправления — `b987895`, предыдущий `codex:` коммит этой задачи.
-  Рабочий Git tree был чистым. Отдельное явное указание пользователя разрешило
-  исправляющую итерацию без нового planner-коммита.
-- Сообщённый оператором production smoke после `b987895`: HTTPS входил в
-  `ERR_TOO_MANY_REDIRECTS`; восстановление прежнего `.htaccess` убрало цикл.
-- Сообщённый оператором HostER probe: HTTP даёт `HTTPS=NULL`, `XFP=http`;
-  клиентский `X-Forwarded-Proto: https` на HTTP всё равно приходит как `http`;
-  HTTPS с клиентским `X-Forwarded-Proto: http` приходит как `HTTPS=on`,
-  `XFP=https`. `REMOTE_ADDR=2a0a:7d80:1:7::154`.
-- Apache 2.4 документация подтверждает проверку `X-Forwarded-Proto` за TLS
-  terminator, если upstream proxy контролируется и заголовок нельзя подделать.
-  Здесь это условие подтверждено production probe для публичного endpoint.
+- Стартовый HEAD: `b722ced0113e114232abf71f575663673a5afb31`, corrective planner.
+  Parent: `39085428a15ea6a94836612ee4e61f69cbaaefd2`, как требует задача.
+- `git log --oneline -5`, HEAD/parent и status проверены до правок; рабочее дерево
+  было чистым. Прочитаны все файлы Hard Workflow Gate; предыдущие прочитанные
+  исходники/docs сверены с новым HEAD — corrective planner изменил только task.
+- `.ai/task.md` не изменялся. Состав и nesting response взяты из его точного контракта.
+- Клиент выполняет только GET dictionary endpoint, без retries/redirects;
+  scheduled, CLI и admin используют один сервис и один lock.
+- SQL-ошибка, неполный/неверный JSON, ambiguity и collision оставляют все пять
+  словарей и sync timestamps без частичных изменений.
+- **Реальные MODX-запросы Codex и тестами не выполнялись.** Все проверки MODX
+  использовали Http::fake с `modx.example.test`; включён preventStrayRequests.
+- Не добавлены group fields/pivots, HTML/images, outbound payload/job/resource ID,
+  зависимости, секреты, реальные response dumps или production data.
 
 ## Assumptions
 
-- Production public directory при следующем deployment получит новый
-  `application/public/.htaccess` через принятую symlink/copy схему.
+- В production web, cron и CLI используют общий cache store/prefix, как требует
+  существующая database-cache deployment схема. Lease общего lock — 600 секунд;
+  сетевой timeout ограничен 60 секундами, ownership проверяется перед commit.
+- TV numeric IDs информационные; identity — owning dictionary + точный value.
 
-## Unknowns / Risks / Next Step
+## Unknowns
 
-Результат исправленного правила на реальном HostER ещё не проверен. Оператору
-нужно обновить production `.htaccess`, выполнить все команды из
-`docs/deployment.md`, проверить отсутствие цикла и пройти вход психолога в
-mobile Chrome. Отдельный 405 / `route:cache` вопрос не исследовался.
-`application/.env_save` и другие локальные конфигурации не менялись.
+Production deployment и реальный endpoint не проверялись и не вызывались.
+Существующие production legacy labels остаются неизвестными; неоднозначность
+приведёт к безопасной ошибке, а не автоматическому выбору одного значения.
+
+## Risks / Next Step
+
+При deployment применить миграцию до обслуживания новым кодом; требуется MySQL 8
+с `utf8mb4_0900_bin`. Настроить private MODX_BASE_URL/MODX_TOKEN и общий cache,
+затем оператору выполнить первый import. Миграция сама не отключает legacy items;
+деактивация происходит только после полного успешного ответа MODX.
+Форма группы, rich text, image upload и outbound synchronization остаются
+отдельными невыполненными этапами. Accept commit не создаётся.

@@ -43,7 +43,7 @@ class GroupWorkflowTest extends TestCase
         Setting::create(['key' => 'placement_price_minor_units', 'type' => 'integer', 'value' => '5000']);
         $ids = [];
         foreach (['group_format', 'gender'] as $code) {
-            $dictionary = Dictionary::query()->create(['code' => $code, 'name' => $code]);
+            $dictionary = Dictionary::query()->firstOrCreate(['code' => $code], ['name' => $code]);
             $ids[$code] = DictionaryItem::query()->create(['dictionary_id' => $dictionary->id, 'code' => 'test', 'name' => 'Test '.$code, 'active' => true])->id;
         }
         $this->fields = ['title' => 'Тестовая группа', 'description' => 'Описание группы', 'schedule' => 'По средам в 19:00',

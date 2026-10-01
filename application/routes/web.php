@@ -95,6 +95,7 @@ Route::middleware(['account', 'role:admin'])->prefix('admin')->name('admin.')->s
     $dictionaries = DictionaryController::class;
     $items = DictionaryItemController::class;
     Route::get('/dictionaries', [$dictionaries, 'index'])->name('dictionaries.index');
+    Route::post('/dictionaries/sync-modx', [$dictionaries, 'syncModx'])->name('dictionaries.sync-modx');
     Route::post('/dictionaries', [$dictionaries, 'store'])->name('dictionaries.store');
     Route::get('/dictionaries/{dictionary}/edit', [$dictionaries, 'index'])->name('dictionaries.edit');
     Route::put('/dictionaries/{dictionary}', [$dictionaries, 'update'])->name('dictionaries.update');

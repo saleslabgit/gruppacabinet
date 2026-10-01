@@ -1,6 +1,6 @@
 # MODX group synchronization implementation plan
 
-Status: **planned**
+Status: **dictionary synchronization implemented; group-form and outbound phases planned**
 
 This document is the implementation order for the next Gruppa Cabinet milestone.
 It intentionally separates verified current infrastructure from planned Cabinet
@@ -148,12 +148,10 @@ unambiguous ordered options for `format`, `gender`, `groupType`,
 
 ## Phase 2 — Cabinet dictionary synchronization
 
-Owner: Codex after Phase 1 is accepted.
-
-Implement:
+Implemented by TASK-2026-10-01-01 (automated verification uses synthetic HTTP fakes):
 
 - schema metadata above;
-- local dictionaries/pivots needed by the target form;
+- five managed dictionary containers; no new group relations or pivots;
 - mxHeadless read client;
 - `ModxDictionarySyncService`;
 - `php artisan modx:sync-dictionaries`;
@@ -169,10 +167,21 @@ Sync algorithm:
 5. create/update label and sort order, set active;
 6. deactivate previously synced values missing from the complete response;
 7. never delete referenced/history values;
-8. commit all dictionaries together;
-9. only then update last-success timestamps.
+8. update last-success timestamps inside the transaction;
+9. commit all dictionaries together.
 
-Network/HTTP/parse/partial failures make no local dictionary changes.
+Network/HTTP/parse/partial failures make no local dictionary changes. A shared
+cache lock surrounds fetch plus transaction for CLI, scheduler and admin runs.
+The migration preserves existing container names, item IDs/codes and group FKs.
+Legacy matching uses only Unicode lowercase and collapsed/trimmed whitespace;
+ambiguous matches or generated-code collisions roll back the entire import.
+Unmatched legacy values become inactive; missing remote values are retained and
+reactivated under the same identity when they return. Manual managed-item CRUD
+is rejected by the domain service, and the existing admin views display TV/value
+and last-success state. Education and custom dictionaries keep local CRUD.
+
+Runtime configuration and operations are in `docs/modx-api.md`. No real MODX
+request or production deployment is part of automated verification.
 
 ## Phase 3 — Group schema and form
 
@@ -297,6 +306,6 @@ Use synthetic/non-public data and verify:
 
 ## Task ordering
 
-Do not give Phase 2 to Codex until Phase 1 returns the real MODX option document.
-That response closes the remaining uncertainty about actual stored values and TV
-input types, which is required before safe schema/bootstrap logic is implemented.
+Phase 1 contract is recorded in TASK-2026-10-01-01 and Phase 2 is implemented.
+Phases 3–7 remain separate work; this milestone adds no group-form fields,
+HTML/image handling, payload mapper or outbound group request.

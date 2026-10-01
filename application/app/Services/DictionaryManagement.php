@@ -16,7 +16,7 @@ class DictionaryManagement
     {
         DB::transaction(function () use ($dictionary): void {
             $locked = Dictionary::query()->lockForUpdate()->findOrFail($dictionary->id);
-            if (in_array($locked->code, DictionaryUsage::CORE_CODES, true) || $locked->items()->exists()) {
+            if ($locked->modx_tv_name !== null || in_array($locked->code, DictionaryUsage::CORE_CODES, true) || $locked->items()->exists()) {
                 throw ValidationException::withMessages(['dictionary' => 'Системный или непустой справочник нельзя удалить.']);
             }
             $locked->delete();
@@ -27,6 +27,9 @@ class DictionaryManagement
     {
         return DB::transaction(function () use ($dictionary, $item, $data): DictionaryItem {
             $parent = Dictionary::query()->lockForUpdate()->findOrFail($dictionary->id);
+            if ($parent->modx_tv_name !== null) {
+                throw ValidationException::withMessages(['item' => 'Элементы этого справочника обновляются только из MODX.']);
+            }
             if ($item === null) {
                 return $parent->items()->create(Arr::only($data, ['code', 'name', 'sort_order', 'active']) + ['active' => true]);
             }
@@ -44,6 +47,9 @@ class DictionaryManagement
     {
         DB::transaction(function () use ($dictionary, $item): void {
             $parent = Dictionary::query()->lockForUpdate()->findOrFail($dictionary->id);
+            if ($parent->modx_tv_name !== null) {
+                throw ValidationException::withMessages(['item' => 'Элементы этого справочника обновляются только из MODX.']);
+            }
             $locked = $parent->items()->lockForUpdate()->findOrFail($item->id);
             if ($this->usage->used($parent, $locked)) {
                 throw ValidationException::withMessages(['item' => 'Элемент используется. Деактивируйте его вместо удаления.']);

@@ -14,6 +14,13 @@ return [
     |
     */
 
+    'modx' => [
+        'base_url' => env('MODX_BASE_URL'),
+        'token' => env('MODX_TOKEN'),
+        'connect_timeout' => env('MODX_CONNECT_TIMEOUT', 5),
+        'timeout' => env('MODX_TIMEOUT', 30),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

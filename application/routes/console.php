@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('payments:queue-recovery-checks')->everyFiveMinutes()->withoutOverlapping();
 
+Schedule::command('modx:sync-dictionaries')->hourly()->withoutOverlapping();
+
 Schedule::command('groups:expire')->everyMinute()->withoutOverlapping();
 Schedule::command('applications:cleanup')->daily()->withoutOverlapping();
 Schedule::command('groups:queue-expiry-warnings')->hourly()->withoutOverlapping();

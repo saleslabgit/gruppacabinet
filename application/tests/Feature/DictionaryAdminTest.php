@@ -7,10 +7,12 @@ use App\Models\DictionaryItem;
 use App\Models\Group;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\ModxDictionarySyncService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
+use Tests\Support\ModxDictionaryFixture;
 use Tests\TestCase;
 
 class DictionaryAdminTest extends TestCase
@@ -31,7 +33,7 @@ class DictionaryAdminTest extends TestCase
         $this->actingAs($this->admin);
     }
 
-    private function dictionary(string $code = 'group_format'): Dictionary
+    private function dictionary(string $code = 'education_type'): Dictionary
     {
         return Dictionary::where('code', $code)->firstOrFail();
     }
@@ -61,7 +63,7 @@ class DictionaryAdminTest extends TestCase
         $this->delete('/admin/dictionaries/'.$dictionary->id.'/items/'.$item->id, ['confirmed' => 1])->assertSessionHasNoErrors();
         $this->delete('/admin/dictionaries/'.$dictionary->id, ['confirmed' => 1])->assertSessionHasNoErrors();
         $this->assertModelMissing($dictionary);
-        foreach (['education_type', 'group_format', 'gender'] as $code) {
+        foreach (['education_type', 'group_format', 'gender', 'group_type', 'group_approach', 'group_tag'] as $code) {
             $this->delete('/admin/dictionaries/'.$this->dictionary($code)->id, ['confirmed' => 1])->assertSessionHasErrors('dictionary');
         }
     }
@@ -70,7 +72,7 @@ class DictionaryAdminTest extends TestCase
     {
         $dictionary = $this->dictionary();
         $item = $this->item($dictionary);
-        $other = $this->dictionary('gender');
+        $other = Dictionary::create(['code' => 'custom', 'name' => 'Custom']);
         $this->item($other);
         $base = '/admin/dictionaries/'.$dictionary->id.'/items';
         $this->assertTrue($item->active);
@@ -105,9 +107,12 @@ class DictionaryAdminTest extends TestCase
 
     public function test_mutations_immediately_change_forms_and_preserve_historical_references(): void
     {
-        $items = [];
-        foreach (['education_type', 'group_format', 'gender'] as $code) {
-            $items[$code] = $this->item($this->dictionary($code));
+        ModxDictionaryFixture::configure();
+        ModxDictionaryFixture::fake();
+        app(ModxDictionarySyncService::class)->sync();
+        $items = ['education_type' => $this->item($this->dictionary('education_type'))];
+        foreach (['group_format', 'gender'] as $code) {
+            $items[$code] = $this->dictionary($code)->items()->firstOrFail();
         }
         $this->owner->update(['education_type_id' => $items['education_type']->id]);
         $group = Group::create(['owner_id' => $this->owner->id, 'format_id' => $items['group_format']->id, 'gender_id' => $items['gender']->id]);
@@ -117,7 +122,14 @@ class DictionaryAdminTest extends TestCase
             $detail = $code === 'education_type' ? '/admin/psychologists/'.$this->owner->id : '/admin/groups/'.$group->id;
             $base = '/admin/dictionaries/'.$item->dictionary_id.'/items/'.$item->id;
             $this->get($create)->assertOk()->assertSee($item->name);
-            $this->post($base.'/deactivate', ['confirmed' => 1])->assertSessionHasNoErrors();
+            if ($code === 'education_type') {
+                $this->post($base.'/deactivate', ['confirmed' => 1])->assertSessionHasNoErrors();
+            } else {
+                $document = ModxDictionaryFixture::document();
+                $document['data']['dictionaries'][$code === 'gender' ? 'gender' : 'format']['options'] = [];
+                ModxDictionaryFixture::fake($document);
+                app(ModxDictionarySyncService::class)->sync();
+            }
             $this->get($create)->assertOk()->assertDontSee($item->name);
             $this->get($edit)->assertOk()->assertSee($item->name)->assertSee('неактивен');
             $this->get($detail)->assertOk()->assertSee($item->name);
@@ -131,7 +143,12 @@ class DictionaryAdminTest extends TestCase
                 $this->assertSame($item->id, $group->fresh()->getAttribute($code === 'gender' ? 'gender_id' : 'format_id'));
             }
             $this->delete($base, ['confirmed' => 1])->assertSessionHasErrors('item');
-            $this->post($base.'/activate')->assertSessionHasNoErrors();
+            if ($code === 'education_type') {
+                $this->post($base.'/activate')->assertSessionHasNoErrors();
+            } else {
+                ModxDictionaryFixture::fake();
+                app(ModxDictionarySyncService::class)->sync();
+            }
             $this->get($create)->assertOk()->assertSee($item->name);
         }
         $group->delete();
@@ -170,7 +187,7 @@ class DictionaryAdminTest extends TestCase
         [$response, $after] = $measure('/admin/dictionaries');
         $this->assertSame($dictionaryCount, $after);
         $this->assertCount(20, $response->viewData('dictionaries'));
-        $this->get('/admin/dictionaries?page=2')->assertOk()->assertViewHas('dictionaries', fn ($rows) => $rows->count() === 8);
+        $this->get('/admin/dictionaries?page=2')->assertOk()->assertViewHas('dictionaries', fn ($rows) => $rows->count() === 11);
     }
 
     public function test_all_stage_eight_routes_deny_psychologist(): void

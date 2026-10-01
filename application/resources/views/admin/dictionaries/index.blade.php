@@ -4,6 +4,11 @@
 <x-breadcrumbs :items="[['label'=>'Справочники', 'url'=>($realDictionaries ?? false) ? route('admin.dictionaries.index') : $links['admin-dictionaries']], ['label'=>'Редактирование']]" />
 @endif
 @endsection
+@section('actions')
+@if($realDictionaries ?? false)
+<form method="POST" action="{{ route('admin.dictionaries.sync-modx') }}">@csrf<x-button type="submit">Обновить из MODX</x-button></form>
+@endif
+@endsection
 @section('content')
 @php
 $real = $realDictionaries ?? false;
@@ -19,12 +24,14 @@ $rows = $real ? $dictionaries : ($empty ? [] : collect(['education_type'=>'Ти�
 @foreach($rows as $row)
 <tr>
 <x-cell label="Код">{{ $row->code }}</x-cell>
-<x-cell label="Название">{{ $row->name }}</x-cell>
+<x-cell label="Название">{{ $row->name }}
+@if($real && $row->modx_tv_name !== null)<p>Управляется MODX · TV: {{ $row->modx_tv_name }}</p><p>Последняя синхронизация: {{ $row->last_synced_at?->format('d.m.Y H:i:s') ?? 'ещё не выполнена' }}</p>@endif
+</x-cell>
 <x-cell label="Элементы">{{ $real ? $row->items_count.' · активных: '.$row->active_items_count : '1 · демонстрационный' }}</x-cell>
 <x-cell label="Действия"><div class="actions dictionary-actions">
 <x-button kind="secondary" icon="arrow-up-right" :href="$real ? route('admin.dictionaries.items.index', $row) : $links['admin-dictionary']">Открыть</x-button>
 <x-button kind="secondary" icon="pencil" :href="$real ? route('admin.dictionaries.edit', $row) : route('prototype.admin-dictionaries',['variant'=>'edit'])">Редактировать</x-button>
-@if($real && !in_array($row->code, $coreCodes, true) && $row->items_count === 0)
+@if($real && $row->modx_tv_name === null && !in_array($row->code, $coreCodes, true) && $row->items_count === 0)
 <x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-dictionary-{{ $row->id }}">Удалить</x-button>
 @endif
 </div></x-cell>
@@ -35,7 +42,7 @@ $rows = $real ? $dictionaries : ($empty ? [] : collect(['education_type'=>'Ти�
 @endif
 @if($real)
 @foreach($rows as $row)
-@if(!in_array($row->code, $coreCodes, true) && $row->items_count === 0)
+@if($row->modx_tv_name === null && !in_array($row->code, $coreCodes, true) && $row->items_count === 0)
 <x-confirmation :id="'delete-dictionary-'.$row->id" title="Удалить справочник?" action="Удалить" :url="route('admin.dictionaries.destroy', $row)" method="DELETE"><p>{{ $row->name }} будет удалён окончательно.</p></x-confirmation>
 @endif
 @endforeach

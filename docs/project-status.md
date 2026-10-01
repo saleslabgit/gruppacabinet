@@ -207,7 +207,7 @@ canonical MODX group parent for future integration is Resource ID **3**;
 template ID **8** and context `web` are currently confirmed.
 
 No Cabinet application code for this outbound flow has been implemented yet:
-there is no HTTP client/job, no stored MODX resource ID, and the final field
+there is no outbound group HTTP client/job, no stored MODX resource ID, and the final field
 mapping has not been approved. Current inbound Stage 11 APIs are unchanged.
 The verified endpoint contract and remaining boundaries are documented in
 `docs/modx-api.md`.
@@ -216,8 +216,19 @@ The target design has now been expanded in `docs/modx-group-sync-plan.md`: the
 future group form adds short/full descriptions, cover, structured schedule,
 frequency, city, group type, multiple approaches and tags; MODX will be the
 source of truth for `format`, `gender`, `groupType`, `approaches` and `tags`
-option lists. This is documentation/planning only; none of those Cabinet schema,
-UI or synchronization changes are implemented at the current HEAD.
+option lists. TASK-2026-10-01-01 implements only the local dictionary layer:
+additive MODX metadata and five managed containers, strict read-only HTTP client,
+shared-lock/transactional import, hourly `modx:sync-dictionaries`, and admin-only
+manual sync on the existing dictionary page. Exact remote values identify items;
+legacy unambiguous label matches preserve IDs/codes/FKs, missing or unmatched
+values become inactive, and failures retain the last successful copy. Managed
+item mutations are blocked server-side; education/custom dictionaries stay local.
+MySQL 8 NO PAD binary collation preserves case, accents and trailing spaces in
+remote identity. Configuration/operations are in `docs/modx-api.md`.
+
+Group-form changes, rich text, covers, new group relations and outbound group
+synchronization remain unimplemented. No production MODX call or deployment was
+performed for this dictionary milestone; verification uses Laravel HTTP fakes.
 
 ## Stage 12 email and onboarding
 
@@ -250,7 +261,8 @@ been performed.
 - Placement and extension prices remain intentionally unconfigured until the
   product values are supplied.
 - Seeds still contain no dictionary item display values. Administrators can add
-  local synthetic examples or approved values through the Stage 8 UI.
+  values for local-only dictionaries through the Stage 8 UI; the five MODX-managed
+  lists require the new dictionary synchronization.
 - Production hosting, queue-worker operation, SMTP, public-site integration,
   and WEBPAY remain unverified and belong to later stages.
 

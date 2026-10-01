@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\ModxDictionarySyncException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DictionaryActionRequest;
 use App\Http\Requests\DictionaryRequest;
 use App\Models\Dictionary;
 use App\Services\DictionaryManagement;
 use App\Services\DictionaryUsage;
+use App\Services\ModxDictionarySyncService;
 use App\Support\PsychologistPages;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -28,6 +30,19 @@ class DictionaryController extends Controller
             'pages' => $rows->getUrlRange(max(1, $rows->currentPage() - 2), min($rows->lastPage(), $rows->currentPage() + 2)),
             'currentPage' => $rows->currentPage(),
         ]));
+    }
+
+    public function syncModx(ModxDictionarySyncService $sync): RedirectResponse
+    {
+        Gate::authorize('manage', Dictionary::class);
+        try {
+            $counts = $sync->sync();
+
+            return redirect()->route('admin.dictionaries.index')->with('success',
+                'Обновлено справочников: '.$counts['dictionaries'].'; вариантов: '.$counts['options'].'.');
+        } catch (ModxDictionarySyncException $exception) {
+            return redirect()->route('admin.dictionaries.index')->withErrors(['sync' => $exception->getMessage()]);
+        }
     }
 
     public function store(DictionaryRequest $request): RedirectResponse

@@ -8,7 +8,7 @@ A MODX plugin named `GruppaCabinetApi` is registered on
 
 The endpoint has been manually smoke-tested: it created a real **unpublished**
 MODX Resource and successfully persisted ordinary TV values and a MIGX JSON
-value. Cabinet-side synchronization code is not implemented yet.
+value. Cabinet-side outbound group synchronization is not implemented yet.
 
 This document defines the transport/API boundary only. The final
 Cabinet-field → MODX Resource/TV/MIGX mapping is intentionally documented
@@ -296,7 +296,52 @@ different values, including `зависимость` (51/105), `психосом
 and `подростки` (88/102). Cabinet must identify remote options by the owning
 dictionary plus exact stored `value`, never by label.
 
-Cabinet-side synchronization is the next implementation milestone.
+Cabinet-side dictionary synchronization is implemented by TASK-2026-10-01-01.
+The authoritative response is `data.complete === true`, with
+`data.dictionaries` an object keyed by TV name. Each definition contains
+`tv_id`, `tv_name`, `type`, and an `options` JSON array of
+`{value: string, label: string, position: integer}`. TV names/types are checked;
+TV numeric IDs are informational. Empty option arrays are accepted only inside
+an otherwise complete, valid document. Unknown extra dictionary keys are ignored;
+only the five fixed lists are imported.
+
+### Cabinet dictionary operations
+
+Apply the additive migration before serving the new code. It ensures the five
+managed containers without changing existing items or container names. Clean
+seeding is idempotent and does not invent remote options. The `modx_value`
+column uses MySQL 8 `utf8mb4_0900_bin` (NO PAD) for exact string identity;
+multiple NULL legacy values remain legal. Migration rollback removes metadata,
+not historical containers/items; re-import is required if metadata is removed.
+
+Set private runtime values (never commit or log them):
+
+- `MODX_BASE_URL`: HTTPS mxHeadless API base URL including `/api/v1`;
+- `MODX_TOKEN`: dedicated Bearer credential with `cabinet.sync`;
+- `MODX_CONNECT_TIMEOUT`: integer seconds, default 5;
+- `MODX_TIMEOUT`: integer seconds, default 30, maximum 60 and at least the
+  connect timeout.
+
+Missing/invalid config refuses the request. Redirects are not followed. The
+client uses GET `/cabinet/dictionaries` only; there are no automatic HTTP retries.
+Run `php artisan modx:sync-dictionaries`, or use **Обновить из MODX** on the
+admin dictionary page. The command is scheduled hourly with `withoutOverlapping`.
+CLI failures return nonzero with sanitized diagnostics; admin failures use the
+existing validation feedback. Neither path exposes upstream errors/bodies.
+
+Web, cron and CLI must share the configured cache store and cache prefix
+(production baseline: database cache/locks). All entry points use the same
+`modx:sync-dictionaries` lock with a 600-second lease around fetch and transaction;
+contention fails safely, and lost ownership is checked before commit. Successful
+output contains aggregate counts only. Dictionary last-sync is the last committed
+complete import; item last-sync is its last confirmed presence in MODX. A failed
+run leaves timestamps/data unchanged. Missing/legacy values remain stored but
+inactive; labels are used only for one-time unambiguous legacy attachment.
+
+The existing dictionary administration shows TV/value and timestamps and blocks
+manual mutations of managed items. Container display names remain editable;
+managed containers cannot be deleted. Education/custom dictionary CRUD stays
+local. No group-form or outbound synchronization is introduced.
 
 ## Planned cover transport
 

@@ -21,7 +21,9 @@ class SettingsAndSeedTest extends TestCase
         $this->seed(DatabaseSeeder::class);
         $this->seed(DatabaseSeeder::class);
 
-        $this->assertSame(3, Dictionary::query()->count());
+        $this->assertSame(6, Dictionary::query()->count());
+        $this->assertNull(Dictionary::where('code', 'education_type')->firstOrFail()->modx_tv_name);
+        $this->assertSame(5, Dictionary::whereNotNull('modx_tv_name')->count());
         $this->assertSame(7, Setting::query()->count());
         $this->assertSame(1, User::query()->where('email', 'admin@gruppa.test')->count());
 
@@ -39,6 +41,18 @@ class SettingsAndSeedTest extends TestCase
         $this->assertTrue($admin->accept);
         $this->assertFalse($admin->disabled);
         $this->assertTrue(Hash::check('password', (string) $admin->password));
+    }
+
+    public function test_seed_preserves_existing_dictionary_names_and_legacy_items(): void
+    {
+        $dictionary = Dictionary::where('code', 'group_format')->firstOrFail();
+        $dictionary->update(['name' => 'Existing format name']);
+        $item = $dictionary->items()->create(['code' => 'legacy', 'name' => 'Historical value']);
+        $this->seed(DatabaseSeeder::class);
+        $this->assertSame('Existing format name', $dictionary->fresh()->name);
+        $this->assertSame('legacy', $item->fresh()->code);
+        $this->assertNull($item->fresh()->modx_value);
+        $this->assertTrue($item->fresh()->active);
     }
 
     public function test_production_seed_does_not_create_known_password_accounts(): void

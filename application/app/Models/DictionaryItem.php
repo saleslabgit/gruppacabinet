@@ -13,7 +13,7 @@ class DictionaryItem extends Model
 
     protected function casts(): array
     {
-        return ['active' => 'boolean'];
+        return ['active' => 'boolean', 'last_synced_at' => 'datetime'];
     }
 
     public function dictionary(): BelongsTo

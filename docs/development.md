@@ -224,7 +224,8 @@ Group dictionaries are not seeded with invented product values. Before filling
 forms, approved active items must exist in `group_format` and `gender`.
 Empty dictionaries display an explanatory warning. Automated and browser
 verification use isolated synthetic items; these are not product seed values.
-Dictionary administration is Stage 8, so real values remain a prerequisite.
+The five MODX-managed lists are populated by dictionary sync (see modx-api.md);
+automated verification uses HTTP fakes, never the production endpoint.
 
 Admin creation selects an enabled approved psychologist. Existing ownership,
 UUID, tariff and lifecycle dates are not editable. The published-content warning
@@ -252,12 +253,14 @@ Use only synthetic verification data; keep screenshots/scripts outside Git.
 ## Stage 8: manage local dictionaries and settings
 
 Log in as the seeded local administrator, then open **Справочники**. Open each
-of `education_type`, `group_format` and `gender` and add synthetic local values
-with stable lowercase codes (letters, digits, underscore). They immediately
-appear in psychologist/group creation forms; no seed rerun or source edit is
-needed. These local examples are not approved production dictionary content.
+local dictionary (`education_type` or a custom container) and add synthetic values
+with stable lowercase codes (letters, digits, underscore). Education values
+immediately appear in psychologist forms. MODX-managed `group_format`, `gender`,
+`group_type`, `group_approach` and `group_tag` are read-only here; the admin
+**Обновить из MODX** button imports all five through the configured read client.
+See modx-api.md for private configuration and CLI/scheduler operation.
 
-Edit changes names/order/active state; codes cannot change. Deactivation requires
+For local dictionaries, edit changes names/order/active state; codes cannot change. Deactivation requires
 confirmation and hides a value from new forms, while records already using it
 retain their selection. Reactivation restores it. Delete is offered only for
 unused values and empty custom containers; core containers remain protected.

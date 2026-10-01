@@ -5,25 +5,33 @@
 @section('content')
 @php
 $real = $realDictionaries ?? false;
+$managed = $real && $dictionary->modx_tv_name !== null;
 $editing = $real ? $editing : ($variant === 'edit' ? (object) ['code'=>'demo', 'name'=>'Очно · пример', 'sort_order'=>10, 'active'=>true] : null);
 $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long ? str_repeat('Демонстрационный формат ', 15) : 'Очно · пример', 'sort_order'=>10, 'active'=>$variant !== 'deactivated', 'usage_count'=>$variant === 'used' ? 1 : 0]]);
 @endphp
 <p class="mb-4">{{ $real ? $dictionary->name.' · '.$dictionary->code : 'Формат группы · group_format' }}</p>
+@if($managed)<x-alert>Управляется MODX · TV: {{ $dictionary->modx_tv_name }}. Последняя синхронизация: {{ $dictionary->last_synced_at?->format('d.m.Y H:i:s') ?? 'ещё не выполнена' }}.</x-alert>@endif
 @if(!$real)<x-alert>Значения ниже — вымышленные примеры для вёрстки, не утверждённый справочник.</x-alert>@endif
 @if($real)<x-validation-summary :errors="$errors" />@endif
 @unless($editing)
 @if(count($rows) === 0)
-<x-empty title="Элементов пока нет" text="Добавьте первое значение ниже." />
+<x-empty title="Элементов пока нет" :text="$managed ? 'Запустите обновление из MODX на странице справочников.' : 'Добавьте первое значение ниже.'" />
 @else
 <x-table :headers="['Код и название','Порядок','Состояние','Действия']">
 @foreach($rows as $row)
 <tr>
-<x-cell label="Код и название">{{ $row->code }}<p>{{ $row->name }}</p></x-cell>
+<x-cell label="Код и название">{{ $row->code }}<p>{{ $row->name }}</p>
+@if($managed)<p>MODX: {{ $row->modx_value ?? 'не связан' }}</p><p>Последнее получение: {{ $row->last_synced_at?->format('d.m.Y H:i:s') ?? 'ещё не выполнено' }}</p>@endif
+</x-cell>
 <x-cell label="Порядок">{{ $row->sort_order }}</x-cell>
 <x-cell label="Состояние">{{ $row->active ? 'Активен' : 'Неактивен' }}
-@if($row->usage_count)<p>{{ $real ? 'Используется в данных. Можно деактивировать, но нельзя удалить.' : 'Используется в группах. Можно деактивировать, но нельзя удалить.' }}</p>@elseif($real)<p>Не используется.</p>@endif
+@if($row->usage_count)<p>{{ $managed ? 'Используется в данных.' : ($real ? 'Используется в данных. Можно деактивировать, но нельзя удалить.' : 'Используется в группах. Можно деактивировать, но нельзя удалить.') }}</p>@elseif($real)<p>Не используется.</p>@endif
 </x-cell>
-<x-cell label="Действия"><div class="actions">
+<x-cell label="Действия">
+@if($managed)
+Обновляется из MODX
+@else
+<div class="actions">
 <x-button kind="secondary" icon="pencil" :href="$real ? route('admin.dictionaries.items.edit', [$dictionary, $row]) : route('prototype.admin-dictionary',['variant'=>'edit'])">Редактировать</x-button>
 @if(!$row->active)
 @if($real)
@@ -33,13 +41,15 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 <x-button kind="danger" data-bs-toggle="modal" data-bs-target="#{{ $real ? 'deactivate-'.$row->id : 'deactivate' }}">Деактивировать</x-button>
 @endif
 @if($real && !$row->usage_count)<x-button icon="trash" kind="danger" data-bs-toggle="modal" data-bs-target="#delete-item-{{ $row->id }}">Удалить</x-button>@endif
-</div></x-cell>
+</div>
+@endif
+</x-cell>
 </tr>
 @endforeach
 </x-table>
 <x-pagination :pages="$pages" :current="$currentPage" />
 @endif
-@if($real)
+@if($real && !$managed)
 @foreach($rows as $row)
 @if($row->active)
 <x-confirmation :id="'deactivate-'.$row->id" title="Деактивировать элемент?" action="Деактивировать" :url="route('admin.dictionaries.items.deactivate', [$dictionary, $row])"><p>{{ $row->name }} исчезнет из новых форм, но сохранится в существующих данных.</p></x-confirmation>
@@ -50,6 +60,7 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 @endforeach
 @endif
 @endunless
+@unless($managed)
 <x-panel :title="$editing ? 'Редактировать элемент' : 'Добавить элемент'">
 <form id="item-form" @if($real) method="POST" action="{{ $editing ? route('admin.dictionaries.items.update', [$dictionary, $editing]) : route('admin.dictionaries.items.store', $dictionary) }}" @else data-prototype-form @endif>
 @if($real) @csrf @if($editing) @method('PUT') @endif @endif
@@ -77,4 +88,5 @@ $rows = $real ? $items : ($empty ? [] : [(object) ['code'=>'demo', 'name'=>$long
 @elseif(!$real)
 <x-confirmation id="deactivate" title="Деактивировать элемент?" action="Деактивировать" :open="$variant === 'confirmation'"><p>Элемент исчезнет из новых форм, но сохранится в существующих данных.</p></x-confirmation>
 @endif
+@endunless
 @endsection
