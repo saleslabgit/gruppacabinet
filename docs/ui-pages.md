@@ -539,8 +539,8 @@ CSRF-защищённые действия. Поиск и фильтры сох�
 - `/cabinet/admin/groups`: поиск, тариф/статус, сортировка, быстрые фильтры
   approved/abandoned (с этапа 9 также expired); нет фильтра успешного платежа.
 - `/cabinet/admin/groups/create` и `/{id}/edit`: общий group-form; психолог
-  выбирается только при создании. Опубликованные изменения синхронизируются
-  с каталогом вручную.
+  выбирается только при создании. Изменения содержимого approved/связанной MODX
+  группы ставят асинхронную синхронизацию в очередь.
 - `/cabinet/admin/groups/{id}`: настоящий психолог и история, UUID с рабочим
   копированием, подтверждения approve/revision/reject/activate по статусу.
   Комментарии связаны с реальными формами подтверждения; ошибки сохраняют ввод.
@@ -704,3 +704,13 @@ new structured fields. Legacy schedule remains visible if days/time are missing.
 Missing local managed options produce a blocking notice for complete submissions.
 Prototype business buttons remain no-op; the accepted panels and responsive
 layout are retained.
+
+## Admin MODX sync extension (TASK-2026-10-01-03)
+
+Existing admin group detail adds one shared-style panel: pending/syncing/synced/
+failed/conflict, Resource ID, request/start/success/failure timestamps, localized
+allowlisted error and optional cleanup warning. POST `/{group}/sync-modx` queues
+manual resync for approved/active/expired, including after success. It validates
+locally and never calls MODX inline. Psychologists have no panel/action access.
+No token, raw remote response or private cover path is exposed. Existing panels,
+confirmation dialogs, responsive primitives and prototype catalogue are retained.

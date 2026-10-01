@@ -87,6 +87,7 @@ Route::middleware(['account', 'role:admin'])->prefix('admin/groups')->name('admi
     Route::get('/{group}/cover', [$controller, 'cover'])->name('cover');
     Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
     Route::put('/{group}', [$controller, 'update'])->name('update');
+    Route::post('/{group}/sync-modx', [$controller, 'syncModx'])->name('sync-modx');
     foreach (['approve', 'revision', 'reject', 'activate'] as $action) {
         Route::post('/{group}/'.$action, [$controller, 'action'])->name($action);
     }

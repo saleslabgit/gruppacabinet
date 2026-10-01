@@ -1,10 +1,8 @@
 # MODX group synchronization implementation plan
 
-Status: **MODX dictionary synchronization, Cabinet group schema/form, HTML sanitizer, progressive rich-text editor and private cover storage implemented; MODX cover transport, payload mapper, outbound create/update job and end-to-end outbound synchronization planned**
+Status: **MODX dictionary synchronization, Cabinet group schema/form, HTML sanitizer, progressive rich-text editor and private cover storage implemented; Cabinet cover transport, payload mapper, outbound create/update job implemented; real production acceptance pending**
 
-This document records the implemented Cabinet milestones and the remaining
-MODX outbound implementation order. It separates current behavior from planned
-transport, mapping and synchronization work.
+This document records the implemented Cabinet milestones and the MODX outbound implementation. It separates current behavior from external production acceptance.
 
 ## Verified starting point
 
@@ -25,16 +23,15 @@ transport, mapping and synchronization work.
   cover storage with authorized previews are implemented.
 - Legacy free-text `schedule` remains only as a read-only fallback; it is not
   editable, parsed or overwritten by the current form.
-- MODX cover transport, payload mapper, outbound create/update client/job and
-  end-to-end outbound synchronization remain planned. Approval does not dispatch
-  an outbound job, and no MODX resource-ID column exists in Cabinet yet.
+- TASK-2026-10-01-03 implements outbound mapping, transport, state, queue and admin
+  retry. External plugin updates were performed by the product owner, not here.
+- Real production end-to-end acceptance remains **not verified**.
 
 ## Target ownership model
 
 ### Cabinet is authoritative for group content
 
-Group content is authored in Cabinet. Once outbound synchronization is
-implemented, it may overwrite the following managed MODX TV values:
+Group content is authored in Cabinet. Synchronization may overwrite the following managed MODX TV values:
 
 - title;
 - short description;
@@ -65,7 +62,7 @@ MODX owns the selectable values and labels for:
 Cabinet stores local integer FKs for domain integrity and the exact MODX stored
 value as `modx_value`. Display label changes do not change local FK identity.
 
-## Group schema — implemented and planned
+## Group schema — implemented
 
 The existing `description` column is retained as **short description**.
 TASK-2026-10-01-02 added these nullable fields to `gp_groups`:
@@ -83,8 +80,9 @@ city
 group_type_id
 ```
 
-`public_site_resource_id` remains planned for outbound synchronization; it is
-not part of the current schema. Legacy nullable `schedule` is preserved only
+`public_site_resource_id` is nullable, unique and persisted on first success.
+Sync revision/status/timestamps, safe error, key/hash and remote-cover tracking
+are added by migration `2026_10_01_000003_add_group_modx_sync`. Legacy nullable `schedule` is preserved only
 as a read-only fallback, without automatic parsing or form writes.
 
 Implemented pivots:
@@ -222,7 +220,7 @@ requires structured meeting days and start time; ordinary legacy saves remain po
 ## Phase 4 — HTML safety and cover storage
 
 Cabinet HTML sanitization, progressive editor and private cover storage are
-implemented in TASK-2026-10-01-02. MODX cover transport remains planned.
+implemented in TASK-2026-10-01-02. Cabinet base64 cover transport is implemented in TASK-2026-10-01-03.
 
 Rich HTML:
 
@@ -240,23 +238,26 @@ Cover:
 - private Cabinet storage;
 - replacement deletes superseded private files only after safe state transition.
 
-The current mxHeadless JSON API defaults to a 1 MiB request limit. Before cover
-sync, extend the MODX endpoint to accept bounded image content (planned base64
-inside authenticated JSON for the low request volume) and raise/verify the
-mxHeadless/hosting request limit sufficiently for base64 overhead.
+The external plugin accepts bounded base64 cover data. Production must set
+`mxheadless_max_body_bytes >= 8388608`, `upload_maxsize >= 5242880`, PHP/hosting
+body limits >= ~10 MiB and writable Media Source. These live settings remain
+unverified. Cabinet sends bytes only when the local source differs from the
+last successful remote cover; otherwise it reasserts `tvs.image`.
 
-## Phase 5 — Mapping builder (planned)
+## Phase 5 — Mapping builder (implemented)
 
-Owner: Codex after exact MODX option/multiple serialization is known.
+`GroupModxPayloadBuilder` implements the verified contract.
 
-One service (for example `GroupModxPayloadBuilder`) owns all MODX names and
+`GroupModxPayloadBuilder` owns all MODX names and
 formatting. Controllers/Blade/jobs do not know TV names.
 
-Initial target mapping:
+Implemented mapping:
 
 | Cabinet source | MODX target |
 |---|---|
 | title | Resource `pagetitle`, TV `title` |
+| immutable public_uuid | TV `groupid` (84, text) |
+| meeting_price minor BYN / 100 | TV `price` (34, number, no decimals) |
 | short description | TV `shortDescription` |
 | sanitized full HTML | TV `desc` |
 | cover | TV `image` |
@@ -273,17 +274,26 @@ Initial target mapping:
 | participant capacity | TV `participantsCount` |
 | gender.modx_value | TV `gender` |
 
-Unresolved until separately verified:
+`days` (45, tag) maps mon/tue/wed/thu/fri/sat/sun to
+`пн,вт,ср,чт,пт,сб,вс`, using canonical Monday–Sunday order without spaces.
+`startAt` receives unchanged `HH:MM`. Approaches/tags join exact `modx_value`
+with `||` in dictionary sort_order/id order. Leader is exactly one MIGX row,
+`{"MIGX_id":"1","text":"FirstName LastName"}`, with whitespace collapsed and
+no middle name. Create-only deterministic alias is slug + `-g<local ID>`, max 191.
 
-- Cabinet meeting price versus MODX `price` / `price_usd`;
-- exact MODX TV used for Cabinet `public_uuid`;
-- SEO/image-display secondary TVs not explicitly requested;
-- exact weekday serialization if the MODX `days` TV requires more than the
-  verified single-value example.
+`groupid` stores the immutable UUID by integration decision; legacy samples did
+not use this field. Whole BYN price is an integer decimal string: minor price
+must be divisible by 100. `price_usd` (81, text) is a separate secondary currency
+line and intentionally unmanaged. SEO/showOnMainPage/other unlisted TVs are omitted.
 
-## Phase 6 — Outbound create/update job (planned)
+Submit, admin create, approval and manual resync require complete content,
+owner first/last name, active correctly linked MODX dictionary values and a
+valid existing private cover. Ordinary legacy edits retain inactive selections
+and do not acquire new completeness requirements. Outbound jobs validate again.
 
-Owner: Codex.
+## Phase 6 — Outbound create/update job (implemented)
+
+`GroupModxSyncScheduler`, `SyncGroupToModx` and `Modx\GroupClient` implement this flow.
 
 After committed `moderation -> approved`:
 
@@ -315,9 +325,19 @@ Use synthetic/non-public data and verify:
 - MODX outage leaves approved group and local dictionaries intact;
 - no API key, full HTML payload, image bytes/base64 or personal data is logged.
 
-## Task ordering
+## Implementation and acceptance status
 
-Phase 1 contract is recorded in TASK-2026-10-01-01 and Phase 2 is implemented.
-Phase 3 and the Cabinet portion of Phase 4 are implemented in TASK-2026-10-01-02.
-MODX cover transport and Phases 5–7 remain planned. No outbound payload mapper,
-approval job, resource-ID column or group HTTP request exists.
+Phases 1–6 are implemented (external MODX plugin maintained by its owner).
+Cabinet verification uses Laravel HTTP fakes only. Phase 7 production acceptance
+remains pending the product owner's deployment test.
+
+Create key: `group-create:<public_uuid>`; update key:
+`group-update:<public_uuid>:<revision>`. No create-key rotation. Exact request
+hash protects retries against payload drift without storing content snapshots.
+See `modx-api.md` for the external TTL limitation and conflict recovery boundary.
+
+Jobs serialize group/revision only, re-read current state and skip stale revisions
+before HTTP. Per-group cache overlap protection covers transport and persistence.
+Stale successful responses still preserve learned Resource/cover identity; stale
+failures cannot overwrite a newer revision. Admin status/manual resync uses the
+same asynchronous pipeline, including after a successful sync.

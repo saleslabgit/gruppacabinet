@@ -6,13 +6,10 @@ The main public site at `https://gruppa.info/` runs MODX 3 with mxHeadless.
 A MODX plugin named `GruppaCabinetApi` is registered on
 `OnMxHeadlessRegister` and exposes a protected synchronization endpoint.
 
-The endpoint has been manually smoke-tested: it created a real **unpublished**
-MODX Resource and successfully persisted ordinary TV values and a MIGX JSON
-value. Cabinet-side outbound group synchronization is not implemented yet.
-
-This document defines the transport/API boundary only. The final
-Cabinet-field → MODX Resource/TV/MIGX mapping is intentionally documented
-separately before Cabinet integration is implemented.
+TASK-2026-10-01-03 implements Cabinet mapping, HTTPS transport, database queue,
+Resource identity and admin resync. The product owner reports the external plugin
+updated with the cover contract below. Codex/tests have made no real MODX calls;
+production end-to-end acceptance and hosting settings remain **not verified**.
 
 ## Base URL
 
@@ -43,11 +40,7 @@ Use a dedicated API key for Cabinet. Never commit or log the key.
 {
   "resource_id": 412,
   "resource": {
-    "pagetitle": "Example group",
-    "parent": 3,
-    "template": 8,
-    "context_key": "web",
-    "published": false
+    "pagetitle": "Example group"
   },
   "tvs": {
     "title": "Example group",
@@ -70,64 +63,19 @@ Optional.
 - present: update that existing Resource;
 - unknown ID: validation failure.
 
-The future Cabinet integration must save the returned MODX Resource ID after
-the first successful create and use it for later updates.
+Cabinet saves the returned MODX Resource ID after
+the first successful create and uses it for later updates.
 
 ### `resource`
 
-Object with an allowlisted set of scalar `modResource` fields. The installed
-plugin currently allows:
+Cabinet sends only `pagetitle`, plus `alias` on create. The alias is Laravel
+`Str::slug(title)` (fallback `group`), truncated to fit a `-g<local ID>` suffix
+inside 191 characters. Updates omit alias to preserve the public URL.
 
-```text
-pagetitle
-longtitle
-description
-alias
-published
-pub_date
-unpub_date
-parent
-isfolder
-introtext
-content
-richtext
-template
-menuindex
-searchable
-cacheable
-menutitle
-content_dispo
-hidemenu
-class_key
-context_key
-content_type
-uri
-uri_override
-hide_children_in_tree
-show_in_tree
-```
-
-Arrays/objects are rejected for Resource fields.
-
-For a newly created Resource, the endpoint defaults:
-
-```text
-type         = document
-class_key    = MODX\Revolution\modDocument
-context_key  = web        (when omitted)
-content_type = 1          (when omitted)
-```
-
-For Cabinet group drafts the canonical target is:
-
-```text
-parent      = 3
-template    = 8
-context_key = web
-published   = false
-```
-
-**Do not use parent 308 for Cabinet group creation.**
+The installed endpoint enforces parent **3**, template **8**, context `web`,
+`published=false` on create; Cabinet does not send or override those fields.
+Updates require the same parent/template/context and preserve publication.
+Cabinet never publishes, unpublishes or deletes a MODX Resource.
 
 ## TV and MIGX values
 
@@ -195,7 +143,9 @@ Create:
   "data": {
     "resource_id": 412,
     "created": true,
-    "updated": false
+    "updated": false,
+    "cover_path": "images/cabinet-group-412-synthetic.png",
+    "cover_cleanup_warning": false
   },
   "meta": []
 }
@@ -208,7 +158,9 @@ Update:
   "data": {
     "resource_id": 412,
     "created": false,
-    "updated": true
+    "updated": true,
+    "cover_path": null,
+    "cover_cleanup_warning": false
   },
   "meta": []
 }
@@ -221,15 +173,23 @@ it separately from Cabinet's immutable `public_uuid`.
 
 mxHeadless applies its standard `Idempotency-Key` middleware to POST requests.
 
-Use a stable key for retries of the same logical create request. A successful
-same-key/same-body replay can return the original response. Reusing the same
-key with a different body conflicts.
+Create always uses `group-create:<public_uuid>` while the local Resource ID is
+NULL. Update uses `group-update:<public_uuid>:<revision>`. No automatic create-key
+rotation is allowed. The exact JSON bytes are serialized once and SHA-256 hashed;
+only key/hash and state are persisted, never JSON/HTML/base64 copies. If rebuilding
+the same attempted key would change the hash (including owner/dictionary changes),
+Cabinet stops with `idempotency_conflict` before sending different bytes.
 
-Important current boundary: the custom endpoint itself does **not** yet perform
-a permanent lookup by Cabinet `public_uuid`. Therefore durable de-duplication
-after the mxHeadless idempotency TTL depends on Cabinet persisting
-`resource_id` and using update for later synchronization. The final Cabinet
-retry contract must be fixed before implementation.
+Same-key/same-body retries can replay the original response. Remote body conflicts
+also become `conflict`; the administrator must reconcile with MODX, not generate a
+new create key. A successful stale create still saves its Resource/cover identity
+and leaves the newer revision pending. A non-null Resource ID is never replaced.
+
+**External limit:** mxHeadless defaults to a 86400-second idempotency TTL. The
+endpoint has no documented permanent UUID lookup. A stable key alone does not
+prove duplicate prevention after remote cache expiry. Before retrying an ambiguous
+initial create outside the configured TTL, the operator must check MODX and
+reconcile identity; this task provides no arbitrary Resource-ID editing UI.
 
 ## Authentication and CORS
 
@@ -255,22 +215,29 @@ From the live mxHeadless schema/resource inspection:
 - A real group Resource uses template ID `8`.
 - A real group exposes ordinary TV values and MIGX JSON through
   `GET /resources/{id}?include=tv`.
-- The correct group parent for future Cabinet creation is Resource ID `3`.
+- The correct group parent for Cabinet creation is Resource ID `3`.
 
-## Cabinet integration target
+## Cabinet group transport and queue
 
-The follow-up Cabinet implementation must:
+`GroupModxPayloadBuilder` owns the mapping in `modx-group-sync-plan.md`.
+`GroupClient` uses POST `/cabinet/resources/sync`, Accept/Content-Type JSON,
+Bearer authentication and the exact caller key. HTTPS is required; credentials,
+query strings and fragments in the base URL are rejected; redirects are refused.
+`MODX_SYNC_TIMEOUT` defaults to 60 seconds (1–60, not less than connect timeout).
+`MODX_CONNECT_TIMEOUT` is shared with dictionary reads (default 5 seconds).
 
-1. Call this endpoint after committed `moderation → approved`.
-2. Run the external call through a database queue job, not inside the moderation
-   database transaction.
-3. Create the MODX Resource as `published=false`.
-4. Persist the returned MODX Resource ID.
-5. On retry/update, target the same Resource.
-6. Send Resource/TV/MIGX values according to a separately approved mapping.
-7. Keep final publication on the MODX site manual.
-8. Keep `approved → active` in Cabinet as the action that starts placement dates.
-9. Never access MODX database tables directly.
+2xx requires a positive integer Resource ID and complementary boolean-compatible
+created/updated flags. A nullable cover path and boolean cleanup warning are
+normalized; malformed contracts fail permanently. Connection/timeout, 429, 5xx
+and the known in-progress 409 retry with bounded backoff. Authentication, other
+4xx, redirects, malformed responses and boundary/not-found errors fail safely.
+No original transport exception, URL, token, body, leader or image bytes are logged.
+
+Approval commits before dispatch to the database queue. Group admin content edits
+for an existing remote resource or currently approved initial create queue a new
+revision; manual resync does the same. Draft saves, psychologist submit, revision,
+rejection, activation, expiration, deletion and payments do not dispatch outbound
+work. No transaction spans HTTP. See architecture/deployment for operational detail.
 
 ## Verified dictionary endpoint
 
@@ -341,34 +308,32 @@ inactive; labels are used only for one-time unambiguous legacy attachment.
 The existing dictionary administration shows TV/value and timestamps and blocks
 manual mutations of managed items. Container display names remain editable;
 managed containers cannot be deleted. Education/custom dictionary CRUD stays
-local. No group-form or outbound synchronization is introduced.
+local. Group forms use this local cache; outbound synchronization does not alter
+the inbound contract.
 
-## Planned cover transport
+## Installed cover contract
 
-The current sync endpoint is JSON-only. mxHeadless
-`ContentNegotiationMiddleware` accepts JSON/form-urlencoded mutations but not
-multipart, and `BodyLimitMiddleware` defaults
-`mxheadless_max_body_bytes` to **1 MiB**.
+`cover` is optional and contains `filename`, `mime_type`, `content_base64`.
+Decoded size is bounded by 5242880 bytes (5 MiB), MIME JPEG/PNG/WebP.
+Cabinet verifies the private file, metadata, size and actual MIME before sending.
+The external plugin writes into `images` with prefix `cabinet-group-` and sets
+TV `image` (id 29, image type, Media Source 1 Filesystem, base URL `/`).
+Never send `tvs.image` together with `cover`.
 
-The target group form allows JPEG/PNG/WebP covers up to 5 MiB. Therefore cover
-transport must be explicitly added before Cabinet outbound sync. The preferred
-low-volume design is bounded base64 image data inside the authenticated JSON
-sync request, with:
+A successful uploaded cover with a nonempty returned `cover_path` records both
+remote path and the exact local source path. Failures preserve prior tracking.
+An unchanged cover is not uploaded again: Cabinet sends `tvs.image` with the
+tracked relative path. Replaced local covers upload again. Cleanup warnings are
+safe flags visible to administrators; they do not contain paths or upstream text.
 
-- decoded-size validation at 5 MiB;
-- MIME verification from bytes;
-- a managed MODX image directory and collision-safe filename;
-- TV `image` set to the resulting relative path;
-- cleanup/compensation when the associated DB operation fails;
-- an mxHeadless body limit large enough for base64 overhead (at least 8 MiB for
-  a 5 MiB product limit), after verifying the actual hosting/PHP request limits.
+External deployment checklist (operator verification required):
 
-This extension is planned, not installed/verified yet.
+- `mxheadless_max_body_bytes >= 8388608`;
+- MODX `upload_maxsize >= 5242880`;
+- PHP/hosting body limit at least ~10 MiB;
+- Media Source writable;
+- private API key with `cabinet.sync`;
+- shared database queue/cache worker and scheduler running.
 
-## Out of scope for this API document
-
-- deciding which Cabinet field maps to each MODX TV;
-- changing the public site's templates or MIGX configuration;
-- automatic publication;
-- Cabinet UI/queue implementation;
-- modifying mxHeadless core.
+The external MODX plugin is maintained outside this repository. Automated tests
+use synthetic HTTP/storage fakes; live upload/create/update has not been verified.

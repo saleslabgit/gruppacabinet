@@ -210,8 +210,8 @@ All URLs below are relative to `http://localhost:8080/cabinet`.
 3. Administrator: open «Группы» (`/admin/groups`), find the moderation group,
    open it, choose «На доработку» and enter a comment of at least 10 characters.
 4. Psychologist: read the comment/history, edit and resubmit. Administrator:
-   confirm approval, copy «ID группы для gruppa.info», and manually publish the
-   catalogue entry with that ID. Confirm «Отметить активной» in the cabinet.
+   confirm approval, wait for successful MODX sync in the group panel, and
+   manually publish that Resource. Confirm «Отметить активной» in the cabinet.
    Dates start at activation and display in Europe/Minsk.
 5. Verify the rejected path on a separate group, including required reason and
    owner soft deletion. Rejected groups cannot be edited or resubmitted.
@@ -228,8 +228,8 @@ The five MODX-managed lists are populated by dictionary sync (see modx-api.md);
 automated verification uses HTTP fakes, never the production endpoint.
 
 Admin creation selects an enabled approved psychologist. Existing ownership,
-UUID, tariff and lifecycle dates are not editable. The published-content warning
-reminds the admin to synchronize changes manually with the public catalogue.
+UUID, tariff and lifecycle dates are not editable. The content warning
+explains asynchronous MODX synchronization and links its status to the group detail.
 List search/filter/sort preserve query parameters across 20-row pages.
 
 `config/groups.php` sets `abandoned_draft_days = 30`; this is an administrative
@@ -545,3 +545,23 @@ Legacy saves may omit new content; moderation submit and admin create require
 full HTML, cover, days/time, frequency/city and local dictionary selections.
 If dictionary options are missing, synchronize them through the existing
 administrator flow; opening/saving a group never fetches them remotely.
+
+## MODX group synchronization (TASK-2026-10-01-03)
+
+Outbound code is implemented; automated verification must use `Http::fake()` and
+synthetic private storage only. Run `php artisan test --compact --filter=ModxGroup`
+for mapping/client/state/admin/worker tests, then the complete MySQL suite.
+Tests globally prevent stray Laravel HTTP requests. Never point tests at production.
+
+Set `MODX_SYNC_TIMEOUT=60` (maximum 60) alongside the existing private MODX config.
+Approval validates complete sync-ready content (whole BYN, names, active linked
+choices, valid cover), commits approved and queues one database job/revision.
+Admin content edits and POST `/admin/groups/{group}/sync-modx` use the same pipeline.
+Legacy ordinary saves remain possible. The job preserves approved on failures;
+admin status shows safe diagnostics. Full mapping and stable key/TTL limitations
+are in `modx-api.md` and `modx-group-sync-plan.md`.
+
+External live acceptance remains pending: deploy, create synthetic complete group,
+submit/approve, run worker, inspect unpublished Resource/TV/MIGX/image and saved ID;
+edit/resync and verify same ID, unchanged/replaced cover and manual publication.
+Codex and automated tests do not execute this external scenario.

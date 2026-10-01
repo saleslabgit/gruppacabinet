@@ -3052,7 +3052,7 @@ Production credentials на этом этапе запрещены.
 
 Создать единый mapper/builder. UI, controllers и queue job не хардкодят TV names.
 
-Целевой mapping, если дальнейшая проверка MODX не выявит иной семантики:
+Утверждённый mapping, реализован TASK-2026-10-01-03:
 
 | Cabinet | MODX |
 |---|---|
@@ -3073,9 +3073,21 @@ Production credentials на этом этапе запрещены.
 | `participant_capacity` | TV `participantsCount` |
 | `gender_id` | TV `gender` через `modx_value` |
 
-`meeting_price` → `price`/`price_usd`, `public_uuid` → конкретный MODX TV, SEO TV и другие поля не считаются утверждёнными до отдельной проверки их реальной семантики.
+`public_uuid` передаётся в TV `groupid` (84, text). `meeting_price` хранится в
+копейках BYN и передаётся в TV `price` (34, number, allowDecimals=0) как целая
+десятичная строка BYN; требуется делимость на 100. `price_usd` (81, text) — отдельная
+валютная строка без источника в Cabinet; она, SEO и showOnMainPage не изменяются.
+`days` (45, tag): mon→пн, tue→вт, wed→ср, thu→чт, fri→пт, sat→сб, sun→вс,
+через запятую без пробелов в порядке понедельник–воскресенье. `startAt` — HH:MM
+без преобразования. Approaches/tags — точные modx_value через || в sort_order/id.
+Leader — одна MIGX-строка с MIGX_id="1", нормализованными именем и фамилией без отчества.
 
-### 17F. Исходящий create/update
+TV image (29, Media Source 1 Filesystem, base URL /) получает относительный путь
+из успешного base64 cover upload. Неизменённая обложка отправляется как tvs.image
+без байтов, новая — как cover без tvs.image. Лимит 5 МиБ, JPEG/PNG/WebP.
+Внешний плагин обновлён владельцем; production limits/приёмка ещё не проверены.
+
+### 17F. Исходящий create/update (реализован TASK-2026-10-01-03)
 
 После `moderation → approved`:
 
@@ -3089,6 +3101,18 @@ Production credentials на этом этапе запрещены.
 - Cabinet не пишет напрямую в таблицы MODX;
 - финальная публикация остаётся ручной, после неё существующий `approved → active` запускает срок размещения.
 
+Create использует постоянный `group-create:<public_uuid>`, update —
+`group-update:<public_uuid>:<revision>`. Ключ создания не меняется при конфликте;
+повторная попытка проверяет хеш точных JSON-байтов. MODX ID сохраняется даже при
+устаревшем успешном ответе; более новая редакция остаётся pending. Администратор
+видит статус/безопасную ошибку и может поставить новую синхронизацию в очередь.
+Публикацией, снятием публикации и удалением MODX Cabinet не управляет.
+
+Production checklist: mxheadless_max_body_bytes >= 8388608, upload_maxsize >=
+5242880, PHP/hosting body limit >= ~10 MiB, writable Media Source, приватный API
+credential, работающие database queue worker и scheduler. Реальный end-to-end
+в MODX не выполнялся Codex/тестами; внешняя приёмка владельцем ещё требуется.
+Ограничение TTL idempotency и порядок восстановления описаны в `docs/modx-api.md`.
 Подробный порядок и границы см. `docs/modx-group-sync-plan.md`; транспортный API — `docs/modx-api.md`.
 
 ### Финальная приёмка этапа 17

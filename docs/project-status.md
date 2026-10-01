@@ -206,9 +206,10 @@ and persistence/read-back of ordinary TV values and a MIGX JSON value. The
 canonical MODX group parent for future integration is Resource ID **3**;
 template ID **8** and context `web` are currently confirmed.
 
-No Cabinet application code for this outbound flow has been implemented yet:
-there is no outbound group HTTP client/job, no stored MODX resource ID, and the final field
-mapping has not been approved. Current inbound Stage 11 APIs are unchanged.
+TASK-2026-10-01-03 implements the outbound mapping, HTTPS client, database queue,
+Resource-ID persistence, cover tracking and admin status/manual resync. Approval
+commits before dispatch; later admin content changes update the same Resource.
+Current inbound Stage 11 APIs are unchanged.
 The verified endpoint contract and remaining boundaries are documented in
 `docs/modx-api.md`.
 
@@ -229,8 +230,11 @@ remote identity. Configuration/operations are in `docs/modx-api.md`.
 TASK-2026-10-01-02 implements the Cabinet form/schema, sanitized semantic HTML,
 private covers, structured schedule and local group type/approach/tag relations.
 Complete new content is required on moderation submission/admin creation; legacy
-ordinary edits remain supported. Approval and payment/lifecycle rules are unchanged.
-Outbound group synchronization and MODX cover transport remain unimplemented.
+ordinary edits remain supported. TASK-2026-10-01-03 additionally validates whole
+BYN, owner names, active linked dictionary choices and existing cover on submission,
+admin creation/approval and resync. Approval now queues outbound synchronization;
+payment/lifecycle rules are unchanged. Mapping/outbound phases are implemented;
+real production acceptance remains **not verified**, pending the product owner.
 No production MODX call or deployment was performed for these milestones;
 verification uses Laravel HTTP fakes.
 

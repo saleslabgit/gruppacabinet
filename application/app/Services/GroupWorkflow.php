@@ -27,6 +27,9 @@ class GroupWorkflow
             $data = app(GroupContent::class)->prepare($data, null, (bool) $actor->admin);
             $group = Group::query()->create(Arr::only($data, self::FIELDS) + ($cover ?? []) + ['owner_id' => $owner->id]);
             $this->syncRelations($group, $data);
+            if ($actor->admin) {
+                app(GroupModxReadiness::class)->validate($group);
+            }
             if (! $owner->free) {
                 $group->update(['status' => GroupStatus::AwaitingPayment]);
                 app(PaymentAttempts::class)->createPlacement($group);
@@ -66,22 +69,34 @@ class GroupWorkflow
                     ], $actor);
                 }
             }
+            $contentChanged = $locked->isDirty([...self::FIELDS, 'cover_path']);
             $locked->save();
 
-            $this->syncRelations($locked, $data);
+            $contentChanged = $this->syncRelations($locked, $data) || $contentChanged;
+            if ($submit) {
+                app(GroupModxReadiness::class)->validate($locked);
+            }
+            if ($actor->admin && $contentChanged && ($locked->public_site_resource_id !== null || $locked->status === GroupStatus::Approved)) {
+                app(GroupModxSyncScheduler::class)->schedule($locked);
+            }
             $saved = $submit ? $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user') : $locked;
 
             return [$saved, $oldCover];
         });
     }
 
-    private function syncRelations(Group $group, array $data): void
+    private function syncRelations(Group $group, array $data): bool
     {
+        $changed = false;
         foreach (['approach_ids' => 'approaches', 'tag_ids' => 'tags'] as $field => $relation) {
             if (array_key_exists($field, $data)) {
-                $group->$relation()->sync($data[$field]);
+                $changes = $group->$relation()->sync($data[$field]);
+                $changed = $changed || $changes['attached'] !== [] || $changes['detached'] !== [];
+                $group->unsetRelation($relation);
             }
         }
+
+        return $changed;
     }
 
     public function moderate(Group $group, User $actor, GroupStatus $target, ?string $comment = null): Group
@@ -99,7 +114,25 @@ class GroupWorkflow
                 $locked->update([$field => $comment]);
             }
 
-            return $this->transitions->transition($locked, $target, $actor, 'user', $comment);
+            if ($target === GroupStatus::Approved) {
+                app(GroupModxReadiness::class)->validate($locked);
+            }
+            $saved = $this->transitions->transition($locked, $target, $actor, 'user', $comment);
+            if ($target === GroupStatus::Approved) {
+                app(GroupModxSyncScheduler::class)->schedule($saved);
+            }
+
+            return $saved;
+        });
+    }
+
+    public function syncModx(Group $group, User $actor): void
+    {
+        DB::transaction(function () use ($group, $actor): void {
+            $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            Gate::forUser($actor)->authorize('syncModx', $locked);
+            app(GroupModxReadiness::class)->validate($locked);
+            app(GroupModxSyncScheduler::class)->schedule($locked);
         });
     }
 

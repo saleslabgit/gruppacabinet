@@ -9,7 +9,7 @@ $weekdayOptions = $weekdayOptions ?? \App\Services\GroupContent::DAYS;
 </x-alert>
 @include('shared.group-history')@endif
 @if($admin)
-<x-alert tone="warning">Администратор может редактировать группу независимо от статуса. Изменения опубликованной группы необходимо вручную перенести в каталог.</x-alert>
+<x-alert tone="warning">Администратор может редактировать группу независимо от статуса. Изменения содержимого одобренной группы или группы с MODX Resource ID синхронизируются через очередь. Статус синхронизации доступен в карточке группы.</x-alert>
 @endif
 <form class="editor-form" enctype="multipart/form-data" @if($realGroups ?? false) method="POST" action="{{ $formAction }}" @else data-prototype-form @endif>
 @if($realGroups ?? false)

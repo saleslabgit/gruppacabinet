@@ -25,7 +25,7 @@ class GroupContentFixture
     {
         $dictionary = Dictionary::firstOrCreate(['code' => $code], ['name' => $code]);
 
-        return $dictionary->items()->create(['code' => (string) Str::uuid(), 'name' => 'Synthetic '.$code, 'active' => $active]);
+        return $dictionary->items()->create(['code' => (string) Str::uuid(), 'name' => 'Synthetic '.$code, 'active' => $active, 'modx_value' => (string) Str::uuid()]);
     }
 
     public static function fields(): array

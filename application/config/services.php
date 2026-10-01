@@ -19,6 +19,7 @@ return [
         'token' => env('MODX_TOKEN'),
         'connect_timeout' => env('MODX_CONNECT_TIMEOUT', 5),
         'timeout' => env('MODX_TIMEOUT', 30),
+        'sync_timeout' => env('MODX_SYNC_TIMEOUT', 60),
     ],
 
     'postmark' => [

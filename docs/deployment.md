@@ -309,3 +309,39 @@ psychologist hiding and admin deletion is lost on rollback. A subsequent up()
 again restores all soft-deleted rejected groups, including groups deleted by an
 administrator after the original deployment; the old schema cannot distinguish
 those origins. Retain the normal pre-deployment backup for exact recovery.
+
+## MODX outbound group synchronization (TASK-2026-10-01-03)
+
+Apply additive migration `2026_10_01_000003_add_group_modx_sync` with the normal
+backup/maintenance procedure, rebuild caches and restart workers on the new code.
+The external MODX plugin is already updated by the product owner; no plugin code
+is deployed from this repository. Real MODX end-to-end acceptance is **not verified**.
+
+Rollback of this migration removes remote identities and sync tracking. After live
+synchronization, retain/restore those mappings from backup before re-enabling
+outbound work; do not treat schema rollback/reapply as a safe way to retry creates.
+
+Before live acceptance, the operator must verify:
+
+- private `MODX_BASE_URL` (HTTPS `/api/v1`) and `MODX_TOKEN` with cabinet.sync;
+- `MODX_CONNECT_TIMEOUT=5`, `MODX_SYNC_TIMEOUT=60` (bounded at 60 seconds);
+- `mxheadless_max_body_bytes >= 8388608`, MODX `upload_maxsize >= 5242880`;
+- PHP/web-server request-body limit >= ~10 MiB and writable Media Source 1;
+- database queue worker and scheduler running, shared cache/lock store and prefix;
+- queue retry_after > job timeout (default 90 > 75 seconds); CLI PCNTL/timeouts
+  supported or existing no-PCNTL deployment gate satisfied. Worker default timeout
+  does not override this job's 75-second timeout. Four tries, backoff 60/300/900.
+
+The admin panel shows pending/syncing/synced/failed/conflict and offers async manual
+resync. A queue-insertion outage is `queue_unavailable`; after restoring the worker/
+queue, use the panel to schedule a new revision. Never rotate a create key or edit
+remote IDs arbitrarily to hide conflicts. mxHeadless default idempotency TTL is
+86400 seconds: inspect/reconcile an ambiguous initial create before retrying after
+TTL expiry. There is no documented permanent UUID lookup on the external endpoint.
+See `modx-api.md` for this external limitation and exact mapping/cover contract.
+
+Verify on a synthetic group: approval commits, worker creates parent 3/template 8/
+web/unpublished, local Resource ID persists, all owned TVs/MIGX/image match; admin
+edit updates the same ID and changed covers upload once. Cabinet never writes
+price_usd, SEO/showOnMainPage, publication/deletion flags. Publication stays manual.
+No full JSON, HTML, leader names, paths, base64 or credentials belong in logs.

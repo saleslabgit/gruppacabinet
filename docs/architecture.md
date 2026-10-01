@@ -471,27 +471,43 @@ external contract and deployment prerequisites.
 
 ## Outbound MODX draft synchronization boundary
 
-A new outbound integration is specified for approved groups. The main site runs
+Outbound integration is implemented for approved groups. The main site runs
 MODX 3 with mxHeadless and an externally managed `GruppaCabinetApi` plugin that
 registers protected `POST /api/v1/cabinet/resources/sync` with scope
-`cabinet.sync`. A manual production-site smoke has confirmed that the endpoint
+`cabinet.sync`. The earlier product-owner smoke confirmed that the endpoint
 can create an unpublished Resource and persist ordinary TV values plus a MIGX
 JSON value.
 
-The endpoint accepts two transport sections: scalar `resource` fields and
-`tvs`. Array TV values are JSON-encoded for MIGX. It validates referenced TV
+The endpoint accepts scalar `resource` fields, `tvs` and optional base64 `cover`.
+Array TV values are JSON-encoded for MIGX. It validates referenced TV
 names before writes and wraps Resource + TV persistence in one MODX database
-transaction. The canonical group container for future Cabinet sync is MODX
+transaction. The canonical group container for Cabinet sync is MODX
 Resource parent **3** (not 308), template **8**, context `web`, with
 `published=false` on create.
 
-This external endpoint exists, but the Cabinet outbound HTTP client, queue job,
-MODX resource-ID persistence and final field mapping are **not implemented yet**.
-Those belong to the dedicated follow-up stage in `SPEC.md`. Cabinet must never
-write directly to MODX database tables. See `docs/modx-api.md`.
+TASK-2026-10-01-03 implements `GroupModxReadiness`, `GroupModxPayloadBuilder`,
+`Modx\GroupClient`, `GroupModxSyncScheduler` and `SyncGroupToModx`. Approval
+validation, local status and revision changes share a row-locked transaction;
+after-commit dispatch explicitly selects the database connection. Queue insertion
+failure marks the committed revision failed (`queue_unavailable`). Admin content
+edits and manual resync schedule through the same service. No HTTP occurs in web
+requests or within a database transaction.
 
-The implemented local dictionary/form milestones and planned outbound phases
-are distinguished in `docs/modx-group-sync-plan.md`.
+Jobs carry only group ID/revision, use four tries, 75-second timeout, backoff
+60/300/900 seconds, and a per-group WithoutOverlapping cache lock (120-second lease,
+60-second contention release). They re-read current relationships, skip stale or
+ineligible work, persist attempted key/hash, then send exact JSON outside locks.
+Retries with changed bytes stop as conflicts. Success persists remote identity
+in a short locked transaction, even for a stale in-flight create; only the current
+revision becomes synced. Failures are sanitized and cannot overwrite newer state. Transient errors leave
+the current revision pending during backoff; exhausted retries mark it failed.
+Remote identity is unique and immutable once set. No payload snapshots are stored.
+
+Cover source/path tracking belongs to successful uploaded bytes. Unchanged covers
+reassert remote image path. Cleanup warnings are boolean-only admin diagnostics.
+No publication/deletion/payment/lifecycle side effects were added. Cabinet never
+writes directly to MODX database tables. See `modx-api.md` for mapping, transport,
+external idempotency TTL limitations and production acceptance still unverified.
 
 ## Stage 12 mail boundary
 

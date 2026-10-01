@@ -40,18 +40,18 @@ class GroupWorkflowTest extends TestCase
         parent::setUp();
         Storage::fake('local');
         URL::forceRootUrl('http://localhost');
-        $this->owner = User::query()->create(['email' => 'owner@example.test', 'first_name' => 'Owner', 'status' => 'approved', 'free' => false]);
+        $this->owner = User::query()->create(['email' => 'owner@example.test', 'first_name' => 'Owner', 'last_name' => 'Synthetic', 'status' => 'approved', 'free' => false]);
         $this->admin = User::query()->create(['email' => 'admin@example.test', 'status' => 'approved', 'admin' => true]);
         WebpayFixture::configure();
         Setting::create(['key' => 'placement_price_minor_units', 'type' => 'integer', 'value' => '5000']);
         $ids = [];
         foreach (['group_format', 'gender'] as $code) {
             $dictionary = Dictionary::query()->firstOrCreate(['code' => $code], ['name' => $code]);
-            $ids[$code] = DictionaryItem::query()->create(['dictionary_id' => $dictionary->id, 'code' => 'test', 'name' => 'Test '.$code, 'active' => true])->id;
+            $ids[$code] = DictionaryItem::query()->create(['dictionary_id' => $dictionary->id, 'code' => 'test', 'name' => 'Test '.$code, 'active' => true, 'modx_value' => $code])->id;
         }
         $this->fields = ['title' => 'Тестовая группа', 'description' => 'Описание группы', 'schedule' => 'По средам в 19:00',
             'format_id' => $ids['group_format'], 'gender_id' => $ids['gender'], 'meeting_duration_minutes' => '90',
-            'participant_capacity' => '10', 'meeting_price' => '35,01'];
+            'participant_capacity' => '10', 'meeting_price' => '35,00'];
         $this->fields += GroupContentFixture::fields();
         Setting::query()->create(['key' => SettingService::PLACEMENT_DURATION_DAYS, 'type' => 'integer', 'value' => '37']);
         app(SettingService::class)->invalidate(SettingService::PLACEMENT_DURATION_DAYS);
@@ -97,7 +97,7 @@ class GroupWorkflowTest extends TestCase
         $this->get('/groups/'.$group->id.'/edit')->assertOk()->assertSee('Сохранить изменения')->assertSee('Отправить на модерацию')->assertDontSee('name="public_uuid"', false);
         $this->put('/groups/'.$group->id, $this->fields)->assertRedirect();
         $this->assertSame(GroupStatus::Draft, $group->fresh()->status);
-        $this->assertSame(3501, $group->fresh()->meeting_price);
+        $this->assertSame(3500, $group->fresh()->meeting_price);
         $this->post('/groups/'.$group->id.'/submit', $this->fields)->assertRedirect();
         $this->get('/groups/'.$group->id.'/edit')->assertForbidden();
         foreach (['Первое замечание модератора', 'Второе замечание модератора'] as $comment) {
@@ -265,7 +265,7 @@ class GroupWorkflowTest extends TestCase
         $this->assertSame(GroupStatus::AwaitingPayment, $group->status);
         $this->assertFalse($group->free);
         $this->assertSame($this->admin->id, $group->statusHistory()->sole()->actor_id);
-        $this->get('/admin/groups/'.$group->id.'/edit')->assertOk()->assertDontSee('name="owner_id"', false)->assertDontSee('name="public_uuid"', false)->assertSee('вручную перенести в каталог');
+        $this->get('/admin/groups/'.$group->id.'/edit')->assertOk()->assertDontSee('name="owner_id"', false)->assertDontSee('name="public_uuid"', false)->assertSee('синхронизируются через очередь');
         foreach ([['disabled' => true], ['disabled' => false, 'status' => 'pending'], ['status' => 'rejected'], ['status' => 'approved', 'admin' => true]] as $state) {
             $this->owner->update($state);
             $this->post('/admin/groups', $this->fields + ['owner_id' => $this->owner->id])->assertSessionHasErrors('owner_id');
@@ -368,7 +368,7 @@ class GroupWorkflowTest extends TestCase
         $transitions->shouldReceive('transition')->once()->andThrow(new \RuntimeException('Simulated history persistence failure'));
         $workflow = new GroupWorkflow($transitions, app(SettingService::class));
         try {
-            $workflow->save($group, $this->owner, array_replace($this->fields, ['title' => 'Must roll back', 'meeting_price' => 3501]), true);
+            $workflow->save($group, $this->owner, array_replace($this->fields, ['title' => 'Must roll back', 'meeting_price' => 3500]), true);
             $this->fail('Expected a transition failure');
         } catch (\RuntimeException $exception) {
             $this->assertSame('Simulated history persistence failure', $exception->getMessage());

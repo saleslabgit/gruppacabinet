@@ -82,7 +82,33 @@ class GroupCovers
         }
     }
 
-    private function safeName(string $name): string
+    public function readVerified(#[\SensitiveParameter] Group $group): string
+    {
+        try {
+            $disk = Storage::disk(config('groups.cover_disk'));
+            $limit = min(5242880, (int) config('groups.cover_max_kb') * 1024);
+            if (! $group->cover_path || ! $group->cover_original_name || ! $disk->exists($group->cover_path)
+                || $group->cover_size < 1 || $group->cover_size > $limit
+                || $disk->size($group->cover_path) !== $group->cover_size) {
+                throw new \RuntimeException;
+            }
+            $bytes = $disk->get($group->cover_path);
+            $image = is_string($bytes) ? @getimagesizefromstring($bytes) : false;
+            if (! is_string($bytes) || strlen($bytes) !== $group->cover_size || $image === false
+                || ! in_array($image['mime'], ['image/jpeg', 'image/png', 'image/webp'], true)
+                || ! in_array($image['mime'], config('groups.cover_mime_types'), true)
+                || $image['mime'] !== $group->cover_mime_type
+                || (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes) !== $group->cover_mime_type) {
+                throw new \RuntimeException;
+            }
+
+            return $bytes;
+        } catch (Throwable) {
+            throw ValidationException::withMessages(['cover' => 'Обложка отсутствует или повреждена. Загрузите JPEG, PNG или WebP до 5 МиБ.']);
+        }
+    }
+
+    public function safeName(string $name): string
     {
         $name = basename(str_replace('\\', '/', $name));
         $name = preg_replace('/[\x00-\x1f\x7f]/u', '', $name) ?? '';

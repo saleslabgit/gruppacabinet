@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
+ * @property list<string>|null $meeting_days
  * @property GroupStatus $status
  * @property Carbon|null $published_at
  * @property Carbon|null $expires_at
@@ -48,6 +49,10 @@ class Group extends Model
                 throw new DomainException('A group public UUID cannot be changed.');
             }
 
+            if ($group->exists && $group->getOriginal('public_site_resource_id') !== null && $group->isDirty('public_site_resource_id')) {
+                throw new DomainException('A group MODX Resource ID cannot be changed.');
+            }
+
             $group->accept = AcceptFromStatus::forGroup($group->status);
         });
     }
@@ -64,6 +69,13 @@ class Group extends Model
             'meeting_price' => 'integer',
             'meeting_days' => 'array',
             'cover_size' => 'integer',
+            'public_site_resource_id' => 'integer',
+            'modx_sync_revision' => 'integer',
+            'modx_cover_cleanup_warning' => 'boolean',
+            'modx_sync_requested_at' => 'datetime',
+            'modx_sync_started_at' => 'datetime',
+            'modx_synced_at' => 'datetime',
+            'modx_sync_failed_at' => 'datetime',
             'placement_days' => 'integer',
             'published_at' => 'datetime',
             'expires_at' => 'datetime',

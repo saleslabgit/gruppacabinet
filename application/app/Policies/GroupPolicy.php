@@ -45,6 +45,12 @@ class GroupPolicy
         return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Moderation;
     }
 
+    public function syncModx(User $actor, Group $group): bool
+    {
+        return $actor->admin && $this->view($actor, $group)
+            && in_array($group->status, [GroupStatus::Approved, GroupStatus::Active, GroupStatus::Expired], true);
+    }
+
     public function activate(User $actor, Group $group): bool
     {
         return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Approved;

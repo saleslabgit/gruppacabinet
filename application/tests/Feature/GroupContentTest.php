@@ -35,7 +35,7 @@ class GroupContentTest extends TestCase
         Http::fake();
         Storage::fake('local');
         URL::forceRootUrl('http://localhost');
-        $this->owner = User::create(['email' => 'content@example.test', 'status' => 'approved', 'free' => true]);
+        $this->owner = User::create(['email' => 'content@example.test', 'first_name' => 'Synthetic', 'last_name' => 'Owner', 'status' => 'approved', 'free' => true]);
         $this->admin = User::create(['email' => 'admin-content@example.test', 'status' => 'approved', 'admin' => true]);
         $this->group = app(GroupWorkflow::class)->create($this->owner, $this->owner);
         $this->fields = Fixture::fields() + ['title' => 'Content group', 'description' => '<script>Short plain text</script>',
@@ -164,7 +164,7 @@ class GroupContentTest extends TestCase
         $transitions->shouldReceive('transition')->once()->andThrow(new \RuntimeException('Synthetic transition failure'));
         $workflow = new GroupWorkflow($transitions, app(SettingService::class));
         try {
-            $workflow->save($this->group, $this->owner, array_replace($this->fields, ['title' => 'Rollback',
+            $workflow->save($this->group, $this->owner, array_replace($this->fields, ['title' => 'Rollback', 'meeting_price' => 3500,
                 'approach_ids' => [Fixture::item('group_approach')->id], 'tag_ids' => [Fixture::item('group_tag')->id]]), true);
             $this->fail('Expected failure');
         } catch (\RuntimeException $exception) {

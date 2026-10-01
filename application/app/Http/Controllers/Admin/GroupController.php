@@ -15,6 +15,7 @@ use App\Support\GroupPages;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -106,6 +107,16 @@ class GroupController extends Controller
         $workflow->save($group, $request->user(), $request->content());
 
         return redirect()->route('admin.groups.show', $group)->with('success', 'Изменения сохранены.');
+    }
+
+    public function syncModx(Request $request, Group $group, GroupWorkflow $workflow): RedirectResponse
+    {
+        $workflow->syncModx($group, $request->user());
+        if ($group->fresh()->modx_sync_error_code === 'queue_unavailable') {
+            return redirect()->route('admin.groups.show', $group)->withErrors(['modx_sync' => 'Очередь недоступна. Повторите синхронизацию после её восстановления.']);
+        }
+
+        return redirect()->route('admin.groups.show', $group)->with('success', 'Синхронизация MODX поставлена в очередь.');
     }
 
     public function action(GroupActionRequest $request, Group $group, GroupWorkflow $workflow): RedirectResponse
