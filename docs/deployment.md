@@ -350,12 +350,12 @@ No full JSON, HTML, leader names, paths, base64 or credentials belong in logs.
 
 Deploy additive migration 000004 and restart all content/publication workers together
 so both classes use the shared overlap lock. Do not roll back the migration while
-paused groups exist: it removes the clock/revision metadata. Use existing database
+paused groups exist: it removes the publication/history/revision metadata. Use existing database
 queue/cache and timeouts. No new credentials or external plugin source are included.
 The operator must first supply `/cabinet/resources/publication` per modx-api.md.
 
 Manual external acceptance on a synthetic remote-backed group: pause/unpublish,
-resume/publish same ID, check exact remaining time and normal MODX events/cache;
+resume/publish same ID before expiry, check unchanged end date and normal MODX events/cache;
 repeat and inspect stale work; delete/expire unpublish without Resource deletion or
 refund. Initial approved publication and expired renewal remain manual. Verify
 nonempty currency writes price_usd and empty preserves remote TV. These live checks
@@ -367,3 +367,12 @@ from an operator console after verifying current desired/status. Set a failed cu
 revision back to pending before replay; never rotate an idempotency-conflict key.
 For conflicts, reconcile the same key/body with the MODX operator first. No new
 admin recovery UI is introduced; deleted rows are handled with withTrashed().
+
+Pause controls publication only: expires_at stays unchanged and placement time
+continues. Visible paused groups receive normal expiry warnings and expire at the
+original deadline; psychologist-hidden groups receive no further warning or
+expiration processing, including stale jobs. Resume republishes the same Resource
+only before expiry and preserves the warning marker. A deadline reached during
+publish commits expired plus a newer unpublished revision and queues unpublish
+after commit. Initial publication and expired renewal still require manual
+publication and admin activation. The publication endpoint contract is unchanged.

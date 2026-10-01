@@ -130,7 +130,7 @@ payment table query, provider call or mutation. All 249 prototype variants remai
 
 ## Stage 9 placement lifecycle and free extension
 
-The every-minute `groups:expire` scheduler expires active placements under row
+The every-minute `groups:expire` scheduler expires visible active/paused placements under row
 locks with an idempotent system history transition, including disabled groups.
 Real owner/admin views show remaining days, configured warnings and extension
 windows; the admin expired filter reminds about manual public-site unpublication.
@@ -324,9 +324,18 @@ deployment.md for timeout limits and manual staging verification.
 ## TASK-2026-10-01-04 — pause/publication lifecycle
 
 Cabinet implementation adds form polish, optional currency → price_usd, paused
-lifecycle with frozen placement time, asynchronous resume of the same Resource,
+publication control with unchanged expires_at, asynchronous resume of the same Resource before expiry,
 and automatic unpublication on pause/delete/expiry. Revision guards and shared
 content/publication locks protect queued work. Any visible group can be deleted;
 payments/history remain and no automatic refund occurs. Initial approved publication
 and expired renewal remain manual. External publication endpoint is operator-managed;
 live acceptance is still pending. Exact verification results are in `.ai/report.md`.
+
+Pause controls publication only: expires_at stays unchanged and placement time
+continues. Visible paused groups receive normal expiry warnings and expire at the
+original deadline; psychologist-hidden groups receive no further warning or
+expiration processing, including stale jobs. Resume republishes the same Resource
+only before expiry and preserves the warning marker. A deadline reached during
+publish commits expired plus a newer unpublished revision and queues unpublish
+after commit. Initial publication and expired renewal still require manual
+publication and admin activation. The publication endpoint contract is unchanged.

@@ -865,7 +865,7 @@ runtime их не читает, не записывает и не синхрон
 Отображение: **Активная**
 
 ## `paused`
-Группа на паузе. Время размещения заморожено, заявки не принимаются.
+Группа на паузе и снимается с публикации, заявки не принимаются. Срок размещения продолжает идти; дата окончания не изменяется.
 
 Отображение: **На паузе**
 
@@ -885,9 +885,10 @@ runtime их не читает, не записывает и не синхрон
 | `moderation` | `rejected` | администратор, причина обязательна |
 | `revision` | `moderation` | психолог |
 | `approved` | `active` | администратор |
-| `active` | `expired` | система, по расписанию |
+| `active` | `expired` | система, по расписанию, если группа не скрыта психологом |
 | `active` | `paused` | психолог-владелец |
-| `paused` | `active` | система, только после подтверждённой публикации MODX |
+| `paused` | `active` | система, только после подтверждённой публикации MODX до expires_at |
+| `paused` | `expired` | система, при expires_at <= now, если группа не скрыта психологом |
 | `expired` | `approved` | система, после успешной оплаты продления (см. §16) |
 
 Любой другой переход недопустим и должен приводить к ошибке независимо от того, как он инициирован — через интерфейс, подделанный POST или прямой вызов сервиса.
@@ -1000,11 +1001,11 @@ commit запускается очередь. Resource никогда не уд�
 
 После наступления `expires_at`:
 
-`active → expired`
+`active → expired` / `paused → expired`
 
 Психолог видит статус **Закончена** и кнопку **«Продлить размещение»**.
 
-При истечении срока Resource автоматически снимается с публикации через очередь после commit. Локальный expired сохраняется при сбое MODX. Paused исключён из expiration: срок заморожен. Resource не удаляется.
+При истечении срока Resource автоматически снимается с публикации через очередь после commit. Локальный expired сохраняется при сбое MODX. Видимые active и paused завершаются в исходный expires_at; paused_at очищается. Скрытые психологом группы исключены из предупреждений и автоматического завершения, в том числе при повторной проверке под блокировкой строки. Resource не удаляется.
 
 ---
 
@@ -2635,7 +2636,7 @@ Laravel Scheduler используется для:
 
 Сделать:
 
-- scheduler `active → expired`;
+- scheduler `active → expired` / `paused → expired`;
 - remaining time/date;
 - filter expired with asynchronous publication state;
 - бесплатное продление active/expired для владельцев с текущим `gp_users.free=true`;
@@ -3183,15 +3184,23 @@ credential, работающие database queue worker и scheduler. Реаль�
 
 Only the non-admin owner can pause an enabled active group with an existing MODX
 Resource and future expires_at. POST `/groups/{group}/pause` confirms active → paused,
-records paused_at and requests unpublished after commit. Paused groups do not expire,
-accept participant applications, receive expiry warnings or permit extensions.
+records paused_at and requests unpublished after commit. Pause controls publication
+only: expires_at never changes on pause/resume, and placement time keeps counting down.
+Paused groups reject participant applications and extensions, but visible paused groups
+receive normal expiry warnings and automatically transition paused → expired at the
+original deadline. Expiration clears paused_at and queues a newer unpublished revision.
+Psychologist-hidden groups are excluded from warning selection/delivery/marker updates
+and expiration selection/row-locked rechecks; their retained admin/audit state remains.
 
-POST `/groups/{group}/resume` requests published for the same immutable Resource ID.
-Local status stays paused during pending/retry/failure. Only a successful current
-publication job transitions paused → active as system, clears paused_at and the
-warning marker, and adds `now - paused_at` in exact stored seconds to expires_at.
-The time change, history and publication success marker commit atomically; retries
-cannot extend twice. Duplicate pending resume requests reuse the current revision.
+POST `/groups/{group}/resume` requests published for the same immutable Resource ID
+only while expires_at is future. Local status stays paused until confirmed publication
+or expiration. A successful current publication job rechecks the deadline under lock,
+transitions paused → active as system and clears paused_at, preserving expires_at and
+expiry_warning_sent_at. If already due before HTTP, publish is skipped and the group
+expires. If due during HTTP, the normal system expiration transition and a newer
+unpublished revision commit, then remote unpublish is queued; the old response cannot
+reactivate the group or overwrite the newer intent. History and publication markers
+commit atomically. Duplicate pending resume requests reuse the current revision.
 Initial approved activation and expired renewal still require manual publication;
 manual activation records published locally without HTTP.
 

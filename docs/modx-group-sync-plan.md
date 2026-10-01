@@ -346,15 +346,23 @@ same asynchronous pipeline, including after a successful sync.
 
 Only the non-admin owner can pause an enabled active group with an existing MODX
 Resource and future expires_at. POST `/groups/{group}/pause` confirms active → paused,
-records paused_at and requests unpublished after commit. Paused groups do not expire,
-accept participant applications, receive expiry warnings or permit extensions.
+records paused_at and requests unpublished after commit. Pause controls publication
+only: expires_at never changes on pause/resume, and placement time keeps counting down.
+Paused groups reject participant applications and extensions, but visible paused groups
+receive normal expiry warnings and automatically transition paused → expired at the
+original deadline. Expiration clears paused_at and queues a newer unpublished revision.
+Psychologist-hidden groups are excluded from warning selection/delivery/marker updates
+and expiration selection/row-locked rechecks; their retained admin/audit state remains.
 
-POST `/groups/{group}/resume` requests published for the same immutable Resource ID.
-Local status stays paused during pending/retry/failure. Only a successful current
-publication job transitions paused → active as system, clears paused_at and the
-warning marker, and adds `now - paused_at` in exact stored seconds to expires_at.
-The time change, history and publication success marker commit atomically; retries
-cannot extend twice. Duplicate pending resume requests reuse the current revision.
+POST `/groups/{group}/resume` requests published for the same immutable Resource ID
+only while expires_at is future. Local status stays paused until confirmed publication
+or expiration. A successful current publication job rechecks the deadline under lock,
+transitions paused → active as system and clears paused_at, preserving expires_at and
+expiry_warning_sent_at. If already due before HTTP, publish is skipped and the group
+expires. If due during HTTP, the normal system expiration transition and a newer
+unpublished revision commit, then remote unpublish is queued; the old response cannot
+reactivate the group or overwrite the newer intent. History and publication markers
+commit atomically. Duplicate pending resume requests reuse the current revision.
 Initial approved activation and expired renewal still require manual publication;
 manual activation records published locally without HTTP.
 

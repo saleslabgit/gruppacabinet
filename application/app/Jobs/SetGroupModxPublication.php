@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\GroupStatus;
 use App\Exceptions\ModxGroupSyncException;
 use App\Models\Group;
+use App\Services\GroupLifecycleService;
 use App\Services\GroupStatusTransitionService;
 use App\Services\Modx\GroupClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -45,6 +46,9 @@ class SetGroupModxPublication implements ShouldQueue
                 }
                 $published = $group->modx_publication_desired === 'published';
                 if ($published && ! $this->resumable($group)) {
+                    if (app(GroupLifecycleService::class)->expireOne($group->id)) {
+                        return null;
+                    }
                     throw new ModxGroupSyncException('resume_unavailable');
                 }
                 $group->forceFill(['modx_publication_status' => 'syncing', 'modx_publication_started_at' => now()])->save();
@@ -65,16 +69,18 @@ class SetGroupModxPublication implements ShouldQueue
                 }
                 if ($request['published']) {
                     if (! $this->resumable($group)) {
+                        // Expiration schedules a newer unpublish revision after commit.
+                        // A late publish response must not reactivate an expired placement.
+                        if (app(GroupLifecycleService::class)->expireOne($group->id)) {
+                            return;
+                        }
                         throw new ModxGroupSyncException('resume_unavailable');
                     }
-                    $seconds = max(0, now()->utc()->startOfSecond()->timestamp - $group->paused_at->timestamp);
-                    $group->forceFill(['expires_at' => $group->expires_at->copy()->addSeconds($seconds),
-                        'paused_at' => null, 'expiry_warning_sent_at' => null])->save();
+                    $group->forceFill(['paused_at' => null])->save();
                     // System actor: remote publication, not the earlier web request, completes resume.
                     $group = $transitions->transition($group, GroupStatus::Active);
                 }
-                // This marker and the lifecycle/time change commit atomically. A retry skips a
-                // completed revision, and rollback leaves paused_at intact: time is added once.
+                // The publication marker and lifecycle transition commit atomically.
                 $group->forceFill(['modx_publication_status' => $group->modx_publication_desired,
                     'modx_publication_synced_at' => now(), 'modx_publication_failed_at' => null,
                     'modx_publication_error_code' => null])->save();
@@ -101,7 +107,7 @@ class SetGroupModxPublication implements ShouldQueue
     private function resumable(Group $group): bool
     {
         return ! $group->trashed() && $group->psychologist_deleted_at === null && ! $group->disabled
-            && $group->status === GroupStatus::Paused && $group->paused_at !== null && $group->expires_at !== null;
+            && $group->status === GroupStatus::Paused && $group->paused_at !== null && $group->expires_at !== null && $group->expires_at->isFuture();
     }
 
     public function failed(?Throwable $exception): void

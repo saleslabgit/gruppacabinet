@@ -16,7 +16,7 @@ class GroupLifecycleService
     public function expireDueGroups(): int
     {
         $expired = 0;
-        Group::query()->where('status', GroupStatus::Active)->where('expires_at', '<=', now()->utc())
+        Group::query()->whereIn('status', [GroupStatus::Active, GroupStatus::Paused])->whereNull('psychologist_deleted_at')->where('expires_at', '<=', now()->utc())
             ->select('id')->chunkById(200, function ($groups) use (&$expired): void {
                 foreach ($groups as $group) {
                     $expired += (int) $this->expireOne($group->id);
@@ -30,10 +30,12 @@ class GroupLifecycleService
     {
         return DB::transaction(function () use ($id): bool {
             $group = Group::query()->lockForUpdate()->find($id);
-            if (! $group || $group->status !== GroupStatus::Active || ! $group->expires_at || $group->expires_at->gt(now()->utc())) {
+            if (! $group || ! in_array($group->status, [GroupStatus::Active, GroupStatus::Paused], true)
+                || $group->psychologist_deleted_at !== null || ! $group->expires_at || $group->expires_at->gt(now()->utc())) {
                 return false;
             }
             $expired = $this->transitions->transition($group, GroupStatus::Expired);
+            $expired->forceFill(['paused_at' => null])->save();
             app(GroupModxPublicationScheduler::class)->schedule($expired, false);
 
             return true;
@@ -90,12 +92,12 @@ class GroupLifecycleService
         $data = ['remaining_days' => null, 'warning' => false, 'expiry_due' => false,
             'extension_deadline' => null, 'outside_window' => false, 'can_extend' => false,
             'current_owner_free' => $group->relationLoaded('owner') && $group->owner ? $group->owner->free : false];
-        if (! in_array($group->status, [GroupStatus::Active, GroupStatus::Expired], true)) {
+        if (! in_array($group->status, [GroupStatus::Active, GroupStatus::Paused, GroupStatus::Expired], true)) {
             return $data;
         }
         $context ??= $this->presentationContext();
         if ($group->expires_at) {
-            if ($group->status === GroupStatus::Active) {
+            if (in_array($group->status, [GroupStatus::Active, GroupStatus::Paused], true)) {
                 $seconds = $group->expires_at->timestamp - $context['now']->getTimestamp();
                 $data['remaining_days'] = max(0, (int) ceil($seconds / 86400));
                 $data['expiry_due'] = $seconds <= 0;
@@ -104,7 +106,7 @@ class GroupLifecycleService
                 $data['extension_deadline'] = $group->expires_at->copy()->addDays($context['window_days']);
                 $data['outside_window'] = $context['now']->gt($data['extension_deadline']);
             }
-            $data['can_extend'] = ! $group->disabled && $data['current_owner_free'] && ! $data['outside_window']
+            $data['can_extend'] = $group->status !== GroupStatus::Paused && ! $group->disabled && $data['current_owner_free'] && ! $data['outside_window']
                 && ! $data['expiry_due'] && ($group->status === GroupStatus::Expired || ($group->placement_days > 0
                     && $group->expires_at->copy()->addDays($group->placement_days)->timestamp <= 2147483647));
         }

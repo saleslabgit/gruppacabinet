@@ -68,7 +68,7 @@ class GroupPolicy
     {
         return ! $actor->admin && $this->view($actor, $group) && ! $group->disabled
             && $group->status === GroupStatus::Paused && $group->public_site_resource_id !== null
-            && $group->paused_at !== null && $group->expires_at !== null;
+            && $group->paused_at !== null && $group->expires_at !== null && $group->expires_at->isFuture();
     }
 
     public function delete(User $actor, Group $group): bool

@@ -24,7 +24,7 @@ class GroupPages
 
     public static function listing(Collection $groups): Collection
     {
-        $context = $groups->contains(fn (Group $group) => in_array($group->status, [GroupStatus::Active, GroupStatus::Expired], true))
+        $context = $groups->contains(fn (Group $group) => in_array($group->status, [GroupStatus::Active, GroupStatus::Paused, GroupStatus::Expired], true))
             ? app(GroupLifecycleService::class)->presentationContext() : null;
 
         return $groups->map(fn (Group $group) => self::data($group, $context));

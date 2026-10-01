@@ -76,21 +76,28 @@ class GroupPublicationTest extends TestCase
         app(GroupWorkflow::class)->resume($this->group, $this->owner);
     }
 
-    public function test_pause_resume_preserves_exact_seconds_once_across_repeated_cycles(): void
+    public function test_pause_resume_preserves_original_deadline_and_warning_across_repeated_cycles(): void
     {
         Queue::fake();
+        $this->group->update(['expiry_warning_sent_at' => now()->subHour()]);
+        $warning = $this->group->fresh()->getRawOriginal('expiry_warning_sent_at');
+        $originalExpiry = $this->group->fresh()->getRawOriginal('expires_at');
+        $date = $this->group->expires_at->copy()->timezone('Europe/Minsk')->format('d.m.Y H:i');
         for ($cycle = 0; $cycle < 2; $cycle++) {
             $expiry = $this->group->fresh()->expires_at->timestamp;
             $this->pause();
             $paused = $this->group->fresh();
             $this->assertSame(GroupStatus::Paused, $paused->status);
             $this->assertFalse($paused->accept);
+            $this->assertSame($originalExpiry, $paused->getRawOriginal('expires_at'));
+            $this->actingAs($this->owner)->get('/groups/'.$paused->id)->assertOk()->assertSee($date)
+                ->assertSee('Срок размещения продолжает идти')->assertDontSee('Дата окончания будет сдвинута');
             $this->assertSame('user', $paused->statusHistory()->latest('id')->first()->actor_type);
             $this->assertSame($this->owner->id, $paused->statusHistory()->latest('id')->first()->actor_id);
             $this->assertSame($cycle * 2 + 1, $paused->modx_publication_revision);
             Http::assertSentCount($cycle * 2);
             $this->runJob();
-            $this->travel(40)->days();
+            $this->travel(2)->days();
             $this->travel(17)->seconds();
             $this->assertFalse(app(GroupLifecycleService::class)->expireOne($paused->id));
             $this->resume();
@@ -101,9 +108,11 @@ class GroupPublicationTest extends TestCase
             $this->runJob();
             $active = $paused->fresh();
             $this->assertSame(GroupStatus::Active, $active->status);
-            $this->assertSame($expiry + 40 * 86400 + 17, $active->expires_at->timestamp);
+            $this->assertSame($expiry, $active->expires_at->timestamp);
             $this->assertNull($active->paused_at);
-            $this->assertNull($active->expiry_warning_sent_at);
+            $this->assertSame($warning, $active->getRawOriginal('expiry_warning_sent_at'));
+            $this->assertSame($originalExpiry, $active->getRawOriginal('expires_at'));
+            $this->get('/groups/'.$active->id)->assertOk()->assertSee($date);
             $this->assertSame('system', $active->statusHistory()->latest('id')->first()->actor_type);
             $this->assertSame('published', $active->modx_publication_status);
         }
@@ -114,6 +123,59 @@ class GroupPublicationTest extends TestCase
         Http::assertSent(fn ($r) => $r->url() === 'https://modx.example.test/api/v1/cabinet/resources/publication'
             && $r->body() === '{"resource_id":123,"published":false}'
             && $r->header('Idempotency-Key') === ['group-publication:'.$this->group->public_uuid.':123:1']);
+    }
+
+    public static function resumeDeadlineRaces(): array
+    {
+        return ['before HTTP' => [false, false], 'during HTTP' => [true, false], 'scheduler during HTTP' => [true, true]];
+    }
+
+    #[DataProvider('resumeDeadlineRaces')]
+    public function test_expiry_wins_over_queued_or_inflight_resume(bool $duringHttp, bool $scheduler): void
+    {
+        Queue::fake();
+        $this->group->update(['expires_at' => now()->addSecond()]);
+        $expiry = $this->group->fresh()->getRawOriginal('expires_at');
+        $this->pause();
+        $this->resume();
+        Queue::fake();
+        if ($duringHttp) {
+            $this->fakeHttp(function () use ($scheduler) {
+                $this->travel(1)->seconds();
+                if ($scheduler) {
+                    $this->assertTrue(app(GroupLifecycleService::class)->expireOne($this->group->id));
+                }
+
+                return Http::response(['data' => ['resource_id' => 123, 'published' => true, 'changed' => true], 'meta' => []]);
+            });
+        } else {
+            $this->travel(1)->seconds();
+        }
+        DB::beginTransaction();
+        $this->runJob(2);
+        Queue::assertNothingPushed();
+        DB::commit();
+        Queue::assertPushed(SetGroupModxPublication::class, fn ($job) => $job->revision === 3 && $job->expectedResourceId === 123);
+        $group = $this->group->fresh();
+        $this->assertSame(GroupStatus::Expired, $group->status);
+        $this->assertNull($group->paused_at);
+        $this->assertSame($expiry, $group->getRawOriginal('expires_at'));
+        $this->assertSame('unpublished', $group->modx_publication_desired);
+        $this->assertSame('pending', $group->modx_publication_status);
+        $history = $group->statusHistory()->latest('id')->first();
+        $this->assertSame(GroupStatus::Paused, $history->from_status);
+        $this->assertSame(GroupStatus::Expired, $history->to_status);
+        $this->assertSame('system', $history->actor_type);
+        $this->assertNull($history->actor_id);
+        $this->runJob(2);
+        Http::assertSentCount($duringHttp ? 1 : 0);
+        $this->fakeHttp();
+        $this->runJob(3);
+        Http::assertSent(fn ($request) => $request['published'] === false);
+        $this->runJob(2);
+        $this->assertSame('unpublished', $group->fresh()->modx_publication_status);
+        $this->assertSame(GroupStatus::Expired, $group->fresh()->status);
+        $this->assertSame(2, $group->statusHistory()->count());
     }
 
     public function test_web_actions_owner_only_confirmed_and_truthful_pending_ui(): void
@@ -156,7 +218,7 @@ class GroupPublicationTest extends TestCase
         $this->assertFalse($this->owner->can('pause', $local));
         $this->assertFalse($this->owner->can('resume', $this->group));
         $this->pause();
-        foreach ([['disabled' => true], ['disabled' => false, 'paused_at' => null], ['paused_at' => now(), 'expires_at' => null]] as $changes) {
+        foreach ([['disabled' => true], ['disabled' => false, 'paused_at' => null], ['paused_at' => now(), 'expires_at' => null], ['expires_at' => now()], ['expires_at' => now()->subSecond()]] as $changes) {
             $this->group->refresh()->update($changes);
             $this->actingAs($this->owner)->post('/groups/'.$this->group->id.'/resume', ['confirmed' => 1])->assertForbidden();
         }
@@ -194,7 +256,7 @@ class GroupPublicationTest extends TestCase
         $this->app->instance(GroupStatusTransitionService::class, new GroupStatusTransitionService);
         $this->runJob();
         $this->runJob();
-        $this->assertSame($expiry + 91, $this->group->fresh()->expires_at->timestamp);
+        $this->assertSame($expiry, $this->group->fresh()->expires_at->timestamp);
     }
 
     public function test_stale_unpublish_skips_and_delete_wins_over_inflight_resume(): void

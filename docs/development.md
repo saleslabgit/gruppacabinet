@@ -572,8 +572,10 @@ Use `php artisan test --compact --filter="GroupPublication|ModxGroup|GroupConten
 with the isolated MySQL test database and HTTP fakes. The full suite covers deletion,
 lifecycle concurrency, participant intake, expiry warnings and prototype regressions.
 Synthetic flow: activate manually, pause, confirm local paused immediately, process
-unpublish, advance time, resume (still paused), process publish and check exact saved
-remaining duration. Repeat; retry and delete while resume is pending. A failed
-publish must leave the clock frozen. Test paid deletion without refund and admin
+unpublish, advance time, resume before expiry (still paused), process publish and
+check the original expires_at and warning marker are unchanged. Repeat; retry and
+delete while resume is pending. A failed publish leaves placement time counting down.
+Check paused expiration, paused warnings, hidden-group exclusions, and deadline
+crossing before/during publish: expired plus a newer queued unpublished revision. Test paid deletion without refund and admin
 visibility. Currency old input/empty/max and legacy safe HTML must remain readable.
 No automated real MODX calls; external endpoint acceptance is operator-managed.

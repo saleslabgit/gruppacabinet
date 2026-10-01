@@ -363,3 +363,12 @@ serializes remote writes; row-locked revision checks reject stale local results.
 `meeting_price_currency` → TV price_usd only when nonempty; omission preserves any
 manual/legacy TV. Primary price remains whole BYN. Initial manual publication and
 expired renewal are unchanged; only paused resume automatically publishes.
+
+Pause controls publication only: expires_at stays unchanged and placement time
+continues. Visible paused groups receive normal expiry warnings and expire at the
+original deadline; psychologist-hidden groups receive no further warning or
+expiration processing, including stale jobs. Resume republishes the same Resource
+only before expiry and preserves the warning marker. A deadline reached during
+publish commits expired plus a newer unpublished revision and queues unpublish
+after commit. Initial publication and expired renewal still require manual
+publication and admin activation. The publication endpoint contract is unchanged.

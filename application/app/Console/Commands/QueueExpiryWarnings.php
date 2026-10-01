@@ -25,7 +25,7 @@ class QueueExpiryWarnings extends Command
         $threshold = $now->copy()->addDays($settings->expiryWarningDays());
         $queued = 0;
         $lock = new UniqueLock(app(Repository::class));
-        Group::query()->where('status', GroupStatus::Active)->where('disabled', false)
+        Group::query()->whereIn('status', [GroupStatus::Active, GroupStatus::Paused])->whereNull('psychologist_deleted_at')->where('disabled', false)
             ->where('expires_at', '>', $now)->where('expires_at', '<=', $threshold)
             ->whereNull('expiry_warning_sent_at')
             ->whereHas('owner', fn ($query) => $query->where('admin', false)->where('disabled', false)->where('status', UserStatus::Approved))

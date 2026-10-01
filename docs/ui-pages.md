@@ -727,9 +727,11 @@ confirmation dialogs, responsive primitives and prototype catalogue are retained
 ## Pause, currency and deletion (TASK-2026-10-01-04)
 
 Existing psychologist detail adds confirmed pause for eligible active groups and
-resume for paused. Pending resume is disabled; safe failure allows retry; conflict
-asks for administrator review. The paused summary explains frozen time and excludes
-extension. Admin MODX panel adds desired/status, timestamps and safe diagnostics.
+resume for paused with future expires_at. Pending resume is disabled; safe failure allows retry; conflict
+asks for administrator review. The paused summary explains the continuing countdown to the unchanged placement end
+date and excludes extension. Confirmations promise no additional time. Visible paused
+groups may receive expiry warnings and expire automatically; psychologist-hidden
+groups leave both automated flows. Admin MODX panel adds desired/status, timestamps and safe diagnostics.
 The catalogue now contains 31 page groups / 259 variants. All four group list/detail
 catalogues include `paused`; detail pages add resume-pending/failed/conflict; paid-delete-allowed replaces
 the obsolete paid-delete-blocked prototype. Native textarea/multiple select remain;

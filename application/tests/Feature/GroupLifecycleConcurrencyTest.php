@@ -18,14 +18,14 @@ class GroupLifecycleConcurrencyTest extends TestCase
 
     public static function races(): array
     {
-        return [[false], [true]];
+        return [['active', 'none'], ['active', 'extend'], ['paused', 'none'], ['paused', 'extend'], ['active', 'hide'], ['paused', 'hide']];
     }
 
     #[DataProvider('races')]
-    public function test_concurrent_candidates_wait_for_lock_and_recheck_committed_state(bool $extendWhileLocked): void
+    public function test_concurrent_candidates_wait_for_lock_and_recheck_committed_state(string $status, string $change): void
     {
         $owner = User::create(['email' => 'lock@example.test', 'status' => 'approved']);
-        $group = Group::create(['owner_id' => $owner->id, 'status' => 'active', 'expires_at' => now()->subMinute()]);
+        $group = Group::create(['owner_id' => $owner->id, 'status' => $status, 'expires_at' => now()->subMinute()]);
         $connection = config('database.connections.mysql');
         $env = ['APP_ENV' => 'testing', 'DB_CONNECTION' => 'mysql', 'DB_HOST' => $connection['host'],
             'DB_PORT' => (string) $connection['port'], 'DB_DATABASE' => $connection['database'],
@@ -57,8 +57,11 @@ WORKER;
                 }
                 $this->assertTrue($worker->isRunning());
             }
-            if ($extendWhileLocked) {
+            if ($change === 'extend') {
                 $group->update(['expires_at' => now()->addDay()]);
+            }
+            if ($change === 'hide') {
+                $group->update(['psychologist_deleted_at' => now()]);
             }
             DB::commit();
             $results = [];
@@ -67,9 +70,9 @@ WORKER;
                 $results[] = trim(str_replace("ready\n", '', $worker->getOutput()));
             }
             sort($results);
-            $this->assertSame($extendWhileLocked ? ['0', '0'] : ['0', '1'], $results);
-            $this->assertSame($extendWhileLocked ? GroupStatus::Active : GroupStatus::Expired, $group->fresh()->status);
-            $this->assertSame($extendWhileLocked ? 0 : 1, $group->statusHistory()->count());
+            $this->assertSame($change !== 'none' ? ['0', '0'] : ['0', '1'], $results);
+            $this->assertSame($change !== 'none' ? GroupStatus::from($status) : GroupStatus::Expired, $group->fresh()->status);
+            $this->assertSame($change !== 'none' ? 0 : 1, $group->statusHistory()->count());
         } finally {
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();

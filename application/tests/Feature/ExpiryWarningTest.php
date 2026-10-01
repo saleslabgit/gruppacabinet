@@ -60,7 +60,7 @@ class ExpiryWarningTest extends TestCase
         foreach ([['expires_at' => now()->addDays(3)->addSecond()], ['expires_at' => now()], ['expires_at' => now()->subSecond()], ['expires_at' => null], ['disabled' => true], ['expiry_warning_sent_at' => now()]] as $data) {
             $this->group($data);
         }
-        foreach (['draft', 'approved', 'expired', 'rejected', 'moderation', 'revision', 'paused', 'awaiting_payment'] as $status) {
+        foreach (['draft', 'approved', 'expired', 'rejected', 'moderation', 'revision', 'awaiting_payment'] as $status) {
             $this->group(['status' => $status]);
         }
         $deleted = $this->group();
@@ -75,6 +75,40 @@ class ExpiryWarningTest extends TestCase
         $this->assertDatabaseCount('jobs', 2);
         $this->artisan('groups:queue-expiry-warnings')->expectsOutput('Queued expiry warnings: 0')->assertSuccessful();
         $this->assertDatabaseCount('jobs', 2);
+    }
+
+    public function test_visible_paused_warns_but_hidden_active_and_paused_do_not(): void
+    {
+        foreach (['active', 'paused'] as $status) {
+            $group = $this->group(['status' => $status]);
+            $job = $this->job($group);
+            $group->update(['psychologist_deleted_at' => now()]);
+            $job->handle(app(SettingService::class));
+            $this->assertNull($group->fresh()->expiry_warning_sent_at);
+        }
+        $this->artisan('groups:queue-expiry-warnings')->expectsOutput('Queued expiry warnings: 0')->assertSuccessful();
+        Mail::assertNothingSent();
+        $paused = $this->group(['status' => 'paused', 'paused_at' => now()->subDay()]);
+        $this->artisan('groups:queue-expiry-warnings')->expectsOutput('Queued expiry warnings: 1')->assertSuccessful();
+        $this->assertSame(0, Artisan::call('queue:work', ['connection' => 'database', '--once' => true]));
+        Mail::assertSent(ExpiryWarningMail::class, 1);
+        $this->assertNotNull($paused->fresh()->expiry_warning_sent_at);
+        $this->assertSame(GroupStatus::Paused, $paused->fresh()->status);
+    }
+
+    public function test_hidden_during_mail_cannot_be_marked(): void
+    {
+        foreach (['active', 'paused'] as $status) {
+            $group = $this->group(['status' => $status]);
+            Mail::shouldReceive('to')->once()->andReturnSelf();
+            Mail::shouldReceive('send')->once()->andReturnUsing(function () use ($group) {
+                $group->update(['psychologist_deleted_at' => now()]);
+
+                return SuccessfulMailFake::receipt();
+            });
+            $this->job($group)->handle(app(SettingService::class));
+            $this->assertNull($group->fresh()->expiry_warning_sent_at);
+        }
     }
 
     public function test_owner_eligibility_and_disabled_group_reenable(): void
@@ -99,7 +133,7 @@ class ExpiryWarningTest extends TestCase
 
     public function test_job_rechecks_stale_state_and_current_threshold(): void
     {
-        foreach ([['status' => 'expired'], ['status' => 'paused'], ['expires_at' => now()->addDays(10)], ['expires_at' => now()], ['expiry_warning_sent_at' => now()], ['disabled' => true], ['deleted_at' => now()]] as $change) {
+        foreach ([['status' => 'expired'], ['psychologist_deleted_at' => now()], ['expires_at' => now()->addDays(10)], ['expires_at' => now()], ['expiry_warning_sent_at' => now()], ['disabled' => true], ['deleted_at' => now()]] as $change) {
             $group = $this->group();
             $job = $this->job($group);
             $group->update($change);

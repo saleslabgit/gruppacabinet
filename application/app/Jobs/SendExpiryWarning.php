@@ -44,7 +44,8 @@ class SendExpiryWarning implements ShouldBeUnique, ShouldQueue
         Log::info('mail.expiry_warning.started', $context);
         $group = Group::query()->with('owner')->find($this->groupId);
         $now = now()->utc();
-        if (! $group || $group->status !== GroupStatus::Active || $group->disabled
+        if (! $group || ! in_array($group->status, [GroupStatus::Active, GroupStatus::Paused], true)
+            || $group->psychologist_deleted_at !== null || $group->disabled
             || ! $group->expires_at || $group->expires_at->utc()->format('Y-m-d H:i:s') !== $this->expectedExpiry
             || $group->expires_at->lte($now) || $group->expires_at->gt($now->copy()->addDays($settings->expiryWarningDays()))
             || $group->expiry_warning_sent_at !== null || ! $group->owner || $group->owner->admin
@@ -70,7 +71,8 @@ class SendExpiryWarning implements ShouldBeUnique, ShouldQueue
         }
         DB::transaction(function (): void {
             $group = Group::query()->lockForUpdate()->find($this->groupId);
-            if ($group && $group->status === GroupStatus::Active && $group->expiry_warning_sent_at === null
+            if ($group && in_array($group->status, [GroupStatus::Active, GroupStatus::Paused], true)
+                && $group->psychologist_deleted_at === null && $group->expiry_warning_sent_at === null
                 && $group->expires_at?->utc()->format('Y-m-d H:i:s') === $this->expectedExpiry) {
                 $group->update(['expiry_warning_sent_at' => now()->utc()]);
             }

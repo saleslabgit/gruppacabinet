@@ -90,12 +90,35 @@ class GroupLifecycleTest extends TestCase
         $this->noSideEffects();
     }
 
+    public function test_paused_deadline_and_hidden_groups_are_rechecked(): void
+    {
+        $future = $this->group(['status' => 'paused', 'paused_at' => now(), 'expires_at' => now()->addSecond()]);
+        $due = $this->group(['status' => 'paused', 'paused_at' => now()->subDay(), 'expires_at' => now()]);
+        $hidden = [];
+        foreach (['active', 'paused'] as $status) {
+            $hidden[] = $this->group(['status' => $status, 'psychologist_deleted_at' => now(), 'expires_at' => now()]);
+        }
+        $this->artisan('groups:expire')->expectsOutput('Expired groups: 1')->assertSuccessful();
+        $this->assertSame(GroupStatus::Paused, $future->fresh()->status);
+        $this->assertFalse(app(GroupLifecycleService::class)->expireOne($future->id));
+        $this->assertSame(GroupStatus::Expired, $due->fresh()->status);
+        $this->assertNull($due->fresh()->paused_at);
+        $this->assertSame(GroupStatus::Paused, $due->statusHistory()->sole()->from_status);
+        $this->assertSame('system', $due->statusHistory()->sole()->actor_type);
+        foreach ($hidden as $group) {
+            $this->assertFalse(app(GroupLifecycleService::class)->expireOne($group->id));
+            $this->assertSame($group->status, $group->fresh()->status);
+            $this->assertSame(0, $group->statusHistory()->count());
+        }
+        $this->noSideEffects();
+    }
+
     public function test_ignored_candidates_and_recheck_after_candidate_was_extended(): void
     {
         $null = $this->group(['expires_at' => null]);
         $deleted = $this->group(['expires_at' => now()->subDay()]);
         $deleted->delete();
-        foreach (['draft', 'moderation', 'revision', 'approved', 'rejected', 'expired', 'paused', 'awaiting_payment'] as $status) {
+        foreach (['draft', 'moderation', 'revision', 'approved', 'rejected', 'expired', 'awaiting_payment'] as $status) {
             $this->group(['status' => $status, 'expires_at' => now()->subDay()]);
         }
         $candidate = $this->group(['expires_at' => now()]);

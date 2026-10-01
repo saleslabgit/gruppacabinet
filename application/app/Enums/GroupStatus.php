@@ -23,7 +23,7 @@ enum GroupStatus: string
             self::Revision => $target === self::Moderation,
             self::Approved => $target === self::Active,
             self::Active => in_array($target, [self::Expired, self::Paused], true),
-            self::Paused => $target === self::Active,
+            self::Paused => in_array($target, [self::Active, self::Expired], true),
             self::Expired => $target === self::Approved,
             self::Rejected => false,
         };

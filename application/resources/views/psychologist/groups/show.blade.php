@@ -34,12 +34,12 @@
 </x-panel>
 @if(($canPause ?? false) || (!($realGroups ?? false) && $group['status'] === 'active'))
 <x-confirmation id="pause-group" title="Поставить группу на паузу?" action="Поставить на паузу" kind="primary" :url="($realGroups ?? false) ? route('psychologist.groups.pause', $group['id']) : null">
-<p>Группа будет снята с публикации на основном сайте. Время размещения остановится, приём заявок прекратится.</p>
+<p>Группа будет снята с публикации на основном сайте. Приём заявок прекратится. Дата окончания размещения не изменится.</p>
 </x-confirmation>
 @endif
 @if(($canResume ?? false) || (!($realGroups ?? false) && $group['status'] === 'paused'))
 <x-confirmation id="resume-group" title="Возобновить публикацию?" action="Возобновить публикацию" kind="primary" :url="($realGroups ?? false) ? route('psychologist.groups.resume', $group['id']) : null">
-<p>После подтверждения публикации на основном сайте группа станет активной. Оставшееся время размещения сохранится.</p>
+<p>После подтверждения публикации на основном сайте группа станет активной. Возобновление доступно только до окончания размещения. Дата окончания не изменится.</p>
 </x-confirmation>
 @endif
 @include('shared.group-history')@include('shared.group-delete')
