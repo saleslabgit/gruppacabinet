@@ -272,66 +272,31 @@ The follow-up Cabinet implementation must:
 8. Keep `approved → active` in Cabinet as the action that starts placement dates.
 9. Never access MODX database tables directly.
 
-## Planned dictionary endpoint
+## Verified dictionary endpoint
 
-The next external prerequisite is a protected read endpoint:
+The protected `GET /api/v1/cabinet/dictionaries` endpoint is installed and was
+manually verified on 2026-10-01 with scope `cabinet.sync`.
 
-```http
-GET /api/v1/cabinet/dictionaries
-Authorization: Bearer <mxHeadless API key>
-```
+Verified live MODX contract:
 
-Scope: `cabinet.sync`.
+| Key | TV id | Type | Count | Stored values |
+|---|---:|---|---:|---|
+| `format` | 35 | `listbox` | 2 | `Офлайн`, `Онлайн` |
+| `gender` | 39 | `listbox` | 3 | display strings |
+| `groupType` | 37 | `listbox` | 23 | numeric strings |
+| `approaches` | 36 | `listbox-multiple` | 23 | numeric strings |
+| `tags` | 30 | `listbox-multiple` | 105 | numeric strings |
 
-It will expose only the fixed whitelist:
+The endpoint returns resolved ordered `{value,label,position}` options and
+`data.complete=true`. MODX `listbox-multiple` stores selected values joined
+with `||`.
 
-```text
-format
-gender
-groupType
-approaches
-tags
-```
+Labels are not identities. The live tag data contains duplicate labels with
+different values, including `зависимость` (51/105), `психосоматика` (30/57)
+and `подростки` (88/102). Cabinet must identify remote options by the owning
+dictionary plus exact stored `value`, never by label.
 
-The endpoint must return the **resolved** MODX input options, not raw TV
-`elements` or binding source text. MODX input rendering resolves TV elements
-through `processBindings(...)` and then parses `||` options; an option
-`Label==storedValue` has a display label and an exact stored value. Cabinet
-needs those two values separately.
-
-Target response shape:
-
-```json
-{
-  "data": {
-    "complete": true,
-    "dictionaries": {
-      "format": {
-        "tv_id": 1,
-        "type": "listbox",
-        "options": [
-          {"value": "Офлайн", "label": "Офлайн", "position": 0}
-        ]
-      },
-      "tags": {
-        "tv_id": 2,
-        "type": "listbox-multiple",
-        "options": [
-          {"value": "77", "label": "Example tag", "position": 0}
-        ]
-      }
-    }
-  }
-}
-```
-
-If a required TV is missing, its binding cannot be resolved, or duplicate stored
-values make the result ambiguous, the request must fail rather than return a
-partial response marked complete. The endpoint must not accept an arbitrary TV
-name from the caller.
-
-Cabinet-side synchronization of these options is planned in
-`docs/modx-group-sync-plan.md`; it is not implemented yet.
+Cabinet-side synchronization is the next implementation milestone.
 
 ## Planned cover transport
 
