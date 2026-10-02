@@ -41,6 +41,9 @@ class PasswordRecoveryController extends Controller
             $user = User::query()->where('email', $email)->first();
             if (PasswordSetupService::eligible($user)) {
                 $setup->invite($user->id);
+            } else {
+                // Match DatabaseTokenRepository's configured hash cost without storing a token.
+                app('hash')->make(Str::random(64));
             }
         } catch (Throwable $exception) {
             // Public outcome must not disclose an eligible account during an outage.

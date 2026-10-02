@@ -8,6 +8,11 @@ Email normalization matches login (trim and lowercase). Malformed input gets syn
 validation only. POST limits are five/minute/IP and one/minute/normalized email
 (SHA-256 key), applied equally to existing and unknown accounts. The rate-limit
 page returns 429 with retry headers; diagnostics never include plaintext email.
+For valid input, eligible accounts incur the real broker token hash; unknown or
+ineligible accounts hash a fresh dummy value through the same configured framework
+hasher, with no per-call cost override. The dummy hash is discarded without a
+token row or queued job. This removes the cryptographic-work differential, not
+all variation from database/queue work or infrastructure failures.
 
 ## Broker and setup flow
 

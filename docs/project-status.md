@@ -25,7 +25,7 @@ in `.ai/report.md`.
 
 ## Stage 3 frontend prototypes
 
-The final Blade view tree covers all 31 page groups with 249 direct catalog
+The final Blade view tree covers all 32 page groups with 263 direct catalog
 variants, shared layouts/components, local Montserrat 500/600 with Cyrillic,
 shared CSS tokens, responsive lists/forms, and confirmation dialogs.
 The Stage 3 visual revision separates page/section/card typography, reduces
@@ -47,8 +47,8 @@ soft-deleted accounts lose access; SessionInvalidator supports later bulk
 session revocation and rotates remember tokens.
 
 The psychologist home now renders real owned groups and creation (Stage 7). The admin home renders an unavailable-work-queue state without
-fixture counts. Real navigation has CSRF-protected POST logout. The 31 groups /
-249 prototype variants remain local/testing only. The old DB diagnostic moved
+fixture counts. Real navigation has CSRF-protected POST logout. The current 32 groups /
+263 prototype variants remain local/testing only. The old DB diagnostic moved
 to local/testing-only `/_foundation`.
 
 Idempotent local/testing seeding includes approved admin and psychologist
@@ -69,7 +69,7 @@ are stored privately with random paths, content MIME validation and authorized
 nested-owner view/download/delete endpoints. Uploads have a configurable
 10 MiB technical ceiling. Stage 12 now adds queued first-password invitations after approval.
 
-The same Blade files retain all 31 prototype groups / 249 variants. Real admin
+The same Blade files currently cover all 32 prototype groups / 263 variants. Real admin
 navigation now also exposes Payments, Dictionaries and Settings (Stage 8). New MySQL tests cover CRUD,
 protected fields, audit, session revocation, IDOR, file failures and constant
 list query counts. No migrations or dependencies were added.

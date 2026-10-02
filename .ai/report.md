@@ -4,129 +4,115 @@ Status: done
 
 ## Summary
 
-Добавлено самостоятельное восстановление пароля через GET/POST `/password/forgot`
-и «Забыли пароль?» на login. Публичный ответ одинаков для существующего,
-неизвестного, недоступного аккаунта и сбоя очереди; проверяется только синтаксис
-email. Нормализация соответствует login. Ограничения: 5 запросов/мин/IP и
-1 запрос/мин по SHA-256 нормализованного email, независимо от наличия аккаунта.
+Внесена корректировка timing privacy после review `e93689b`.
+Неизвестный или недоступный аккаунт после успешной проверки синтаксиса email
+выполняет один `app('hash')->make(Str::random(64))`: тот же контейнерный framework
+hasher и настроенная стоимость, которые получает DatabaseTokenRepository.
+Случайное значение и результат сразу отбрасываются; fake user, token row, job,
+новые логи или искусственные задержки не добавлены.
 
-Существующие PasswordSetupService, Laravel PasswordBroker/DatabaseTokenRepository,
-password_reset_tokens, TTL и database queue используются для первой установки
-и замены пароля. Новая ссылка заменяет старую. Успешное завершение под блокировкой
-пользователя меняет пароль через hashed cast, вызывает SessionInvalidator и удаляет
-токен. Завершаются только сессии целевого пользователя, меняется remember_token;
-его текущая браузерная сессия также выходит. Автовхода нет.
+Ветка доступного аккаунта по-прежнему вызывает существующий `invite()`.
+Broker, row lock, token replacement, rollback, очередь, TTL, eligibility,
+сессии, rate limits и публичные ответы не изменены.
 
-Администратор может отправить ссылку доступному психологу независимо от наличия
-пароля. Новый audit action — user.password_link_sent; исторический
-user.password_setup_resent продолжает отображаться. Автоматическое приглашение
-после approval остаётся только для аккаунтов без пароля. Нейтральные HTML/text
-письма подходят для onboarding и recovery; ограничения SMTP/sendmail сохранены.
+Текущие сводки каталога исправлены на 32 группы / 263 варианта. Исторические
+описания состава старых этапов не переписывались.
 
 ## Changed Files
 
-- PasswordRecoveryController (новый), web routes, AppServiceProvider и
-  bootstrap/app.php: форма/валидация/общий ответ, лимиты и безопасное отображение 429.
-- PasswordSetupService, PasswordSetupController, PsychologistActions:
-  общая eligibility без password-null, транзакционная смена пароля и sessions,
-  сохранение after-commit onboarding.
-- Admin PsychologistController, admin/users/show: новое название действия и audit.
-- auth/password-forgot (новый), login/password, mail/password-setup HTML/text:
-  существующие layout/components, восстановление и нейтральный текст письма.
-- PrototypeCatalog/Fixtures: четыре новых состояния; 32 группы / 263 варианта.
-- PasswordRecoveryTest (новый), PasswordSetupTest, PrototypeTest: публичная
-  приватность, лимиты, токены, отказ очереди, сессии, авторизация, mail и UI.
-- SPEC.md; docs/email, architecture, development, deployment, project-status,
-  ui-pages: актуальный password recovery flow и эксплуатационные границы.
-- .ai/report.md: этот отчёт. .ai/task.md, WORKFLOW и AGENTS не изменены.
+- `application/app/Http/Controllers/PasswordRecoveryController.php` — три строки
+  для dummy hash в неизвестной/недоступной ветке.
+- `application/tests/Feature/PasswordRecoveryTimingTest.php` — 19 deterministic
+  HTTP tests: восемь состояний × bcrypt/Argon2id, malformed/throttle, свежесть
+  dummy values, rollback и безопасная диагностика при отказе очереди.
+- `docs/ui-pages.md`, `docs/project-status.md` — актуальные сводки 32/263,
+  включая текущие формулировки local/testing и повторного использования Blade.
+- `docs/email.md` — механизм одинаковой криптографической работы и его границы.
+- `.ai/report.md` — отчёт этой корректирующей итерации.
 
 ## Checks
 
-Проверки выполнены в изолированной копии `/tmp/password-check` локального
-PHP 8.2.32 контейнера; MySQL 8.4, выделенная БД `gruppa_cabinet_test`.
-Исходный код смонтирован read-only. Env/private/storage/cache файлы проекта не
-копировались; тестовая копия использует пустой `.env` и синтетические настройки.
-Для subprocess-тестов DB_CONNECTION/HOST/PORT/DATABASE/USERNAME/PASSWORD из
-phpunit.xml явно переданы через docker exec -e; APP_ENV=testing, синтетический
-APP_KEY, MAIL_MAILER=array. Mail fake исключает реальные SMTP/sendmail вызовы; HTTP preventStrayRequests
-сохранён. Production env, включая `.env_save`, не читались.
+Изолированная копия `/tmp/timing-check` локального PHP 8.2.32 контейнера;
+MySQL 8.4, выделенная `gruppa_cabinet_test`. Исходники смонтированы read-only.
+Env/private/storage/cache файлы проекта исключены из копирования; использован
+пустой тестовый `.env`. DB-настройки из phpunit.xml и синтетический APP_KEY
+переданы через environment, в том числе дочерним PHP-процессам.
 
-- `php artisan test --compact --filter="PasswordRecoveryTest|PasswordSetupTest|AuthenticationTest|PsychologistAdminTest|PrototypeTest|DeploymentPreflightTest|PolicyTest" --log-junit=/tmp/password-regression.xml`
-  — **115 passed, 2354 assertions**, 22.13 s; failures/errors/skips: 0/0/0.
-- Первый полный suite: 712 passed, 4 failed, 7751 assertions, 624.40 s.
-  Три IntegrationConcurrencyTest и один SharedHostingRuntimeTest не получили
-  DB-настройки родительского PHPUnit: subprocess подключался к 127.0.0.1.
-  После передачи локальных настроек через environment:
-  `php artisan test --compact --filter="IntegrationConcurrencyTest|SharedHostingRuntimeTest" --log-junit=/tmp/password-environment.xml`
-  — **6 passed, 93 assertions**, 62.11 s. Код этих подсистем не менялся.
-- `php artisan test --compact --log-junit=/tmp/password-full-final.xml`
-  — **716 passed, 7864 assertions**, 599.32 s; failures/errors/skips: **0/0/0**.
-  Включены все классы без exclusions; исправлены только настройки тестового окружения.
-- `php vendor/bin/pint --test` — **PASS, 213 files**.
+- `php artisan test --compact --filter=PasswordRecoveryTimingTest --log-junit=/tmp/timing-focused.xml`
+  — **19 passed, 295 assertions**, 9.12 s.
+- `php artisan test --compact --filter="PasswordRecoveryTest|PasswordSetupTest|AuthenticationTest|PsychologistAdminTest|PrototypeTest|DeploymentPreflightTest|ExpiryWarningTest|SharedHostingRuntimeTest" --log-junit=/tmp/timing-regression.xml`
+  — **136 passed, 2619 assertions**, 78.50 s.
+- `php artisan test --compact --log-junit=/tmp/timing-full.xml`
+  — **735 passed, 8143 assertions**, 679.74 s; failures/errors/skips: **0/0/0**.
+  Выполнены все классы, без exclusions.
+- `php vendor/bin/pint --test` — **PASS, 214 files**.
 - `php vendor/bin/phpstan analyse --no-progress --memory-limit=512M` — **No errors**.
 - `composer check-platform-reqs` — все требования **success**.
 - `composer validate --no-check-publish` — **composer.json is valid**.
 - `php artisan view:cache` — **Blade templates cached successfully**.
-- `php artisan route:list --path=password -v` — семь маршрутов, включая
-  recovery GET/POST, setup GET/POST, admin POST и два prototype routes.
-  Middleware recovery/setup/admin проверены; существующие guards сохранены.
-- `CACHE_STORE=array php artisan schedule:list` — **PASS**, пять прежних команд.
-  Запуск списка не выполнял scheduled commands. Первая попытка без изолированного
-  cache store использовала отсутствующую default SQLite; после настройки прошла.
-- `git diff --check` / `git diff --cached --check` — exit 0.
-  Просмотрены diff и 26 staged implementation/docs файлов; нет env/private,
-  production data, mail captures, logs/cache/vendor или временных артефактов.
-  Каталоги app/routes/resources/views/tests и bootstrap/app.php тестовой копии
-  побайтово совпали с исходными файлами (diff -qr/cmp).
+- `php artisan route:list --path=password -v` — **PASS**, семь прежних routes,
+  включая recovery/setup/admin и два prototype routes; middleware сохранены.
+- `CACHE_STORE=array php artisan schedule:list` — **PASS**, пять прежних команд;
+  scheduled commands не запускались.
+- `git diff --check` / `git diff --cached --check` — exit 0. Полный diff и
+  состав staged-файлов проверены: только текущая корректировка и отчёт, без
+  env/private/production data, tokens, queue dumps, captures, logs/cache/vendor
+  и временных артефактов. App/tests/routes/Blade/bootstrap тестовой копии
+  побайтово совпали с исходниками (diff -qr/cmp).
 
-| Полный класс из финального JUnit | Tests | Assertions | Failures/errors/skips |
-|---|---:|---:|---|
-| PasswordRecoveryTest | 23 | 254 | 0/0/0 |
-| PasswordSetupTest | 22 | 270 | 0/0/0 |
-| AuthenticationTest | 25 | 208 | 0/0/0 |
-| PsychologistAdminTest | 15 | 263 | 0/0/0 |
-| PrototypeTest | 10 | 1207 | 0/0/0 |
-| DeploymentPreflightTest | 20 | 152 | 0/0/0 |
-| ExpiryWarningTest | 18 | 239 | 0/0/0 |
-| SharedHostingRuntimeTest | 3 | 26 | 0/0/0 |
-| IntegrationConcurrencyTest | 3 | 67 | 0/0/0 |
+Полные классы из финального JUnit (failures/errors/skips везде 0/0/0):
 
-HTTP feature tests проходят через реальные routes, middleware, CSRF/policy и Blade.
-Проверены database queue insertion, token rollback при сбое очереди, stale jobs,
-production base-path URL, безопасная диагностика, прежние transports, оба варианта
-password presence, login новым/отказ старым паролем, отзыв только целевых sessions,
-выход текущего пользователя и сохранение чужой авторизации. Все 263 прототипных
-варианта рендерятся без БД; новый prototype не отправляет формы.
+| Класс | Tests | Assertions |
+|---|---:|---:|
+| PasswordRecoveryTimingTest | 19 | 295 |
+| PasswordRecoveryTest | 23 | 254 |
+| PasswordSetupTest | 22 | 270 |
+| AuthenticationTest | 25 | 208 |
+| PsychologistAdminTest | 15 | 263 |
+| PrototypeTest | 10 | 1207 |
+| DeploymentPreflightTest | 20 | 152 |
+| ExpiryWarningTest | 18 | 239 |
+| SharedHostingRuntimeTest | 3 | 26 |
 
-Начальные итерации выявили ошибки новых fixtures/base-path тестовых URL и
-статического типа logoutCurrentDevice; исправлены. Отсутствующий `.env` в тестовой
-копии давал предупреждения раннера; пустой синтетический файл устранил их.
+Новые тесты наблюдают вызовы реального framework hash manager через proxy,
+делегируя actual make настроенным Laravel bcrypt/Argon2id drivers. Проверены
+один вызов make, отсутствие per-call overrides и metadata фактических хешей
+(bcrypt cost 6 либо Argon2id memory/time/threads 1024/2/1 в тестах). Broker получает
+тот же объект hasher. Для доступного аккаунта наблюдаемый hash сохранён в реальном
+password_reset_tokens и работает через broker; для остальных states записей/jobs нет.
+Проверены свежесть dummy input, отсутствие dummy input/hash в сессии и логах,
+отказ очереди с сохранением старого токена и прежним публичным ответом.
+Wall-clock thresholds и sleep-based assertions не применялись.
+
+Полные regression-классы проверяют первые приглашения, замену существующего
+пароля, login старым/новым паролем, одноразовость, отзыв целевых сессий,
+CSRF/policy, base-path URLs, mail transports и generic body/status/headers.
+Все 263 prototype states проверены серверным рендерингом.
 
 ## Facts
 
-- Исходный HEAD `a4b7180` — planner текущей задачи, parent
-  `a632e01cc5776c57d568d9592196782a18203d2b` подтверждён.
-- Исходное дерево чистое; WORKFLOW/AGENTS/task/предыдущий report и необходимые
-  код/тесты/Blade/CSS/docs изучены до реализации.
-- Context7 consulted для named multi-limit API; совместимость проверена по
-  установленному Laravel framework. Новых зависимостей и миграций нет.
-- **Реальных внешних писем не отправлялось.** MODX/WEBPAY/intake и production
-  артефакты не изменялись; внешний live smoke не выполнялся.
+- Исходный HEAD `b42ecbc` — corrective planner; parent
+  `e93689ba2e81aad6c990c38cb1d2ae67eba0e248` подтверждён; дерево было чистым.
+- Прочитаны WORKFLOW/AGENTS/task/report, изучены исходный implementation diff,
+  controller/service, установленный DatabaseTokenRepository/HashManager,
+  recovery tests, каталог и связанные документы.
+- `.ai/task.md`, AGENTS, WORKFLOW, Blade/CSS, broker, policy, limiter и session
+  implementation не изменены; пакетов и миграций не добавлено.
+- **Реальных внешних писем не отправлялось.** Тесты используют mail/HTTP fakes;
+  реальных SMTP/sendmail/MODX/WEBPAY вызовов не выполнялось.
+- Production/private env, включая `.env_save`, не читались и не изменялись.
 
 ## Assumptions
 
-Новых продуктовых предположений нет; реализованы явные решения задачи.
+Дополнительных продуктовых предположений нет; применён preferred design задачи.
 
 ## Unknowns
 
-Browser smoke не выполнен: Playwright MCP не смог запустить отсутствующий
-Chromium executable. Новая страница наследует существующие responsive CSS и
-компоненты; browser desktop/tablet/mobile проверка визуального результата остаётся
-непроверенной. Реальная доставка во входящие не проверялась и задачей не разрешена.
+Live email/integration delivery не проверялась: внешние вызовы запрещены задачей.
+Изменений интерфейса нет; отдельный browser smoke для этой коррекции не проводился.
 
 ## Risks / Next Step
 
-Обязательные automated/runtime проверки пройдены; результат готов к task commit.
-Отдельная визуальная проверка desktop/tablet/mobile в браузере с установленным
-Chromium остаётся непроверенной. Доставка ссылки зависит от database worker и
-SMTP/sendmail; при инфраструктурном сбое публичный ответ намеренно остаётся общим.
+Обязательные проверки пройдены; корректировка готова к task commit.
+Коррекция устраняет различие дорогой криптографической работы; она не обещает абсолютного равенства времени DB/queue/network операций
+или инфраструктурных отказов.
