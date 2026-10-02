@@ -53,7 +53,7 @@ class PsychologistActions
                 $user->delete();
             }
             $this->audit->record('user', $user->id, 'user.'.$action, $metadata, $actor);
-            if ($action === 'approved' && PasswordSetupService::eligible($user)) {
+            if ($action === 'approved' && $user->password === null && PasswordSetupService::eligible($user)) {
                 DB::afterCommit(function () use ($user): void {
                     try {
                         app(PasswordSetupService::class)->invite($user->id);

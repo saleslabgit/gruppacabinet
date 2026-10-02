@@ -161,7 +161,7 @@ class PsychologistController extends Controller
             return redirect()->route('admin.psychologists.show', $psychologist)->withErrors(['action' => 'Не удалось поставить письмо в очередь. Повторите отправку позже.']);
         }
 
-        return redirect()->route('admin.psychologists.show', $psychologist)->with('success', 'Письмо со ссылкой установки пароля поставлено в очередь.');
+        return redirect()->route('admin.psychologists.show', $psychologist)->with('success', 'Письмо со ссылкой для нового пароля поставлено в очередь.');
     }
 
     public function action(PsychologistActionRequest $request, User $psychologist, PsychologistActions $actions): RedirectResponse

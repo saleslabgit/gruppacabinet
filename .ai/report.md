@@ -1,113 +1,132 @@
-# Report: TASK-2026-10-01-05
+# Report: TASK-2026-10-02-01
 
 Status: done
 
 ## Summary
 
-Исправлена семантика паузы: она управляет только публикацией, не меняет expires_at
-и не сбрасывает expiry_warning_sent_at. Видимые paused-группы получают обычные
-предупреждения и завершаются в исходный срок. Скрытые психологом группы исключены
-из выбора и повторных проверок предупреждений/expiration.
+Добавлено самостоятельное восстановление пароля через GET/POST `/password/forgot`
+и «Забыли пароль?» на login. Публичный ответ одинаков для существующего,
+неизвестного, недоступного аккаунта и сбоя очереди; проверяется только синтаксис
+email. Нормализация соответствует login. Ограничения: 5 запросов/мин/IP и
+1 запрос/мин по SHA-256 нормализованного email, независимо от наличия аккаунта.
 
-Возобновление допускается только до окончания размещения. При достижении срока
-до HTTP публикация пропускается; при достижении во время HTTP выполняется обычный
-system-переход paused → expired и создаётся новая unpublished revision с отправкой
-после commit. Устаревший ответ не может восстановить active или затереть новое намерение.
+Существующие PasswordSetupService, Laravel PasswordBroker/DatabaseTokenRepository,
+password_reset_tokens, TTL и database queue используются для первой установки
+и замены пароля. Новая ссылка заменяет старую. Успешное завершение под блокировкой
+пользователя меняет пароль через hashed cast, вызывает SessionInvalidator и удаляет
+токен. Завершаются только сессии целевого пользователя, меняется remember_token;
+его текущая браузерная сессия также выходит. Автовхода нет.
+
+Администратор может отправить ссылку доступному психологу независимо от наличия
+пароля. Новый audit action — user.password_link_sent; исторический
+user.password_setup_resent продолжает отображаться. Автоматическое приглашение
+после approval остаётся только для аккаунтов без пароля. Нейтральные HTML/text
+письма подходят для onboarding и recovery; ограничения SMTP/sendmail сохранены.
 
 ## Changed Files
 
-- GroupStatus, GroupPolicy, GroupLifecycleService: paused → expired, future-expiry
-  resume guard, row-locked hidden/status/date rechecks, очистка paused_at,
-  countdown для paused без возможности продления.
-- SetGroupModxPublication: удалено добавление длительности паузы; повторная
-  проверка срока до/после HTTP использует существующий lifecycle service.
-  Revision/Resource ID/shared lock/retry/after-commit границы сохранены.
-- QueueExpiryWarnings, SendExpiryWarning: active/paused с исключением hidden,
-  включая финальную блокировку перед записью warning marker.
-- GroupPages и существующие show/summary Blade: исходная дата, продолжающийся
-  отсчёт и исправленные подтверждения; структура страниц/CSS не менялись.
-- GroupPublicationTest, ExpiryWarningTest, GroupLifecycleTest,
-  GroupLifecycleConcurrencyTest, StatusTransitionMatrixTest: неизменность даты
-  и marker, повторные паузы, deadline races, stale revisions, paused warnings,
-  hidden rechecks и конкурентное завершение/скрытие.
-- SPEC и docs: architecture, development, deployment, modx-api,
-  modx-group-sync-plan, project-status, ui-pages — исправлены утверждения о сроке.
+- PasswordRecoveryController (новый), web routes, AppServiceProvider и
+  bootstrap/app.php: форма/валидация/общий ответ, лимиты и безопасное отображение 429.
+- PasswordSetupService, PasswordSetupController, PsychologistActions:
+  общая eligibility без password-null, транзакционная смена пароля и sessions,
+  сохранение after-commit onboarding.
+- Admin PsychologistController, admin/users/show: новое название действия и audit.
+- auth/password-forgot (новый), login/password, mail/password-setup HTML/text:
+  существующие layout/components, восстановление и нейтральный текст письма.
+- PrototypeCatalog/Fixtures: четыре новых состояния; 32 группы / 263 варианта.
+- PasswordRecoveryTest (новый), PasswordSetupTest, PrototypeTest: публичная
+  приватность, лимиты, токены, отказ очереди, сессии, авторизация, mail и UI.
+- SPEC.md; docs/email, architecture, development, deployment, project-status,
+  ui-pages: актуальный password recovery flow и эксплуатационные границы.
+- .ai/report.md: этот отчёт. .ai/task.md, WORKFLOW и AGENTS не изменены.
 
 ## Checks
 
-PHP 8.2.32 / MySQL 8.4; изолированная копия `/tmp/modx-group-check` в локальном
-PHP-контейнере, выделенная БД `gruppa_cabinet_test`. Тесты используют HTTP fakes и
-глобальный preventStrayRequests. SHA-256 всех 14 изменённых application-файлов
-совпал с финальной тестовой копией.
+Проверки выполнены в изолированной копии `/tmp/password-check` локального
+PHP 8.2.32 контейнера; MySQL 8.4, выделенная БД `gruppa_cabinet_test`.
+Исходный код смонтирован read-only. Env/private/storage/cache файлы проекта не
+копировались; тестовая копия использует пустой `.env` и синтетические настройки.
+Для subprocess-тестов DB_CONNECTION/HOST/PORT/DATABASE/USERNAME/PASSWORD из
+phpunit.xml явно переданы через docker exec -e; APP_ENV=testing, синтетический
+APP_KEY, MAIL_MAILER=array. Mail fake исключает реальные SMTP/sendmail вызовы; HTTP preventStrayRequests
+сохранён. Production env, включая `.env_save`, не читались.
 
-- Focused: `php artisan test --compact --filter="GroupPublicationTest|ExpiryWarningTest|GroupLifecycleTest|GroupLifecycleConcurrencyTest|StatusTransitionMatrixTest"`
-  — **194 passed, 1046 assertions**, 68.34 s. После этого уточнён порядок проверки
-  resumable/expireOne и текст summary; финальное состояние включено в полный suite.
-- Полный suite: `php artisan test --compact --log-junit=/tmp/pause-timing-full.xml`
-  — **693 passed, 7512 assertions**, 590.57 s; failures/errors/skips: **0/0/0**.
-- `php vendor/bin/pint --test` — **PASS, 211 files**.
-  Предварительная попытка `pint --dirty` в копии без Git не поддерживается;
-  форматирование не запускалось, полный `--test` прошёл.
+- `php artisan test --compact --filter="PasswordRecoveryTest|PasswordSetupTest|AuthenticationTest|PsychologistAdminTest|PrototypeTest|DeploymentPreflightTest|PolicyTest" --log-junit=/tmp/password-regression.xml`
+  — **115 passed, 2354 assertions**, 22.13 s; failures/errors/skips: 0/0/0.
+- Первый полный suite: 712 passed, 4 failed, 7751 assertions, 624.40 s.
+  Три IntegrationConcurrencyTest и один SharedHostingRuntimeTest не получили
+  DB-настройки родительского PHPUnit: subprocess подключался к 127.0.0.1.
+  После передачи локальных настроек через environment:
+  `php artisan test --compact --filter="IntegrationConcurrencyTest|SharedHostingRuntimeTest" --log-junit=/tmp/password-environment.xml`
+  — **6 passed, 93 assertions**, 62.11 s. Код этих подсистем не менялся.
+- `php artisan test --compact --log-junit=/tmp/password-full-final.xml`
+  — **716 passed, 7864 assertions**, 599.32 s; failures/errors/skips: **0/0/0**.
+  Включены все классы без exclusions; исправлены только настройки тестового окружения.
+- `php vendor/bin/pint --test` — **PASS, 213 files**.
 - `php vendor/bin/phpstan analyse --no-progress --memory-limit=512M` — **No errors**.
-- `php /tmp/group-composer.phar check-platform-reqs` — все требования **success**.
-- `php /tmp/group-composer.phar validate --no-check-publish` — **composer.json is valid**.
+- `composer check-platform-reqs` — все требования **success**.
+- `composer validate --no-check-publish` — **composer.json is valid**.
 - `php artisan view:cache` — **Blade templates cached successfully**.
-- `php artisan schedule:list` — успешно, пять существующих scheduled commands,
-  включая groups:expire и groups:queue-expiry-warnings; просмотр расписания
-  не запускал команды. Их выполнение проверено в тестах.
-- `git diff --check` — exit 0. Полный diff просмотрен; состав staged-файлов
-  проверен перед commit, секреты и посторонние артефакты не добавлены.
+- `php artisan route:list --path=password -v` — семь маршрутов, включая
+  recovery GET/POST, setup GET/POST, admin POST и два prototype routes.
+  Middleware recovery/setup/admin проверены; существующие guards сохранены.
+- `CACHE_STORE=array php artisan schedule:list` — **PASS**, пять прежних команд.
+  Запуск списка не выполнял scheduled commands. Первая попытка без изолированного
+  cache store использовала отсутствующую default SQLite; после настройки прошла.
+- `git diff --check` / `git diff --cached --check` — exit 0.
+  Просмотрены diff и 26 staged implementation/docs файлов; нет env/private,
+  production data, mail captures, logs/cache/vendor или временных артефактов.
+  Каталоги app/routes/resources/views/tests и bootstrap/app.php тестовой копии
+  побайтово совпали с исходными файлами (diff -qr/cmp).
 
-HTTP feature tests проверяют реальные Blade страницы/POST actions, неизменную дату
-через повторные pause/resume, авторизацию и состояния публикации. Время пересекает
-expires_at внутри fake HTTP callback, с запуском планировщика и без него; проверены
-новая revision, system history, after-commit dispatch и исполнение unpublish.
-Конкурентные expireOne проверены независимыми процессами/соединениями MySQL,
-включая hidden-state recheck после освобождения блокировки.
-
-Полные обязательные классы из финального JUnit (без exclusions):
-
-| Класс | Tests | Assertions | Failures/errors/skips |
+| Полный класс из финального JUnit | Tests | Assertions | Failures/errors/skips |
 |---|---:|---:|---|
+| PasswordRecoveryTest | 23 | 254 | 0/0/0 |
+| PasswordSetupTest | 22 | 270 | 0/0/0 |
+| AuthenticationTest | 25 | 208 | 0/0/0 |
+| PsychologistAdminTest | 15 | 263 | 0/0/0 |
+| PrototypeTest | 10 | 1207 | 0/0/0 |
+| DeploymentPreflightTest | 20 | 152 | 0/0/0 |
 | ExpiryWarningTest | 18 | 239 | 0/0/0 |
-| GroupContentMigrationTest | 2 | 127 | 0/0/0 |
-| GroupContentTest | 17 | 217 | 0/0/0 |
-| GroupLifecycleConcurrencyTest | 6 | 115 | 0/0/0 |
-| GroupLifecycleTest | 20 | 318 | 0/0/0 |
-| GroupPublicationTest | 24 | 233 | 0/0/0 |
-| GroupWorkflowTest | 50 | 658 | 0/0/0 |
-| IntegrationIntakeTest | 25 | 625 | 0/0/0 |
-| ModxGroupClientTest | 57 | 298 | 0/0/0 |
-| ModxGroupSyncTest | 28 | 236 | 0/0/0 |
-| PaymentEraGroupsTest | 4 | 54 | 0/0/0 |
-| PrototypeTest | 9 | 1164 | 0/0/0 |
-| WebpayConcurrencyTest | 6 | 138 | 0/0/0 |
-| WebpayTest | 26 | 272 | 0/0/0 |
+| SharedHostingRuntimeTest | 3 | 26 | 0/0/0 |
+| IntegrationConcurrencyTest | 3 | 67 | 0/0/0 |
+
+HTTP feature tests проходят через реальные routes, middleware, CSRF/policy и Blade.
+Проверены database queue insertion, token rollback при сбое очереди, stale jobs,
+production base-path URL, безопасная диагностика, прежние transports, оба варианта
+password presence, login новым/отказ старым паролем, отзыв только целевых sessions,
+выход текущего пользователя и сохранение чужой авторизации. Все 263 прототипных
+варианта рендерятся без БД; новый prototype не отправляет формы.
+
+Начальные итерации выявили ошибки новых fixtures/base-path тестовых URL и
+статического типа logoutCurrentDevice; исправлены. Отсутствующий `.env` в тестовой
+копии давал предупреждения раннера; пустой синтетический файл устранил их.
 
 ## Facts
 
-- Исходный HEAD `1c8ccd7ad2e569839c46392ff369663e190814ae` — planner текущей задачи;
-  parent `695ee2e6e234a177a12b3dd00b53540157c045ae` подтверждён.
-- Перед изменениями выполнены git log/status, прочитаны WORKFLOW/AGENTS/task/report,
-  изучены TASK-04 diff, соответствующие код/тесты/docs/Blade/CSS. Исходное дерево чистое.
-- `.ai/task.md`, WORKFLOW и AGENTS не изменены.
-- Editor/currency/payment/delete реализации TASK-04 сохранены; no remote delete,
-  no auto-refund. Первичная публикация и expired renewal остаются ручными.
-- **Реальный MODX publication endpoint не вызывался.** Внешний контракт не изменён;
-  пакеты, миграции, внешний plugin source и private artifacts не добавлялись.
+- Исходный HEAD `a4b7180` — planner текущей задачи, parent
+  `a632e01cc5776c57d568d9592196782a18203d2b` подтверждён.
+- Исходное дерево чистое; WORKFLOW/AGENTS/task/предыдущий report и необходимые
+  код/тесты/Blade/CSS/docs изучены до реализации.
+- Context7 consulted для named multi-limit API; совместимость проверена по
+  установленному Laravel framework. Новых зависимостей и миграций нет.
+- **Реальных внешних писем не отправлялось.** MODX/WEBPAY/intake и production
+  артефакты не изменялись; внешний live smoke не выполнялся.
 
 ## Assumptions
 
-Новых продуктовых предположений нет; применены явные правила TASK-05.
+Новых продуктовых предположений нет; реализованы явные решения задачи.
 
 ## Unknowns
 
-Поведение live MODX не проверялось: реальные запросы запрещены задачей.
+Browser smoke не выполнен: Playwright MCP не смог запустить отсутствующий
+Chromium executable. Новая страница наследует существующие responsive CSS и
+компоненты; browser desktop/tablet/mobile проверка визуального результата остаётся
+непроверенной. Реальная доставка во входящие не проверялась и задачей не разрешена.
 
 ## Risks / Next Step
 
-Обязательные проверки пройдены; результат готов к task commit.
-Отдельный визуальный browser smoke не проводился;
-страницы проверены серверными HTTP feature tests и компиляцией Blade. Снятие
-публикации остаётся асинхронным и зависит от доступности очереди/MODX; локальный
-expired и новая unpublished revision сохраняются независимо от удалённого ответа.
+Обязательные automated/runtime проверки пройдены; результат готов к task commit.
+Отдельная визуальная проверка desktop/tablet/mobile в браузере с установленным
+Chromium остаётся непроверенной. Доставка ссылки зависит от database worker и
+SMTP/sendmail; при инфраструктурном сбое публичный ответ намеренно остаётся общим.

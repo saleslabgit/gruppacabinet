@@ -9,6 +9,7 @@ final class PrototypeCatalog
     {
         return [
             'login' => ['title' => 'Вход', 'view' => 'auth.login', 'variants' => ['normal', 'validation', 'error', 'rate-limit', 'disabled']],
+            'password-forgot' => ['title' => 'Восстановление пароля', 'view' => 'auth.password-forgot', 'variants' => ['normal', 'validation', 'success', 'rate-limit']],
             'password' => ['title' => 'Установка пароля', 'view' => 'auth.password', 'variants' => ['normal', 'validation', 'expired', 'invalid', 'success', 'long']],
             'errors' => ['title' => 'Системные ошибки', 'view' => 'errors.403', 'variants' => ['403', '404', '419', '429', '500']],
             'notices' => ['title' => 'Уведомления и подтверждения', 'view' => 'shared.notices', 'variants' => ['success', 'validation', 'warning', 'danger', 'confirmation', 'long']],

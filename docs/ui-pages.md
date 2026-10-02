@@ -639,8 +639,9 @@ UI/UX-аудит рекомендуется следующей продукто�
 Реальная форма имеет CSRF, серверную валидацию и существующие состояния
 недействительной/истёкшей ссылки и успешной установки. Автовхода нет.
 На реальной карточке психолога в меню действий доступна отправка ссылки только
-для approved/enabled/non-admin/password-null аккаунта. История показывает
-повторную отправку. CSS, иерархия действий и 31/249 прототипов сохранены.
+для approved/enabled/non-admin/non-deleted аккаунта независимо от наличия пароля.
+История отображает новые `user.password_link_sent` и прежние `user.password_setup_resent`.
+CSS и иерархия действий сохранены; новый каталог восстановления описан ниже.
 
 
 ## Real WEBPAY wiring
@@ -732,7 +733,7 @@ asks for administrator review. The paused summary explains the continuing countd
 date and excludes extension. Confirmations promise no additional time. Visible paused
 groups may receive expiry warnings and expire automatically; psychologist-hidden
 groups leave both automated flows. Admin MODX panel adds desired/status, timestamps and safe diagnostics.
-The catalogue now contains 31 page groups / 259 variants. All four group list/detail
+At the group-pause milestone the catalogue contained 31 page groups / 259 variants. All four group list/detail
 catalogues include `paused`; detail pages add resume-pending/failed/conflict; paid-delete-allowed replaces
 the obsolete paid-delete-blocked prototype. Native textarea/multiple select remain;
 removed helper copy is absent. Toolbar keeps Bold/Italic/UL/OL/Remove formatting;
@@ -741,3 +742,22 @@ safe stored headings, quotes and links are preserved.
 Under «Условия участия», optional «Стоимость встречи (В валюте)» uses the existing
 input/grid with «Цена одной встречи с указанием валюты». Detail shows nonempty values.
 Deletion confirms automatic unpublication and no automatic refund in every status.
+
+## 32. Восстановление пароля — TASK-2026-10-02-01
+
+View: `application/resources/views/auth/password-forgot.blade.php`.
+Реальные GET/POST `/cabinet/password/forgot` доступны по «Забыли пароль?» на login.
+Общие public layout, auth-wrap, panel, input, validation-summary, button и alert;
+адаптивная ширина и типографика наследуются от существующей auth-страницы.
+
+- `/cabinet/_prototype/password-forgot/normal`
+- `/cabinet/_prototype/password-forgot/validation`
+- `/cabinet/_prototype/password-forgot/success`
+- `/cabinet/_prototype/password-forgot/rate-limit`
+
+Success не раскрывает наличие/состояние аккаунта и не утверждает доставку письма.
+Rate-limit предлагает повторить запрос через минуту. Есть возврат к login;
+прототипы остаются no-op и доступны только local/testing. Password form просит
+новый пароль, а invalid/expired предлагает самостоятельное восстановление.
+Admin action называется «Отправить ссылку для нового пароля» и доступен для
+подходящего аккаунта с паролем или без него. Каталог: **32 группы / 263 варианта**.

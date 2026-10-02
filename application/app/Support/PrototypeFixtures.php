@@ -148,7 +148,7 @@ final class PrototypeFixtures
         }
         $data = compact('slug', 'variant', 'links', 'admin', 'long', 'date', 'group', 'groups', 'user', 'application', 'payment', 'navigation', 'errors');
         $data += ['title' => PrototypeCatalog::pages()[$slug]['title'], 'prototype' => true, 'empty' => in_array($variant, ['empty', 'no-results', 'pre-webpay'], true), 'pages' => [1 => route('prototype.'.$slug), 2 => route('prototype.'.$slug, ['variant' => in_array('pagination', PrototypeCatalog::pages()[$slug]['variants'], true) ? 'pagination' : PrototypeCatalog::pages()[$slug]['variants'][0]])], 'currentPage' => $variant === 'pagination' ? 2 : 1];
-        if ($variant === 'success' && ! in_array($slug, ['password', 'notices'], true)) {
+        if ($variant === 'success' && ! in_array($slug, ['password', 'password-forgot', 'notices'], true)) {
             $data['notice'] = ['tone' => 'success', 'text' => 'Изменения сохранены. Демонстрационное состояние.'];
         }
 

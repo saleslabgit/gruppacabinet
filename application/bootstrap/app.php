@@ -60,6 +60,9 @@ return Application::configure(basePath: dirname(__DIR__))
                 return response('Unavailable', 503);
             }
             if ($request->routeIs('password.*')) {
+                if ($request->routeIs('password.forgot.store') && $exception instanceof HttpResponseException) {
+                    return $exception->getResponse();
+                }
                 $status = $exception instanceof HttpExceptionInterface ? $exception->getStatusCode() : 500;
 
                 return response('Не удалось выполнить запрос. Попробуйте позже или обратитесь к администратору.', $status)

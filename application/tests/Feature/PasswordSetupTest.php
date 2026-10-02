@@ -132,7 +132,7 @@ class PasswordSetupTest extends TestCase
 
             return $this->setup->valid($query['email'], basename(parse_url($mail->setupUrl, PHP_URL_PATH)));
         });
-        $entry = AuditLog::where('action', 'user.password_setup_resent')->sole();
+        $entry = AuditLog::where('action', 'user.password_link_sent')->sole();
         $this->assertSame($this->admin->id, $entry->actor_id);
         $this->assertNull($entry->metadata);
         $this->actingAs($this->admin)->post($url)->assertStatus(429);
@@ -140,7 +140,7 @@ class PasswordSetupTest extends TestCase
 
     public static function ineligible(): array
     {
-        return [['pending'], ['rejected'], ['disabled'], ['deleted'], ['admin'], ['password']];
+        return [['pending'], ['rejected'], ['disabled'], ['deleted'], ['admin']];
     }
 
     #[DataProvider('ineligible')]
@@ -152,7 +152,6 @@ class PasswordSetupTest extends TestCase
         } else {
             $this->user->update(match ($state) {
                 'pending', 'rejected' => ['status' => $state],
-                'password' => ['password' => 'Synthetic-only-password'],
                 default => [$state => true],
             });
         }

@@ -32,6 +32,7 @@
 <x-input name="password" label="Пароль" type="password" autocomplete="current-password" :required="true" :error="$fieldErrors['password'] ?? null" />
 <x-button icon="box-arrow-in-right" class="w-100" :data-noop="$prototype" :type="$prototype ? 'button' : 'submit'" :disabled="$variant === 'disabled'">Войти</x-button>
 </form>
+<p class="mt-4"><a href="{{ $prototype ? $links['password-forgot'] : route('password.forgot') }}">Забыли пароль?</a></p>
 </x-panel>
 </div>
 @endsection

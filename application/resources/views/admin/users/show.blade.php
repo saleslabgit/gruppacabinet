@@ -25,12 +25,12 @@
 </li>
 @if(!$prototype && auth()->user()->can('passwordSetup', $psychologist))
 <li><form method="POST" action="{{ route('admin.psychologists.password-setup', $psychologist) }}">@csrf
-<button type="submit" class="dropdown-item">Отправить ссылку установки пароля</button>
+<button type="submit" class="dropdown-item">Отправить ссылку для нового пароля</button>
 </form></li>
 @endif
 @if($prototype && $user['status'] === 'approved')
 <li>
-<button type="button" class="dropdown-item" data-noop>Повторно отправить установку пароля</button>
+<button type="button" class="dropdown-item" data-noop>Отправить ссылку для нового пароля</button>
 </li>
 @endif
 <li>
@@ -67,7 +67,7 @@
 @if(!$prototype)
 @foreach($history as $entry)
 <li>
-<strong>{{ ['user.approved'=>'Анкета принята','user.rejected'=>'Анкета отклонена','user.enabled'=>'Доступ включён','user.disabled'=>'Доступ отключён','user.tariff_changed'=>'Тариф изменён','user.deleted'=>'Психолог удалён','user.password_setup_resent'=>'Повторная отправка ссылки установки пароля'][$entry->action] ?? 'Действие администратора' }}</strong>
+<strong>{{ ['user.approved'=>'Анкета принята','user.rejected'=>'Анкета отклонена','user.enabled'=>'Доступ включён','user.disabled'=>'Доступ отключён','user.tariff_changed'=>'Тариф изменён','user.deleted'=>'Психолог удалён','user.password_setup_resent'=>'Повторная отправка ссылки установки пароля','user.password_link_sent'=>'Отправка ссылки для нового пароля'][$entry->action] ?? 'Действие администратора' }}</strong>
 @if(isset($entry->metadata['old_free']))
 <p class="actions"><x-tariff :free="$entry->metadata['old_free']" /><span aria-label="изменён на">→</span><x-tariff :free="$entry->metadata['new_free']" /></p>
 @endif

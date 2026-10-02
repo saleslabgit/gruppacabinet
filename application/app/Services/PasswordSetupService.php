@@ -12,12 +12,11 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class PasswordSetupService
 {
-    public function __construct(private SettingService $settings) {}
+    public function __construct(private SettingService $settings, private SessionInvalidator $sessions) {}
 
     public function broker(): PasswordBroker
     {
@@ -35,7 +34,7 @@ class PasswordSetupService
     public static function eligible(?User $user): bool
     {
         return $user && ! $user->admin && ! $user->disabled && ! $user->trashed()
-            && $user->status === UserStatus::Approved && $user->password === null;
+            && $user->status === UserStatus::Approved;
     }
 
     public function invite(int $userId, ?User $actor = null): void
@@ -62,7 +61,7 @@ class PasswordSetupService
                 });
             }
             if ($actor) {
-                app(AuditService::class)->record('user', $user->id, 'user.password_setup_resent', [], $actor);
+                app(AuditService::class)->record('user', $user->id, 'user.password_link_sent', [], $actor);
             }
         });
     }
@@ -85,7 +84,8 @@ class PasswordSetupService
             if (! $broker->tokenExists($user, $token)) {
                 return false;
             }
-            $user->update(['password' => $password, 'remember_token' => Str::random(60)]);
+            $user->update(['password' => $password]);
+            $this->sessions->invalidate($user);
             $broker->deleteToken($user);
 
             return true;

@@ -167,7 +167,9 @@ UserStatusTransitionService; invalid/repeated actions produce validation errors
 without audit/state changes. Soft deletion preserves related records. Tariff
 changes never rewrite group snapshots. Human-readable audit history includes
 actors (including soft-deleted actors), dates and relevant state changes.
-Create/approve do not set a password, send mail or dispatch jobs.
+Create/approve never assign a password. Approval of an eligible password-null
+account queues the initial password link after commit (Stage 12); later recovery
+and admin sending reuse the same broker flow.
 
 PsychologistDocumentController and PsychologistDocuments use the private
 `local` disk at `storage/app/private`. Automatic local storage serving is
@@ -515,7 +517,12 @@ external idempotency TTL limitations and production acceptance still unverified.
 current typed TTL; standard password_reset_tokens stores only token hashes.
 Approval registers an after-commit invitation, while token replacement and the
 database queue insert share a separate atomic transaction. Resend and setup
-serialize on the user row. Setup consumes the token without automatic login.
+serialize on the user row. Public `/password/forgot` uses the same invitation
+transaction for eligible accounts with or without passwords and returns a generic
+success even for unknown/ineligible accounts or infrastructure failure. IP and
+hashed normalized email rate limits are account-independent. Admin sending uses
+the same eligibility. Completion writes the password, invalidates only the target
+user’s sessions/remember state and consumes the token without automatic login.
 
 Dedicated jobs recheck eligibility and stale tokens/placement periods before
 SMTP. Expiry warning uniqueness uses Laravel UniqueLock/ShouldBeUnique for

@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Services\PasswordSetupService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class PasswordSetupController extends Controller
 {
@@ -43,6 +45,11 @@ class PasswordSetupController extends Controller
             return $this->page('normal', $email, $token, $validator->errors()->messages(), 422);
         }
         $success = $setup->complete($email, $token, $request->string('password')->toString());
+        if ($success && $request->user() && Str::lower($request->user()->email) === Str::lower($email)) {
+            Auth::logoutCurrentDevice();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         return $this->page($success ? 'success' : 'invalid', status: $success ? 200 : 422);
     }

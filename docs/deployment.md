@@ -376,3 +376,14 @@ only before expiry and preserves the warning marker. A deadline reached during
 publish commits expired plus a newer unpublished revision and queues unpublish
 after commit. Initial publication and expired renewal still require manual
 publication and admin activation. The publication endpoint contract is unchanged.
+
+## Password recovery
+
+`/password/forgot` reuses the existing broker, token table and configured setup TTL;
+no migration or separate reset store is required. Public responses are generic for
+unknown/ineligible email and queue failures. IP and hashed-email rate limits need
+the shared cache. Admin sending is allowed for eligible psychologists regardless
+of an existing password. New links replace old ones; completion invalidates target
+database sessions and remember state. Onboarding remains supported. Keep database
+queue/SMTP or sendmail operational; never log passwords, tokens, reset URLs or
+recipients. Queue/transport acceptance does not guarantee inbox delivery.

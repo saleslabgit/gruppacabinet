@@ -245,8 +245,12 @@ Stage 12 is complete and verified locally; verification details are in `.ai/repo
 Queued first-password invitations follow committed admin approval. Admin resend
 replaces the broker token and invalidates older queued invitations. The real
 password Blade page validates current eligibility and typed TTL, consumes tokens,
-hashes passwords and supports normal login afterward. No public reset request or
-password replacement is provided.
+hashes passwords and supports normal login afterward. Self-service recovery is now
+available at `/password/forgot` with a generic account-existence-safe response and
+IP/email throttling. The same broker/token table supports existing-password
+replacement and admin sending for eligible accounts. Successful completion revokes
+target sessions and remember state without affecting other users or auto-login.
+Mail remains database-queued through SMTP/sendmail; sensitive mail data is not logged.
 
 Hourly expiry warnings use database jobs and a shared unique lock for each exact
 placement period. Jobs recheck current state, then mark only after successful

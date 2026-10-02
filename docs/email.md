@@ -1,8 +1,13 @@
-# Email and first-password setup (Stage 12)
+# Email, password setup and recovery
 
-Only approved, enabled, non-deleted psychologists whose password is null may
-set their first password. There is no forgot-password endpoint, self-service
-resend, or password replacement for an already configured account.
+Approved, enabled, non-deleted, non-admin psychologists may set or replace their
+password regardless of whether one is already configured. Login links to the public
+GET/POST `/password/forgot` recovery form. Unknown/ineligible accounts and queue
+failures receive the same generic success page; only eligible accounts get a job.
+Email normalization matches login (trim and lowercase). Malformed input gets syntax
+validation only. POST limits are five/minute/IP and one/minute/normalized email
+(SHA-256 key), applied equally to existing and unknown accounts. The rate-limit
+page returns 429 with retry headers; diagnostics never include plaintext email.
 
 ## Broker and setup flow
 
@@ -18,29 +23,36 @@ Laravel 12's `isPast()` boundary accepts the exact expiry instant and rejects
 any instant after it; timestamps are stored with second precision. Increasing
 TTL can make an unconsumed older token valid again. There is no TTL snapshot.
 
-After approval commits, an invitation transaction locks the user, replaces the
-broker token and inserts one database job. Mail delivery never runs in that
-transaction.
+After approval of an eligible password-null account commits, an invitation
+transaction locks the user, replaces the broker token and inserts one database
+job. Mail delivery never runs in that transaction.
 An infrastructure failure logs only a technical message and user ID; approval
-stays committed. Admin resend is the recovery path. Token replacement and queue
-insert are atomic on the application's database connection. Keep
+stays committed. Self-service recovery and admin sending reuse this transaction.
+Token replacement and queue insert are atomic on the application's database connection. Keep
 `DB_QUEUE_CONNECTION` unset so the database queue uses that same connection.
 
 - GET `/password/setup/{token}?email=...` validates current eligibility/token.
 - POST `/password/setup` validates email, token and confirmed 8–255 character
   password, rechecks under a user row lock, writes through the hashed cast,
-  rotates remember_token and deletes the token in the same transaction.
+  invalidates all target database sessions through SessionInvalidator, rotates
+  remember_token and deletes the token in the same transaction. Other users’
+  sessions remain unchanged.
 - Both routes share 10 requests/minute/IP. No auto-login occurs.
 - Admin POST `/admin/psychologists/{id}/password-setup` requires account/admin
   middleware, policy, Form Request and CSRF; limit is one/minute/admin/target.
   It replaces the previous token immediately on successful commit and writes
-  `user.password_setup_resent` with actor/entity only, no metadata.
+  `user.password_link_sent` with actor/entity only, no metadata. It is available
+  with or without an existing password. Historical `user.password_setup_resent`
+  audit rows remain readable. Every new public/admin/approval link replaces the
+  previous token.
 
 `SendPasswordSetup` carries user ID and token, then checks current eligibility
 and broker validity immediately before delivery. Old jobs after resend and expired
 or ineligible accounts finish without mail. Retries use the same token.
 Routes generate base-path-safe URLs from APP_URL in workers. Russian HTML and
-text templates have no external assets or password content.
+text templates have no external assets or password content. Neutral copy describes
+a one-time new-password link, configured TTL and the option to ignore unexpected
+mail; receiving/opening the message does not change the password.
 
 Setup validation renders errors directly without flashing credentials. Setup
 URLs are excluded from session previous-URL storage; responses use no-store and

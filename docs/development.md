@@ -91,7 +91,7 @@ With the existing Docker stack running, open:
 
 `http://localhost:8080/cabinet/_prototype/`
 
-The catalog links to all 31 page groups and their direct state variants.
+The catalog links to all 32 page groups and their direct state variants.
 `docs/ui-pages.md` lists the view files and URLs. These pages work without
 business records or seed data. Examples of prices, dictionaries, names,
 phones, UUIDs, documents and payment identifiers are synthetic and do not
@@ -133,7 +133,8 @@ disabled and deleted accounts all receive the same generic failure message.
 Log in as the development administrator, open «Психологи», create a synthetic
 psychologist, then open the profile to edit it or confirm moderation, tariff,
 access and deletion actions. New accounts are pending/enabled/non-admin and
-have no password. No mail is sent. Use a separate pending record for rejection;
+have no password. Creation sends no mail; approval queues the initial password
+link as described below. Use a separate pending record for rejection;
 approved accounts are disabled rather than rejected. Education choices remain
 empty until approved items exist in the database.
 
@@ -452,7 +453,14 @@ account via the real admin detail form; observe one database job, process it,
 open the actual Mailpit link, choose a password, verify login and link reuse
 rejection. For resend, leave an old invitation queued, use the eligible admin
 resend action, check immediate old-link rejection, process the old job (no mail)
-and the new job (working link). Do not copy tokens or message bodies into reports.
+and the new job (working link). For an already configured account, request a link
+from «Забыли пароль?» and verify the same generic success for unknown/ineligible
+email. Repeating within a minute shows rate-limit; normalized case shares the
+email limit even across client IPs. Submit a new password and verify old sessions
+and remember tokens are invalidated, other users remain logged in, old password
+fails and new password works. Admin sending works with an existing password too.
+Prototype `password-forgot` covers normal/validation/success/rate-limit using the
+real Blade page. Do not copy tokens or message bodies into reports.
 
 Create a synthetic active group outside the warning threshold and run
 `groups:queue-expiry-warnings` (zero), move its expiry inside the threshold,

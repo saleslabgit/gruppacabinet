@@ -25,8 +25,8 @@ class PrototypeTest extends TestCase
         DB::purge();
         config()->set('database.default', 'missing-prototype-database');
         $catalog = $this->get('http://localhost/_prototype')->assertOk();
-        $this->assertCount(31, PrototypeCatalog::pages());
-        $this->assertSame(259, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
+        $this->assertCount(32, PrototypeCatalog::pages());
+        $this->assertSame(263, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
         foreach (PrototypeCatalog::pages() as $slug => $page) {
             foreach ($page['variants'] as $variant) {
                 $path = '/_prototype/'.$slug.'/'.$variant;
@@ -58,6 +58,25 @@ class PrototypeTest extends TestCase
     {
         $this->get('http://localhost/_prototype/group/not-a-status')->assertNotFound();
         $this->post('http://localhost/_prototype/group/draft')->assertStatus(405);
+    }
+
+    public function test_recovery_prototypes_show_form_validation_success_and_rate_limit(): void
+    {
+        foreach (['normal', 'validation', 'rate-limit'] as $variant) {
+            $response = $this->get('/_prototype/password-forgot/'.$variant)->assertOk()
+                ->assertViewIs('auth.password-forgot')->assertSee('data-prototype-form')
+                ->assertDontSee('name="_token"', false)->assertDontSee('type="submit"', false)
+                ->assertSee(route('prototype.login'), false);
+            if ($variant === 'validation') {
+                $response->assertSee('Укажите корректный email.')->assertSee('is-invalid');
+            } elseif ($variant === 'rate-limit') {
+                $response->assertSee('Попробуйте через минуту.');
+            }
+        }
+        $this->get('/_prototype/password-forgot/success')->assertOk()
+            ->assertSee('Если аккаунт с таким email доступен для восстановления')
+            ->assertDontSee('data-prototype-form');
+        $this->get('/_prototype/login')->assertSee(route('prototype.password-forgot'), false);
     }
 
     public function test_production_boot_does_not_register_prototype_routes(): void

@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\PsychologistController;
 use App\Http\Controllers\Admin\PsychologistDocumentController;
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\PasswordRecoveryController;
 use App\Http\Controllers\PasswordSetupController;
 use App\Http\Controllers\Psychologist\ApplicationController;
 use App\Http\Controllers\Psychologist\GroupController;
@@ -19,6 +20,9 @@ Route::middleware('throttle:password-setup')->group(function (): void {
     Route::get('/password/setup/{token}', [PasswordSetupController::class, 'show'])->name('password.setup');
     Route::post('/password/setup', [PasswordSetupController::class, 'store'])->name('password.store');
 });
+
+Route::get('/password/forgot', [PasswordRecoveryController::class, 'show'])->name('password.forgot');
+Route::post('/password/forgot', [PasswordRecoveryController::class, 'store'])->middleware('throttle:password-recovery')->name('password.forgot.store');
 
 Route::get('/login', [SessionController::class, 'create'])->name('login');
 Route::post('/login', [SessionController::class, 'store'])->name('login.store');

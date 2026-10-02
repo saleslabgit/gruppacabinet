@@ -2,12 +2,14 @@
 
 namespace App\Providers;
 
+use App\Http\Controllers\PasswordRecoveryController;
 use App\Integration\ApiErrors;
 use App\Integration\IntegrationException;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,6 +26,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('password-recovery', function (Request $request) {
+            $email = is_string($request->input('email')) ? Str::lower(trim($request->input('email'))) : '';
+            $response = fn (Request $request, array $headers) => app(PasswordRecoveryController::class)->rateLimited($headers);
+
+            return [
+                Limit::perMinute(5)->by('ip:'.$request->ip())->response($response),
+                Limit::perMinute(1)->by('email:'.hash('sha256', $email))->response($response),
+            ];
+        });
         RateLimiter::for('password-setup', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
         RateLimiter::for('password-setup-resend', fn (Request $request) => Limit::perMinute(1)->by($request->user()?->id.'|'.$request->route('psychologist')));
         RateLimiter::for('integration', function (Request $request) {
