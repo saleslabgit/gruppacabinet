@@ -1,534 +1,271 @@
 # Task: TASK-2026-10-02-01
 
 Status: planned
-Created from: a632e01cc5776c57d568d9592196782a18203d2b (main)
+Created from: e93689ba2e81aad6c990c38cb1d2ae67eba0e248 (main)
 
 ## Title
 
-Add self-service password recovery and reusable admin password-link sending
+Correct password-recovery timing privacy
 
 ## Goal
 
-Close the current password-recovery gap without introducing a second token system.
+Correct the implementation of TASK-2026-10-02-01 after review.
 
-A psychologist who can normally use the Cabinet must be able to recover access
-without contacting an administrator:
+The self-service password recovery feature is functionally complete, but the
+public POST `/password/forgot` currently has an observable application-level
+timing difference:
 
-1. open the login page;
-2. choose “Forgot password?”;
-3. submit the account email;
-4. receive a one-time email link;
-5. set a new password;
-6. log in with the new password.
+- an unknown or ineligible email performs only lookup/eligibility work and returns;
+- an eligible email additionally performs Laravel broker token creation, including
+  the deliberately expensive token hash, transaction/write work and queue insert.
 
-An administrator must also be able to send the same password-link flow from the
-psychologist card at any time while that psychologist is currently eligible to
-use the Cabinet, regardless of whether the psychologist has never set a password
-or already has one.
+The public response body/status/headers are generic, but this obvious cost
+difference can be used for statistical account enumeration.
 
-Reuse the existing Laravel password-broker/token infrastructure from Stage 12.
-Do not create a custom reset-token table or a parallel password-reset mechanism.
+Remove that timing side channel while preserving every accepted behavior from
+commit `e93689ba2e81aad6c990c38cb1d2ae67eba0e248`.
 
-## Facts
+Also correct the two stale prototype-count summaries found during review.
 
-- Current main HEAD is
-  `a632e01cc5776c57d568d9592196782a18203d2b`.
-- Existing first-password flow uses:
-  - `PasswordSetupService`;
-  - Laravel `PasswordBroker` + `DatabaseTokenRepository`;
-  - existing `password_reset_tokens`;
-  - configurable `password_setup_link_ttl_hours`;
-  - `SendPasswordSetup` database-queue job;
-  - `PasswordSetupMail`;
-  - GET `/password/setup/{token}?email=...`;
-  - POST `/password/setup`.
-- Existing token replacement invalidates the previous link.
-- Existing password completion is currently restricted to users whose
-  `password === null`.
-- Existing admin password action is also restricted to `password === null`.
-- Existing login page has no “Forgot password?” path.
-- Existing setup Blade page is the approved Stage 3 password page.
-- Existing mail transport rules allow only SMTP/sendmail for password links and
-  use the database queue.
-- Password setup/recovery URLs and tokens are sensitive and must not be logged.
-- `SessionInvalidator` already deletes the target user’s database sessions and
-  rotates `remember_token`.
-- Account login eligibility is currently:
-  - non-admin psychologist;
-  - status `approved`;
-  - not disabled;
-  - not soft-deleted.
-- No migration is expected to be necessary.
-- Do not touch unrelated MODX, WEBPAY, intake, route-405, HTTPS redirect, or
-  production private artifacts.
+## Review Result / Starting Point
 
-## Product Decisions
+The implementation commit under review is:
 
-### Eligible account
+`e93689ba2e81aad6c990c38cb1d2ae67eba0e248`
+`codex: TASK-2026-10-02-01 add password recovery`
 
-A password link may be issued for a psychologist only when the account is:
+Original planner:
 
-- non-admin;
-- `approved`;
-- enabled;
-- not soft-deleted.
+`a4b718059a54a0430dc0eacebb6ec45261a085b2`
+`planner: TASK-2026-10-02-01 add password recovery`
 
-Password presence is **not** an eligibility condition anymore.
+Accepted implementation behavior already present and to preserve:
 
-Thus both of these are supported:
+- login has “Забыли пароль?”;
+- GET/POST `/password/forgot`;
+- same Laravel `PasswordBroker` / `DatabaseTokenRepository` /
+  `password_reset_tokens`;
+- configured password-link TTL;
+- recovery works with an existing password or null password;
+- unknown/ineligible accounts receive no token/job;
+- generic public result;
+- public IP + SHA-256-normalized-email throttles;
+- newest link invalidates the previous link;
+- password completion rechecks eligibility/token;
+- password replacement revokes only the target user’s sessions and remember state;
+- no auto-login;
+- admin can send a new password link to an eligible psychologist regardless of
+  current password;
+- initial post-approval onboarding remains password-null-only;
+- mail remains database-queued and SMTP/sendmail only;
+- no sensitive token/link/recipient/password diagnostic logging;
+- 32 prototype page groups / 263 variants are implemented and tested.
 
-- first password: `password === null`;
-- password recovery/replacement: `password !== null`.
+## Required Correction
 
-Pending, rejected, disabled, deleted and admin accounts do not receive a usable
-password link.
+### 1. Equalize the expensive public recovery path
 
-“Admin can send at any time” means at any time for a currently login-eligible
-psychologist, including when a password is already configured. It does not bypass
-account access restrictions.
+For every syntactically valid POST `/password/forgot`, perform an equivalent
+expensive token-hash operation whether or not the submitted email resolves to an
+eligible account.
 
-### Public privacy semantics
+The implementation must remove the current obvious branch where only an eligible
+account incurs the password/token hasher cost.
 
-The public recovery request must not reveal whether an email exists, whether the
-account is approved/enabled, or whether a password is currently configured.
+Use the same hashing service/algorithm/cost that Laravel's existing
+`DatabaseTokenRepository` uses for password-reset token hashing. Do not invent a
+cheaper hash, fixed hash, plain SHA-256 substitute, or a separate crypto system.
 
-After a syntactically valid request, return the same generic success state for:
+Preferred design:
 
-- an eligible existing account;
+- keep the existing real broker path unchanged for eligible users;
+- for unknown/ineligible users, execute a dummy token-like hash using the same
+  framework hasher and a fresh random token-shaped value;
+- discard the dummy result immediately;
+- do not create a fake user;
+- do not create a real `password_reset_tokens` row for an unknown/ineligible email;
+- do not enqueue a job for an unknown/ineligible email;
+- do not log the submitted email or dummy token/hash.
+
+If a small helper/service method makes the security property explicit and
+testable, that is acceptable. Avoid a broad password subsystem refactor.
+
+The correction is about eliminating the obvious cryptographic-work differential.
+Do not introduce sleeps, busy loops, fixed response delays or random artificial
+latency as the primary defense. They amplify request cost and are brittle under
+load.
+
+### 2. Preserve transaction/token semantics for eligible accounts
+
+Eligible requests must still use the existing real broker flow and existing
+transactional guarantees:
+
+- current user row lock;
+- broker token replacement;
+- queue insert;
+- rollback preserves the previous token if queue insertion fails;
+- stale queued tokens remain no-op;
+- configured TTL unchanged.
+
+Do not replace the real broker operation with custom token generation.
+
+### 3. Keep public response privacy unchanged
+
+For syntactically valid requests, preserve the current same public outcome for:
+
+- eligible account;
 - unknown email;
-- pending/rejected/disabled/deleted/admin account.
+- pending/rejected/disabled/deleted/admin account;
+- eligible-account queue/infrastructure failure.
 
-Only the eligible account receives a token/job/email.
+Do not introduce account-specific:
 
-Do not expose different HTTP status, copy, redirect target, timing-dependent
-application state, or validation detail that intentionally identifies account
-existence.
+- status codes;
+- redirects;
+- body copy;
+- response headers;
+- validation messages;
+- logs.
 
-Normal malformed-email validation may be shown because it describes request
-syntax, not account existence.
+Malformed-email validation remains allowed.
 
-### Link/token semantics
-
-Use the same Laravel broker repository and configured TTL as the first-password
-flow.
-
-Issuing a new link from any source:
-
-- public recovery;
-- admin action;
-- automatic post-approval invitation;
-
-must replace the previous broker token for that email, making older links invalid.
-
-The link remains one-time. Successful password submission deletes the token.
-
-### Successful password change
-
-On successful completion:
-
-1. validate current account eligibility again under the existing safe boundary;
-2. validate the one-time broker token;
-3. hash/store the new password via the existing model cast;
-4. invalidate all existing sessions for that user;
-5. rotate remember-token state through the existing session invalidation service;
-6. delete the broker token;
-7. do not auto-login.
-
-Other users’ sessions must remain untouched.
-
-## Scope
-
-### 1. Generalize the existing password-link domain service
-
-Refactor the existing Stage 12 password setup implementation surgically so that
-the same broker flow supports both first-password setup and recovery.
-
-Do not add a second broker or token storage.
-
-The shared account/link eligibility must no longer require `password === null`.
+### 4. Rate-limit behavior stays unchanged
 
 Preserve:
 
-- approved/enabled/non-admin/non-deleted guards;
-- configured TTL;
-- one-time tokens;
-- token replacement;
-- database queue;
-- SMTP/sendmail transport restrictions;
-- safe logging;
-- base-path-safe URLs;
-- no auto-login.
+- 5 requests/minute/IP;
+- 1 request/minute per SHA-256 key of trim+lowercase email;
+- existing generic recovery-specific 429 UI;
+- no plaintext email in limiter keys/logging.
 
-Keep naming changes minimal. A broad rename/refactor of Stage 12 is not required
-if the existing service can remain understandable with focused methods.
+Do not weaken login, password-link GET/POST or admin resend throttles.
 
-### 2. Add self-service recovery request page
+### 5. Security-focused tests
 
-Add a public recovery request route and page using the existing public auth
-layout, tokens and Blade components.
+Add tests that verify the timing-privacy mechanism by behavior/instrumentation,
+not by fragile wall-clock thresholds.
 
-Preferred route shape:
+At minimum prove:
 
-- GET `/password/forgot` — form;
-- POST `/password/forgot` — request link.
+- one syntactically valid eligible request performs one framework token-hash cost
+  through the real broker;
+- one syntactically valid unknown request performs one equivalent dummy hash cost;
+- each ineligible state (pending/rejected/disabled/deleted/admin) follows the
+  equivalent dummy hash path;
+- malformed email does not need to perform the dummy hash because syntax has
+  already been rejected;
+- unknown/ineligible requests still create no `password_reset_tokens` row and
+  no queue job;
+- eligible request still creates the real token/job;
+- queue failure keeps the generic result and previous-token rollback semantics;
+- no plaintext email, token, dummy token or hash appears in application logs.
 
-Use stable Laravel route names under the existing `password.*` namespace so
-the existing password exception redaction/rendering boundary still applies.
+Do not write a flaky test that asserts response times are within N milliseconds.
+Mock/spy the framework hasher or isolate an explicit helper boundary so the
+expensive operation count/type is deterministic.
 
-The page must include:
+The test must also ensure the dummy hash uses the same configured framework
+hasher as the token repository rather than a hard-coded alternative.
 
-- page title for password recovery;
-- email input;
-- submit action;
-- link back to login;
-- validation state;
-- generic sent/success state;
-- rate-limit state.
+### 6. Preserve all original recovery regressions
 
-The login page must expose a visible “Забыли пароль?” link.
-
-Do not redesign the login page or create a new visual language.
-
-### 3. Public recovery request behavior
-
-For a valid email-shaped request:
-
-- normalize using the same account-email semantics already used by auth;
-- look up a possible user without exposing the result;
-- if eligible, issue/replace the broker token and queue the password email;
-- if ineligible or unknown, perform no password mutation and queue no email;
-- return the same generic success message in either case.
-
-Suggested user-facing meaning:
-
-“Если аккаунт с таким email доступен для восстановления, мы отправили ссылку для установки нового пароля.”
-
-Do not claim that an email definitely exists or was definitely sent.
-
-Queue insertion / token replacement for an eligible user must retain the current
-transactional safety properties of the Stage 12 invite flow.
-
-Infrastructure failure for an eligible request must not leak account existence.
-Use the same generic public result; log only safe technical context without
-recipient/token/URL/body.
-
-### 4. Rate limiting / abuse protection
-
-Add explicit public recovery throttling.
-
-Protect at least:
-
-- by client IP;
-- by normalized email-derived key, without logging/storing plaintext email in
-  application diagnostics.
-
-A practical target is:
-
-- a small per-minute IP allowance for form submissions;
-- no more than one issued request per minute for the same normalized email.
-
-Use existing Laravel rate-limiter patterns.
-
-Do not weaken the existing:
-
-- password link GET/POST limiter;
-- admin resend limiter;
-- login limiter.
-
-Do not return an account-existence-specific throttle result.
-
-### 5. Reuse the existing password form for both first setup and recovery
-
-The current `auth/password.blade.php` must work for a user who already has a
-password.
-
-Update its copy so it does not falsely claim that every operation is a “first
-login”.
-
-The normal form should clearly ask for a new password.
-
-The invalid/expired state must tell the user that they may request another link
-themselves from password recovery, rather than saying that only the administrator
-can help.
-
-Keep:
-
-- email;
-- token;
-- new password;
-- confirmation;
-- existing password requirements;
-- invalid/expired state;
-- success state;
-- login link;
-- no auto-login.
-
-### 6. Password email copy
-
-Reuse the existing queued password-link mail path.
-
-The email must be truthful for both:
+Re-run the full password-recovery/setup/auth/admin/prototype/session tests from
+the original task. The correction must not regress:
 
 - first-password onboarding;
-- later recovery/reset.
+- existing-password replacement;
+- old/new password authentication;
+- one-time tokens;
+- session invalidation;
+- admin action;
+- base-path-safe production URLs;
+- safe queued mail;
+- unsupported transport rejection;
+- account-existence-safe body/status/headers;
+- CSRF/policy boundaries.
 
-It may either:
+### 7. Correct stale prototype-count documentation
 
-- use purpose-specific subject/body selected when the link is issued; or
-- use one neutral password-link copy that is correct for both cases.
+The actual `PrototypeCatalog` and `PrototypeTest` now prove:
 
-It must not falsely say “your questionnaire was just approved” for a later reset.
+- **32 page groups**;
+- **263 variants**.
 
-For a recovery-capable message, include the meaning:
+Update stale summary statements that still say **31 / 249**, specifically the
+current top-level summaries in:
 
-- a link was created to set a new Cabinet password;
-- the link is one-time;
-- show configured TTL;
-- if the recipient did not expect the message, they can ignore it;
-- merely receiving/opening the email does not change the password.
-
-Do not include passwords.
-
-### 7. Admin action
-
-Keep the action on the existing psychologist detail page and existing security
-boundaries.
-
-The administrator must be able to send a new password link for any currently
-eligible psychologist even if `password !== null`.
-
-The action must:
-
-- use CSRF;
-- require admin/account middleware and policy;
-- retain the per-admin/target rate limiter;
-- replace the prior token;
-- queue mail asynchronously;
-- never set a password directly;
-- never expose the token in admin UI or logs.
-
-Update button/copy from “first password setup” semantics to a truthful generic
-meaning such as “Отправить ссылку для нового пароля”.
-
-Update audit semantics so newly generated events do not falsely imply “first
-password setup” when the user already had a password. Historical existing audit
-action values must remain renderable; no migration/rewrite of old audit rows.
-
-### 8. Successful reset invalidates existing sessions
-
-Integrate the existing `SessionInvalidator` into password completion.
-
-Prove that:
-
-- all database sessions for the reset user are removed;
-- `remember_token` rotates;
-- another user’s sessions remain;
-- the new password works;
-- the old password no longer works.
-
-This must also be safe for first-password setup where no prior authenticated
-session normally exists.
-
-### 9. New approved UI state
-
-This feature necessarily adds one new public auth page that was not in the
-original Stage 3 page catalogue.
-
-Use the existing Blade/layout/component system and add development/testing
-prototype coverage for the new page instead of inventing a parallel HTML mock.
-
-Cover at least:
-
-- normal;
-- validation;
-- sent/success;
-- rate-limit.
-
-Update the prototype/page catalogue and counts as required by the repository’s
-existing catalogue conventions.
-
-Do not redesign unrelated approved pages.
-
-### 10. Preserve initial onboarding
-
-Approval of a new eligible psychologist with `password === null` must still
-queue the initial password link after commit.
-
-Existing guarantees remain:
-
-- approval is not rolled back by later mail infrastructure failure;
-- stale/replaced queued token jobs become no-ops;
-- configured TTL applies;
-- initial password may still be set from the emailed link;
-- login succeeds afterward.
-
-## Tests
-
-Add/update focused tests for all of the following.
-
-### Public recovery
-
-- login page contains “Forgot password?” link;
-- GET recovery page renders approved real Blade UI;
-- eligible approved/enabled psychologist with existing password can request a link;
-- approved/enabled psychologist with null password can also request a link;
-- unknown email gets the same public success state and queues nothing;
-- pending, rejected, disabled, deleted and admin emails get the same success state
-  and queue nothing;
-- malformed email gets only syntax validation;
-- public result does not expose whether an account exists;
-- repeated issuance replaces the prior token;
-- old link becomes invalid;
-- newest link remains valid;
-- rate limiting works by IP and normalized email;
-- case-normalized email behavior matches login/account lookup behavior;
-- infrastructure/queue failure does not disclose account existence.
-
-### Link completion
-
-For an account with an existing password:
-
-- GET valid link renders the password form;
-- POST valid token + confirmed password changes the password;
-- old password stops authenticating;
-- new password authenticates;
-- token cannot be reused;
-- expired/invalid link is rejected;
-- disabled/rejected/deleted state after issuance invalidates the flow;
-- no auto-login occurs;
-- target user sessions are deleted;
-- target remember token changes;
-- unrelated user sessions remain.
-
-Retain first-password setup coverage.
-
-### Admin
-
-- admin action is available for eligible `password === null`;
-- admin action is also available for eligible `password !== null`;
-- non-admin cannot call it;
-- ineligible account states remain blocked;
-- CSRF/form request/policy remain enforced;
-- new action replaces an older public/admin token;
-- queue failure returns safe admin error;
-- audit entry contains no token/email/body/URL;
-- historical `user.password_setup_resent` display remains supported if a new audit
-  action name is introduced.
-
-### Mail / security / deployment semantics
-
-- queued mail contains a base-path-safe password URL;
-- production APP_URL generates
-  `https://gruppa.info/cabinet/...`;
-- recovery/reset email copy is truthful for a previously configured password;
-- no password/token/URL/recipient is written to application diagnostic logs;
-- unsupported mail transports stay rejected;
-- tests make no real SMTP/sendmail request.
-
-### Regression
-
-Re-run existing complete:
-
-- PasswordSetupTest;
-- AuthenticationTest;
-- admin psychologist workflow/policy tests;
-- prototype tests;
-- session invalidation tests;
-- mail/deployment preflight tests affected by the copy/flow.
-
-## Documentation
-
-Update implemented-state documentation at least in:
-
-- `SPEC.md`;
-- `docs/email.md`;
-- `docs/project-status.md`;
 - `docs/ui-pages.md`;
-- `docs/architecture.md` / `docs/development.md` / `docs/deployment.md` where
-  current password-flow or operational statements require correction.
+- `docs/project-status.md`.
 
-Documentation must state:
+Do not mechanically rewrite historical statements where the text is explicitly
+describing what an older stage/task contained at that historical point. Correct
+only statements that purport to describe the current/final catalogue.
 
-- self-service forgot-password now exists;
-- public request does not disclose account existence;
-- the same Laravel broker/token table is reused;
-- admin may send a link for an eligible account regardless of existing password;
-- issuing a newer link invalidates the older link;
-- successful password change invalidates prior sessions;
-- initial onboarding remains supported;
-- password-link mail remains queued through database queue and SMTP/sendmail;
-- no plaintext password/reset token belongs in logs.
-
-Correct stale documentation that currently explicitly states no forgot-password
-or password replacement exists.
-
-Do not perform unrelated documentation cleanup.
+If review finds another current-state 31/249 statement, correct it only when its
+meaning is clearly current state.
 
 ## Out Of Scope
 
 Do NOT:
 
-- add a custom token table;
-- add SMS/phone recovery;
-- add security questions;
-- let an administrator assign or see a password;
-- email plaintext/generated passwords;
-- auto-login after reset;
-- allow pending/rejected/disabled/deleted users to bypass account restrictions;
-- change password complexity beyond the existing 8–255 confirmed rule unless
-  required by an existing shared validator;
-- change login authentication semantics unrelated to recovery;
-- change MODX, WEBPAY, integration intake or group lifecycle behavior;
-- read/change/commit production private env files such as `.env_save`;
-- make a real mail send to a production recipient;
-- add Node/Vite/packages;
+- redesign password recovery UI;
+- change password/link email copy unless required by the correction;
+- add a second token table/broker;
+- add fake password-reset rows for unknown users;
+- add sleeps/fixed delays as the main timing defense;
+- change password complexity;
+- change eligibility rules;
+- change admin eligibility;
+- change TTL;
+- change session invalidation semantics;
+- change rate-limit values;
+- change MODX, WEBPAY, intake, group lifecycle or unrelated auth behavior;
+- add packages;
+- read/change/commit production private files including `.env_save`;
+- send real external email;
 - run `migrate:fresh`;
 - create an `accept:` commit.
 
 ## Acceptance Criteria
 
-1. Login page has a working self-service “Forgot password?” entry point.
-2. An eligible psychologist with an existing password can request a one-time
-   recovery link without administrator involvement.
-3. Unknown/ineligible emails receive the same generic public response and no
-   account existence is disclosed.
-4. The recovery link uses the existing Laravel broker/token repository and
-   configured TTL; no new token store exists.
-5. A valid link can replace an already configured password.
-6. Issuing a newer link invalidates the older link.
-7. Successful password replacement invalidates all existing sessions for that
-   user, rotates remember state and leaves other users’ sessions untouched.
-8. The administrator can issue a new password link for any currently eligible
-   psychologist regardless of whether the password is null or already configured.
-9. Existing first-password onboarding after approval still works.
-10. Mail remains queued and safe; no password/token/URL/recipient is leaked to
-    application diagnostics.
-11. New public UI uses the approved auth layout/components and has prototype
-    state coverage.
-12. Full regression/static checks pass and no unrelated behavior changes.
+1. A valid unknown/ineligible recovery request performs an equivalent framework
+   token-hashing cost to an eligible request's real token generation.
+2. The implementation uses the same configured framework hasher/cost as
+   `DatabaseTokenRepository`; no cheap substitute or custom token crypto exists.
+3. Unknown/ineligible requests still create no reset-token row and no queue job.
+4. Eligible requests still use the real Laravel broker/token repository and keep
+   token replacement/rollback/queue semantics.
+5. Public body/status/headers remain generic and account-existence-safe.
+6. Existing IP/email throttles and all auth/CSRF/policy boundaries remain.
+7. No sensitive submitted email/token/dummy value/hash is added to diagnostics.
+8. All functionality accepted from `e93689b` remains intact.
+9. Current prototype documentation consistently reports 32 page groups / 263
+   variants where it describes the current catalogue.
+10. Full regression/static checks pass.
 
 ## Checks
 
 Run and report exact results for:
 
-1. focused password recovery/setup tests;
-2. full `PasswordSetupTest`;
-3. full `AuthenticationTest`;
-4. affected admin psychologist/policy/session tests;
-5. full `PrototypeTest`;
-6. affected mail/preflight tests;
-7. full MySQL test suite;
-8. Pint;
-9. PHPStan;
-10. composer check-platform-reqs;
-11. composer validate --no-check-publish;
-12. artisan view:cache;
-13. artisan route:list (verify recovery/setup/admin routes);
-14. artisan schedule:list;
-15. git diff --check;
-16. final status/diff/staged secret/artifact review.
+1. new focused timing-privacy tests;
+2. full `PasswordRecoveryTest`;
+3. full `PasswordSetupTest`;
+4. full `AuthenticationTest`;
+5. affected admin psychologist/policy/session tests;
+6. full `PrototypeTest`;
+7. affected mail/deployment-preflight tests;
+8. full MySQL suite;
+9. Pint;
+10. PHPStan;
+11. composer check-platform-reqs;
+12. composer validate --no-check-publish;
+13. artisan view:cache;
+14. artisan route:list --path=password -v;
+15. artisan schedule:list;
+16. git diff --check;
+17. final status/diff/staged secret/artifact review.
 
-Do not make a real external email delivery call as part of automated acceptance.
+Do not make real SMTP/sendmail/MODX/WEBPAY calls.
 
 ## Hard Workflow Gate
 
@@ -536,39 +273,41 @@ Before editing:
 
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm HEAD is this planner commit and its parent is
-  `a632e01cc5776c57d568d9592196782a18203d2b`;
-- read `WORKFLOW.md`, `AGENTS.md`, this task and the previous report;
-- inspect current PasswordSetupService/controller/job/mail, auth routes, login and
-  password Blade, UserPolicy, PsychologistActions, SessionInvalidator,
-  PasswordSetupTest, AuthenticationTest, docs/email.md and prototype catalogue;
-- verify the local tree is clean/known;
+- confirm HEAD is this corrective planner commit and its parent is
+  `e93689ba2e81aad6c990c38cb1d2ae67eba0e248`;
+- read `WORKFLOW.md`, `AGENTS.md`, this task and current `.ai/report.md`;
+- inspect the full implementation diff
+  `a4b718059a54a0430dc0eacebb6ec45261a085b2..e93689ba2e81aad6c990c38cb1d2ae67eba0e248`;
+- inspect `PasswordRecoveryController`, `PasswordSetupService`,
+  framework hasher usage in the existing broker/repository boundary, and
+  `PasswordRecoveryTest`;
+- inspect current prototype counts and the two stale docs;
+- verify clean/known local tree;
 - do not touch unknown local changes.
 
 During implementation:
 
-- work only within this task;
+- work only on this correction;
 - do not edit `.ai/task.md`;
-- preserve the single Laravel broker/token storage;
-- preserve generic account-existence-safe public behavior;
-- keep mail queued;
-- never log password/token/link/recipient;
-- preserve existing account eligibility boundaries;
-- invalidate target sessions only after successful password completion;
-- keep UI changes within approved auth components/layout;
-- avoid unrelated refactors.
+- keep real eligible flow on the existing Laravel broker;
+- use the same framework hash cost for dummy work;
+- no artificial sleep defense;
+- no fake reset rows/jobs;
+- never log submitted email/token/hash;
+- preserve all accepted recovery behavior;
+- avoid unrelated refactors/docs cleanup.
 
 Before commit:
 
 - run all required checks;
-- inspect complete diff and staged files;
-- verify no secrets, production data, env/private files, mail captures, queue
-  payload dumps, storage/cache/log/vendor or temporary artifacts are staged;
+- inspect complete diff/staged files;
+- verify no env/private files, production data, tokens, queue payload dumps,
+  mail captures, logs/cache/vendor or temporary artifacts are staged;
 - update `.ai/report.md` factually;
 - explicitly state that no real external mail was sent.
 
 If complete, commit with:
 
-`codex: TASK-2026-10-02-01 add password recovery`
+`codex: TASK-2026-10-02-01 correct recovery timing privacy`
 
 Do not create an accept commit.
