@@ -1,271 +1,245 @@
 # Task: TASK-2026-10-02-01
 
 Status: planned
-Created from: e93689ba2e81aad6c990c38cb1d2ae67eba0e248 (main)
+Created from: 80d0db339e8a0d0c2305cb3cdee3fb64ebcbbb9e (main)
 
 ## Title
 
-Correct password-recovery timing privacy
+Close recovery timing race after locked eligibility recheck
 
 ## Goal
 
-Correct the implementation of TASK-2026-10-02-01 after review.
+Finish the password-recovery timing-privacy correction after review of:
 
-The self-service password recovery feature is functionally complete, but the
-public POST `/password/forgot` currently has an observable application-level
-timing difference:
+`80d0db339e8a0d0c2305cb3cdee3fb64ebcbbb9e`
+`codex: TASK-2026-10-02-01 correct recovery timing privacy`
 
-- an unknown or ineligible email performs only lookup/eligibility work and returns;
-- an eligible email additionally performs Laravel broker token creation, including
-  the deliberately expensive token hash, transaction/write work and queue insert.
+The current implementation correctly performs the same configured framework hash
+for an already-known ineligible/unknown account, but one race remains.
 
-The public response body/status/headers are generic, but this obvious cost
-difference can be used for statistical account enumeration.
+Current public flow:
 
-Remove that timing side channel while preserving every accepted behavior from
-commit `e93689ba2e81aad6c990c38cb1d2ae67eba0e248`.
+1. controller reads user;
+2. controller sees the user as eligible;
+3. controller calls `PasswordSetupService::invite()`;
+4. `invite()` locks/reloads the row;
+5. concurrent admin/account change may make the user ineligible;
+6. actorless `invite()` returns without creating a real broker token;
+7. controller has already skipped the dummy branch.
 
-Also correct the two stale prototype-count summaries found during review.
+Therefore a syntactically valid recovery request can still perform **zero**
+expensive token-hash operations.
 
-## Review Result / Starting Point
+Close this race so every syntactically valid, non-throttled public recovery
+request performs exactly one configured framework token-hash cost:
 
-The implementation commit under review is:
+- real broker token hash if a token is actually issued;
+- otherwise one dummy hash using the same framework hasher/cost.
 
-`e93689ba2e81aad6c990c38cb1d2ae67eba0e248`
-`codex: TASK-2026-10-02-01 add password recovery`
+Preserve every accepted recovery/admin/session/mail behavior.
 
-Original planner:
+## Facts
 
-`a4b718059a54a0430dc0eacebb6ec45261a085b2`
-`planner: TASK-2026-10-02-01 add password recovery`
+- Current main HEAD is
+  `80d0db339e8a0d0c2305cb3cdee3fb64ebcbbb9e`.
+- Previous timing correction already:
+  - uses `app('hash')->make(Str::random(64))` for the normal unknown/ineligible branch;
+  - proves same framework hasher for bcrypt/Argon2id;
+  - creates no fake user/token row/job;
+  - adds no sleeps;
+  - preserves generic public responses;
+  - passes the full suite.
+- The remaining issue exists only when eligibility changes between the controller's
+  first lookup and the locked recheck inside `PasswordSetupService::invite()`.
+- `invite()` currently returns `void`.
+- For actorless/public use, an ineligible locked row returns silently.
+- For admin use, ineligibility still raises the existing validation/authorization
+  behavior and must remain unchanged.
+- No UI, migration, route, mail-copy or documentation-count change is needed
+  unless implementation facts require a narrowly related correction.
 
-Accepted implementation behavior already present and to preserve:
+## Required Design
 
-- login has “Забыли пароль?”;
-- GET/POST `/password/forgot`;
-- same Laravel `PasswordBroker` / `DatabaseTokenRepository` /
-  `password_reset_tokens`;
-- configured password-link TTL;
-- recovery works with an existing password or null password;
-- unknown/ineligible accounts receive no token/job;
-- generic public result;
-- public IP + SHA-256-normalized-email throttles;
-- newest link invalidates the previous link;
-- password completion rechecks eligibility/token;
-- password replacement revokes only the target user’s sessions and remember state;
-- no auto-login;
-- admin can send a new password link to an eligible psychologist regardless of
-  current password;
-- initial post-approval onboarding remains password-null-only;
-- mail remains database-queued and SMTP/sendmail only;
-- no sensitive token/link/recipient/password diagnostic logging;
-- 32 prototype page groups / 263 variants are implemented and tested.
+### 1. Make actual issuance observable to the public caller
 
-## Required Correction
+Adjust the smallest appropriate service boundary so the public recovery caller
+can know whether a real token was actually created after the row-lock eligibility
+recheck.
 
-### 1. Equalize the expensive public recovery path
+Preferred approach:
 
-For every syntactically valid POST `/password/forgot`, perform an equivalent
-expensive token-hash operation whether or not the submitted email resolves to an
-eligible account.
+- change `PasswordSetupService::invite(...)` to return a boolean such as:
+  - `true` = a real broker token/job was created;
+  - `false` = actorless/public call found the locked user no longer eligible and
+    no real token/hash was created.
 
-The implementation must remove the current obvious branch where only an eligible
-account incurs the password/token hasher cost.
+Admin behavior must stay the same:
 
-Use the same hashing service/algorithm/cost that Laravel's existing
-`DatabaseTokenRepository` uses for password-reset token hashing. Do not invent a
-cheaper hash, fixed hash, plain SHA-256 substitute, or a separate crypto system.
+- actor present + missing/ineligible target still follows existing 404 /
+  authorization / validation semantics;
+- successful admin sending still audits and returns success;
+- do not turn admin failures into `false`.
 
-Preferred design:
+Automatic post-approval onboarding must keep working. Its caller may ignore the
+return value.
 
-- keep the existing real broker path unchanged for eligible users;
-- for unknown/ineligible users, execute a dummy token-like hash using the same
-  framework hasher and a fresh random token-shaped value;
-- discard the dummy result immediately;
-- do not create a fake user;
-- do not create a real `password_reset_tokens` row for an unknown/ineligible email;
-- do not enqueue a job for an unknown/ineligible email;
-- do not log the submitted email or dummy token/hash.
+If another equally small explicit service boundary is cleaner, it is acceptable,
+but do not introduce a broad refactor.
 
-If a small helper/service method makes the security property explicit and
-testable, that is acceptable. Avoid a broad password subsystem refactor.
+### 2. Public controller fallback
 
-The correction is about eliminating the obvious cryptographic-work differential.
-Do not introduce sleeps, busy loops, fixed response delays or random artificial
-latency as the primary defense. They amplify request cost and are brittle under
-load.
+For every syntactically valid, non-throttled POST `/password/forgot`:
 
-### 2. Preserve transaction/token semantics for eligible accounts
+- if no eligible user was found before calling the service: perform one dummy hash;
+- if an eligible user was found but the locked recheck returns “not issued”:
+  perform one dummy hash;
+- if the real token was issued: do not perform an additional dummy hash.
 
-Eligible requests must still use the existing real broker flow and existing
-transactional guarantees:
+The normal successful real path must still perform exactly one hash through the
+broker.
 
-- current user row lock;
-- broker token replacement;
-- queue insert;
-- rollback preserves the previous token if queue insertion fails;
-- stale queued tokens remain no-op;
-- configured TTL unchanged.
+The race-lost path must perform exactly one dummy hash.
 
-Do not replace the real broker operation with custom token generation.
+Do not create two expensive hashes for any ordinary request.
 
-### 3. Keep public response privacy unchanged
+### 3. Preserve queue failure semantics
 
-For syntactically valid requests, preserve the current same public outcome for:
+If a real eligible issuance reaches broker token creation but queue insertion
+throws and the transaction rolls back:
 
-- eligible account;
-- unknown email;
-- pending/rejected/disabled/deleted/admin account;
-- eligible-account queue/infrastructure failure.
+- keep the existing generic public success response;
+- preserve the previous broker token if one existed;
+- do not add a second dummy hash after the exception.
 
-Do not introduce account-specific:
+That request already paid the real broker hash cost before the queue failure.
 
-- status codes;
-- redirects;
-- body copy;
-- response headers;
-- validation messages;
-- logs.
+Do not accidentally convert the catch path into “always dummy hash”, which would
+double the cryptographic cost for infrastructure failures after token creation.
 
-Malformed-email validation remains allowed.
+### 4. Preserve the existing timing-privacy properties
 
-### 4. Rate-limit behavior stays unchanged
+Keep unchanged:
 
-Preserve:
+- same framework hasher / configured cost;
+- fresh random dummy input;
+- no per-call cheaper options;
+- no dummy storage;
+- no fake reset row;
+- no queue job for ineligible users;
+- no sleeps/fixed delays;
+- generic body/status/headers;
+- no plaintext email/token/hash in logs;
+- 5/min/IP and 1/min/normalized-email throttles;
+- malformed email does not need dummy hash;
+- throttled request does not need dummy hash.
 
-- 5 requests/minute/IP;
-- 1 request/minute per SHA-256 key of trim+lowercase email;
-- existing generic recovery-specific 429 UI;
-- no plaintext email in limiter keys/logging.
+## Concurrency / Race Tests
 
-Do not weaken login, password-link GET/POST or admin resend throttles.
+Add deterministic coverage for the exact remaining race.
 
-### 5. Security-focused tests
-
-Add tests that verify the timing-privacy mechanism by behavior/instrumentation,
-not by fragile wall-clock thresholds.
+Do not use wall-clock timing assertions.
 
 At minimum prove:
 
-- one syntactically valid eligible request performs one framework token-hash cost
-  through the real broker;
-- one syntactically valid unknown request performs one equivalent dummy hash cost;
-- each ineligible state (pending/rejected/disabled/deleted/admin) follows the
-  equivalent dummy hash path;
-- malformed email does not need to perform the dummy hash because syntax has
-  already been rejected;
-- unknown/ineligible requests still create no `password_reset_tokens` row and
-  no queue job;
-- eligible request still creates the real token/job;
-- queue failure keeps the generic result and previous-token rollback semantics;
-- no plaintext email, token, dummy token or hash appears in application logs.
+1. controller initially resolves an eligible account;
+2. before/during the locked `invite()` recheck, the account becomes ineligible;
+3. the service does not create a real token/job;
+4. the public request still performs exactly one framework hash via the dummy path;
+5. public response remains the same generic success response;
+6. no reset-token row/job is created;
+7. no sensitive values are logged.
 
-Do not write a flaky test that asserts response times are within N milliseconds.
-Mock/spy the framework hasher or isolate an explicit helper boundary so the
-expensive operation count/type is deterministic.
+Cover at least one concurrent/in-between state change, preferably `disabled=true`.
 
-The test must also ensure the dummy hash uses the same configured framework
-hasher as the token repository rather than a hard-coded alternative.
+Also test the service return contract directly:
 
-### 6. Preserve all original recovery regressions
+- actorless eligible → `true`;
+- actorless locked-ineligible → `false`;
+- admin eligible → success;
+- admin ineligible → existing exception/validation semantics, not `false`.
 
-Re-run the full password-recovery/setup/auth/admin/prototype/session tests from
-the original task. The correction must not regress:
+Retain and re-run the existing `PasswordRecoveryTimingTest` cases proving:
 
-- first-password onboarding;
-- existing-password replacement;
+- eligible real path = one hash;
+- unknown/ineligible dummy path = one hash;
+- bcrypt + Argon2id same configured hasher/cost;
+- queue failure rollback;
+- malformed/throttled no hash;
+- dummy freshness and safe logs.
+
+## Preserve Original Feature
+
+Do not regress:
+
+- self-service “Забыли пароль?”;
+- recovery with existing or null password;
+- one-time/newest-token semantics;
+- admin password-link action;
+- post-approval first-password invitation;
+- target-only session invalidation;
 - old/new password authentication;
-- one-time tokens;
-- session invalidation;
-- admin action;
-- base-path-safe production URLs;
-- safe queued mail;
-- unsupported transport rejection;
-- account-existence-safe body/status/headers;
-- CSRF/policy boundaries.
-
-### 7. Correct stale prototype-count documentation
-
-The actual `PrototypeCatalog` and `PrototypeTest` now prove:
-
-- **32 page groups**;
-- **263 variants**.
-
-Update stale summary statements that still say **31 / 249**, specifically the
-current top-level summaries in:
-
-- `docs/ui-pages.md`;
-- `docs/project-status.md`.
-
-Do not mechanically rewrite historical statements where the text is explicitly
-describing what an older stage/task contained at that historical point. Correct
-only statements that purport to describe the current/final catalogue.
-
-If review finds another current-state 31/249 statement, correct it only when its
-meaning is clearly current state.
+- no auto-login;
+- base-path production URLs;
+- SMTP/sendmail/database queue restrictions;
+- CSRF/policy/account access boundaries;
+- 32 page groups / 263 variants.
 
 ## Out Of Scope
 
 Do NOT:
 
-- redesign password recovery UI;
-- change password/link email copy unless required by the correction;
-- add a second token table/broker;
-- add fake password-reset rows for unknown users;
-- add sleeps/fixed delays as the main timing defense;
-- change password complexity;
-- change eligibility rules;
-- change admin eligibility;
-- change TTL;
-- change session invalidation semantics;
+- redesign UI;
+- change routes;
+- change mail copy;
 - change rate-limit values;
-- change MODX, WEBPAY, intake, group lifecycle or unrelated auth behavior;
-- add packages;
-- read/change/commit production private files including `.env_save`;
-- send real external email;
+- change password TTL or complexity;
+- add new token storage/broker;
+- add sleeps or response delays;
+- add packages/migrations;
+- touch MODX, WEBPAY, intake, group lifecycle;
+- read/change/commit `.env_save` or other production private files;
+- send real external mail;
 - run `migrate:fresh`;
 - create an `accept:` commit.
 
 ## Acceptance Criteria
 
-1. A valid unknown/ineligible recovery request performs an equivalent framework
-   token-hashing cost to an eligible request's real token generation.
-2. The implementation uses the same configured framework hasher/cost as
-   `DatabaseTokenRepository`; no cheap substitute or custom token crypto exists.
-3. Unknown/ineligible requests still create no reset-token row and no queue job.
-4. Eligible requests still use the real Laravel broker/token repository and keep
-   token replacement/rollback/queue semantics.
-5. Public body/status/headers remain generic and account-existence-safe.
-6. Existing IP/email throttles and all auth/CSRF/policy boundaries remain.
-7. No sensitive submitted email/token/dummy value/hash is added to diagnostics.
-8. All functionality accepted from `e93689b` remains intact.
-9. Current prototype documentation consistently reports 32 page groups / 263
-   variants where it describes the current catalogue.
-10. Full regression/static checks pass.
+1. Every syntactically valid, non-throttled public recovery request performs
+   exactly one configured framework token-hash cost.
+2. Real issuance uses the existing Laravel broker hash.
+3. Initial/locked-ineligible requests use exactly one dummy hash.
+4. A race from initially eligible to locked-ineligible cannot produce a zero-hash
+   request.
+5. Queue failure after real token creation does not add a second dummy hash and
+   preserves rollback/generic-response behavior.
+6. Admin and onboarding behavior remains unchanged.
+7. No fake reset rows/jobs or sensitive diagnostics are introduced.
+8. All previous recovery/timing/security tests and full regression checks pass.
 
 ## Checks
 
 Run and report exact results for:
 
-1. new focused timing-privacy tests;
-2. full `PasswordRecoveryTest`;
-3. full `PasswordSetupTest`;
-4. full `AuthenticationTest`;
-5. affected admin psychologist/policy/session tests;
-6. full `PrototypeTest`;
-7. affected mail/deployment-preflight tests;
-8. full MySQL suite;
-9. Pint;
-10. PHPStan;
-11. composer check-platform-reqs;
-12. composer validate --no-check-publish;
-13. artisan view:cache;
-14. artisan route:list --path=password -v;
-15. artisan schedule:list;
-16. git diff --check;
-17. final status/diff/staged secret/artifact review.
+1. new focused locked-recheck race tests;
+2. full `PasswordRecoveryTimingTest`;
+3. full `PasswordRecoveryTest`;
+4. full `PasswordSetupTest`;
+5. full `AuthenticationTest`;
+6. affected admin psychologist/policy/session tests;
+7. full `PrototypeTest`;
+8. affected mail/deployment-preflight tests;
+9. full MySQL suite;
+10. Pint;
+11. PHPStan;
+12. composer check-platform-reqs;
+13. composer validate --no-check-publish;
+14. artisan view:cache;
+15. artisan route:list --path=password -v;
+16. artisan schedule:list;
+17. git diff --check;
+18. final status/diff/staged secret/artifact review.
 
-Do not make real SMTP/sendmail/MODX/WEBPAY calls.
+No real SMTP/sendmail/MODX/WEBPAY calls.
 
 ## Hard Workflow Gate
 
@@ -273,41 +247,36 @@ Before editing:
 
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm HEAD is this corrective planner commit and its parent is
-  `e93689ba2e81aad6c990c38cb1d2ae67eba0e248`;
-- read `WORKFLOW.md`, `AGENTS.md`, this task and current `.ai/report.md`;
-- inspect the full implementation diff
-  `a4b718059a54a0430dc0eacebb6ec45261a085b2..e93689ba2e81aad6c990c38cb1d2ae67eba0e248`;
+- confirm HEAD is this planner commit and parent is
+  `80d0db339e8a0d0c2305cb3cdee3fb64ebcbbb9e`;
+- read WORKFLOW.md, AGENTS.md, this task and current report;
 - inspect `PasswordRecoveryController`, `PasswordSetupService`,
-  framework hasher usage in the existing broker/repository boundary, and
-  `PasswordRecoveryTest`;
-- inspect current prototype counts and the two stale docs;
+  `PasswordRecoveryTimingTest` and the previous correction diff;
 - verify clean/known local tree;
 - do not touch unknown local changes.
 
 During implementation:
 
-- work only on this correction;
+- work only on this race correction;
 - do not edit `.ai/task.md`;
-- keep real eligible flow on the existing Laravel broker;
-- use the same framework hash cost for dummy work;
-- no artificial sleep defense;
-- no fake reset rows/jobs;
+- keep eligible real broker flow intact;
+- ensure exactly one hash in real/dummy/race paths;
+- no artificial delays;
+- no fake token rows/jobs;
 - never log submitted email/token/hash;
-- preserve all accepted recovery behavior;
-- avoid unrelated refactors/docs cleanup.
+- avoid unrelated refactors/docs changes.
 
 Before commit:
 
 - run all required checks;
-- inspect complete diff/staged files;
-- verify no env/private files, production data, tokens, queue payload dumps,
-  mail captures, logs/cache/vendor or temporary artifacts are staged;
+- inspect full diff/staged files;
+- verify no env/private files, production data, token/queue dumps, mail captures,
+  logs/cache/vendor/temp artifacts are staged;
 - update `.ai/report.md` factually;
 - explicitly state that no real external mail was sent.
 
 If complete, commit with:
 
-`codex: TASK-2026-10-02-01 correct recovery timing privacy`
+`codex: TASK-2026-10-02-01 close recovery timing race`
 
 Do not create an accept commit.
