@@ -4,69 +4,70 @@ Status: done
 
 ## Summary
 
-Внесена корректировка timing privacy после review `e93689b`.
-Неизвестный или недоступный аккаунт после успешной проверки синтаксиса email
-выполняет один `app('hash')->make(Str::random(64))`: тот же контейнерный framework
-hasher и настроенная стоимость, которые получает DatabaseTokenRepository.
-Случайное значение и результат сразу отбрасываются; fake user, token row, job,
-новые логи или искусственные задержки не добавлены.
+Закрыта гонка между первой проверкой аккаунта в public recovery controller и
+повторной проверкой под row lock в `PasswordSetupService::invite()`.
+Сервис возвращает `true` после создания реального broker token и постановки job,
+либо `false`, если actorless-вызов при locked reload обнаружил недоступный аккаунт.
+Контроллер выполняет один dummy hash при первоначальной недоступности либо таком
+`false`; успешная выдача выполняет только реальный broker hash.
 
-Ветка доступного аккаунта по-прежнему вызывает существующий `invite()`.
-Broker, row lock, token replacement, rollback, очередь, TTL, eligibility,
-сессии, rate limits и публичные ответы не изменены.
-
-Текущие сводки каталога исправлены на 32 группы / 263 варианта. Исторические
-описания состава старых этапов не переписывались.
+Fallback остаётся внутри try: исключение очереди после реального хеширования
+не вызывает второй dummy hash. Сохранены rollback, прежний токен, generic response,
+admin 404/authorization/validation semantics, audit и post-approval onboarding.
+Новых задержек, fake token rows/jobs, логов, пакетов и миграций нет.
 
 ## Changed Files
 
-- `application/app/Http/Controllers/PasswordRecoveryController.php` — три строки
-  для dummy hash в неизвестной/недоступной ветке.
-- `application/tests/Feature/PasswordRecoveryTimingTest.php` — 19 deterministic
-  HTTP tests: восемь состояний × bcrypt/Argon2id, malformed/throttle, свежесть
-  dummy values, rollback и безопасная диагностика при отказе очереди.
-- `docs/ui-pages.md`, `docs/project-status.md` — актуальные сводки 32/263,
-  включая текущие формулировки local/testing и повторного использования Blade.
-- `docs/email.md` — механизм одинаковой криптографической работы и его границы.
-- `.ai/report.md` — отчёт этой корректирующей итерации.
+- `application/app/Services/PasswordSetupService.php` — boolean issuance contract
+  через результат существующей транзакции, без изменений broker/locking/queue flow.
+- `application/app/Http/Controllers/PasswordRecoveryController.php` — dummy fallback
+  учитывает фактический результат выдачи после locked recheck.
+- `application/tests/Feature/PasswordRecoveryTimingTest.php` — deterministic race
+  для bcrypt и Argon2id с реальным сервисом и инструментированным framework hasher.
+- `application/tests/Feature/PasswordSetupTest.php` — прямые проверки true/false,
+  admin success/audit, authorization/404 и validation exception semantics.
+- `docs/email.md` — описание locked-recheck fallback и отсутствия второго hash
+  после исключения при выдаче.
+- `.ai/report.md` — отчёт текущей итерации.
 
 ## Checks
 
-Изолированная копия `/tmp/timing-check` локального PHP 8.2.32 контейнера;
-MySQL 8.4, выделенная `gruppa_cabinet_test`. Исходники смонтированы read-only.
-Env/private/storage/cache файлы проекта исключены из копирования; использован
-пустой тестовый `.env`. DB-настройки из phpunit.xml и синтетический APP_KEY
-переданы через environment, в том числе дочерним PHP-процессам.
+Проверки выполнены в изолированной копии `/tmp/race-check` временного контейнера
+`cabinet-race-check`: PHP 8.2.32, MySQL 8.4, выделенная `gruppa_cabinet_test`.
+Исходники смонтированы read-only; private env, storage/cache исключены из копирования.
+Использован пустой тестовый `.env`, DB-настройки из phpunit.xml и синтетический
+APP_KEY переданы через environment, включая дочерние PHP-процессы.
 
-- `php artisan test --compact --filter=PasswordRecoveryTimingTest --log-junit=/tmp/timing-focused.xml`
-  — **19 passed, 295 assertions**, 9.12 s.
-- `php artisan test --compact --filter="PasswordRecoveryTest|PasswordSetupTest|AuthenticationTest|PsychologistAdminTest|PrototypeTest|DeploymentPreflightTest|ExpiryWarningTest|SharedHostingRuntimeTest" --log-junit=/tmp/timing-regression.xml`
-  — **136 passed, 2619 assertions**, 78.50 s.
-- `php artisan test --compact --log-junit=/tmp/timing-full.xml`
-  — **735 passed, 8143 assertions**, 679.74 s; failures/errors/skips: **0/0/0**.
-  Выполнены все классы, без exclusions.
+- `php artisan test --compact --filter="locked_recheck|invite_reports|invite_rechecks|invite_keeps_validation" --log-junit=/tmp/race-focused.xml`
+  — **10 passed, 113 assertions**, 8.12 s.
+- `php artisan test --compact --filter="PasswordRecoveryTimingTest|PasswordRecoveryTest|PasswordSetupTest|AuthenticationTest|PsychologistAdminTest|PrototypeTest|DeploymentPreflightTest|ExpiryWarningTest|SharedHostingRuntimeTest" --log-junit=/tmp/race-regression.xml`
+  — **165 passed, 3027 assertions**, 50.96 s.
+- `php artisan test --compact --log-junit=/tmp/race-full.xml`
+  — **745 passed, 8215 assertions**, 587.78 s; failures/errors/skips **0/0/0**,
+  выполнены все классы без exclusions.
 - `php vendor/bin/pint --test` — **PASS, 214 files**.
 - `php vendor/bin/phpstan analyse --no-progress --memory-limit=512M` — **No errors**.
 - `composer check-platform-reqs` — все требования **success**.
 - `composer validate --no-check-publish` — **composer.json is valid**.
 - `php artisan view:cache` — **Blade templates cached successfully**.
-- `php artisan route:list --path=password -v` — **PASS**, семь прежних routes,
-  включая recovery/setup/admin и два prototype routes; middleware сохранены.
+- `php artisan route:list --path=password -v` — **PASS**, семь прежних routes
+  с прежними middleware, включая два prototype routes.
 - `CACHE_STORE=array php artisan schedule:list` — **PASS**, пять прежних команд;
   scheduled commands не запускались.
-- `git diff --check` / `git diff --cached --check` — exit 0. Полный diff и
-  состав staged-файлов проверены: только текущая корректировка и отчёт, без
-  env/private/production data, tokens, queue dumps, captures, logs/cache/vendor
-  и временных артефактов. App/tests/routes/Blade/bootstrap тестовой копии
-  побайтово совпали с исходниками (diff -qr/cmp).
+- `git diff --check` / `git diff --cached --check` — exit 0. Тестовая копия app/tests/routes/Blade/bootstrap
+  побайтово совпала с исходниками (`diff -qr` / `cmp`).
+- Полный diff и staged-файлы проверены: только шесть файлов текущей задачи; проверены отсутствие
+  private/env/production data, token/queue dumps, mail captures, logs/cache/vendor
+  и временных артефактов, а также отсутствие credential patterns в добавленных строках.
 
-Полные классы из финального JUnit (failures/errors/skips везде 0/0/0):
+Результаты полных обязательных классов из успешного regression JUnit
+(failures/errors/skips везде 0/0/0):
 
 | Класс | Tests | Assertions |
 |---|---:|---:|
-| PasswordRecoveryTimingTest | 19 | 295 |
+| PasswordRecoveryTimingTest | 21 | 353 |
 | PasswordRecoveryTest | 23 | 254 |
-| PasswordSetupTest | 22 | 270 |
+| PasswordSetupTest | 30 | 325 |
 | AuthenticationTest | 25 | 208 |
 | PsychologistAdminTest | 15 | 263 |
 | PrototypeTest | 10 | 1207 |
@@ -74,45 +75,57 @@ Env/private/storage/cache файлы проекта исключены из ко
 | ExpiryWarningTest | 18 | 239 |
 | SharedHostingRuntimeTest | 3 | 26 |
 
-Новые тесты наблюдают вызовы реального framework hash manager через proxy,
-делегируя actual make настроенным Laravel bcrypt/Argon2id drivers. Проверены
-один вызов make, отсутствие per-call overrides и metadata фактических хешей
-(bcrypt cost 6 либо Argon2id memory/time/threads 1024/2/1 в тестах). Broker получает
-тот же объект hasher. Для доступного аккаунта наблюдаемый hash сохранён в реальном
-password_reset_tokens и работает через broker; для остальных states записей/jobs нет.
-Проверены свежесть dummy input, отсутствие dummy input/hash в сессии и логах,
-отказ очереди с сохранением старого токена и прежним публичным ответом.
-Wall-clock thresholds и sleep-based assertions не применялись.
+Промежуточные результаты не скрыты:
 
-Полные regression-классы проверяют первые приглашения, замену существующего
-пароля, login старым/новым паролем, одноразовость, отзыв целевых сессий,
-CSRF/policy, base-path URLs, mail transports и generic body/status/headers.
-Все 263 prototype states проверены серверным рендерингом.
+- Первый focused-прогон: 6 failed / 4 passed (107 assertions) из-за неверного
+  имени audit-таблицы в новых assertions. Исправлено на существующую модель
+  `AuditLog`; повторный focused-прогон успешен. Production-код из-за этого не менялся.
+- Первый regression-прогон: 1 failed / 164 passed (3024 assertions), 51.88 s.
+  Существующий `AuthenticationTest::test_throttle_expires_after_sixty_seconds`
+  получил redirect на login после travel(61). Без изменения кода отдельный полный
+  `AuthenticationTest` прошёл: **25 passed, 208 assertions**, 12.41 s
+  (`php artisan test --compact --filter=AuthenticationTest --log-junit=/tmp/race-auth-recheck.xml`).
+  Повтор всего regression-набора и полный MySQL suite также успешны.
+  Причина единичного сбоя не установлена.
+
+Race-тест детерминированно перехватывает вызов `invite()` после первоначального
+eligible lookup, меняет `disabled` в БД, затем вызывает исходный реальный сервис
+с locked reload. Его результат не подменяется: проверяются `false` и отсутствие
+hash до возврата в controller, затем ровно один framework hash. Проверены configured
+bcrypt/Argon2id cost, отсутствие per-call overrides, одинаковые body/status/headers,
+отсутствие token rows/jobs, sensitive values в логах и сессии. Wall-clock assertions
+и sleep-based timing tests не применяются. Это воспроизведение порядка событий
+между проверками, без недетерминированного планирования двух процессов.
+
+Сохранённые regression-тесты проверяют один hash для real/dummy paths,
+queue-failure rollback без второго hash, malformed/throttled без hash, свежесть
+и отбрасывание dummy values, password reset/login/session boundaries, onboarding,
+admin actions/audit, transport restrictions, base-path URLs и все 263 prototype states.
 
 ## Facts
 
-- Исходный HEAD `b42ecbc` — corrective planner; parent
-  `e93689ba2e81aad6c990c38cb1d2ae67eba0e248` подтверждён; дерево было чистым.
-- Прочитаны WORKFLOW/AGENTS/task/report, изучены исходный implementation diff,
-  controller/service, установленный DatabaseTokenRepository/HashManager,
-  recovery tests, каталог и связанные документы.
-- `.ai/task.md`, AGENTS, WORKFLOW, Blade/CSS, broker, policy, limiter и session
-  implementation не изменены; пакетов и миграций не добавлено.
-- **Реальных внешних писем не отправлялось.** Тесты используют mail/HTTP fakes;
+- Исходный HEAD `e00eec1` — актуальный planner; parent
+  `80d0db339e8a0d0c2305cb3cdee3fb64ebcbbb9e` подтверждён; дерево было чистым.
+- Прочитаны WORKFLOW/AGENTS/task/current report, предыдущий correction diff,
+  controller/service/tests и admin/onboarding callers.
+- `.ai/task.md`, UI/CSS, routes, rate limits, broker/TTL, session implementation
+  и catalogue 32/263 не изменены.
+- **Реальных внешних писем не отправлялось.** Использовались mail/HTTP fakes;
   реальных SMTP/sendmail/MODX/WEBPAY вызовов не выполнялось.
 - Production/private env, включая `.env_save`, не читались и не изменялись.
 
 ## Assumptions
 
-Дополнительных продуктовых предположений нет; применён preferred design задачи.
+Дополнительных продуктовых предположений нет; реализован preferred design задачи.
 
 ## Unknowns
 
-Live email/integration delivery не проверялась: внешние вызовы запрещены задачей.
-Изменений интерфейса нет; отдельный browser smoke для этой коррекции не проводился.
+Live delivery не проверялась: внешние вызовы запрещены задачей. Browser smoke
+не проводился — UI не менялся. Причина промежуточного throttle-test сбоя неизвестна.
 
 ## Risks / Next Step
 
-Обязательные проверки пройдены; корректировка готова к task commit.
-Коррекция устраняет различие дорогой криптографической работы; она не обещает абсолютного равенства времени DB/queue/network операций
-или инфраструктурных отказов.
+Все обязательные проверки пройдены; корректировка готова к обязательному task commit.
+Исправление выравнивает криптографическую работу при изменении eligibility между
+проверками; абсолютное равенство времени DB/queue/network и инфраструктурных отказов
+не заявляется.

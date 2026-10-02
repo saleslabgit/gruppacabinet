@@ -12,16 +12,20 @@ use App\Services\PasswordSetupService;
 use App\Services\PsychologistActions;
 use App\Services\SettingService;
 use Database\Seeders\DatabaseSeeder;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\Passwords\DatabaseTokenRepository;
 use Illuminate\Auth\Passwords\PasswordBroker;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Support\SuccessfulMailFake;
 use Tests\TestCase;
 
@@ -53,6 +57,69 @@ class PasswordSetupTest extends TestCase
     {
         Setting::where('key', SettingService::PASSWORD_SETUP_LINK_TTL_HOURS)->update(['value' => (string) $hours]);
         app(SettingService::class)->invalidate(SettingService::PASSWORD_SETUP_LINK_TTL_HOURS);
+    }
+
+    public function test_actorless_invite_reports_actual_issuance(): void
+    {
+        $this->assertTrue($this->setup->invite($this->user->id));
+        $this->assertDatabaseCount('password_reset_tokens', 1);
+        $this->assertDatabaseCount('jobs', 1);
+        $this->assertFalse(AuditLog::where('action', 'user.password_link_sent')->exists());
+        Mail::assertNothingSent();
+    }
+
+    public function test_admin_invite_reports_success_and_audits(): void
+    {
+        $this->assertTrue($this->setup->invite($this->user->id, $this->admin));
+        $this->assertDatabaseCount('password_reset_tokens', 1);
+        $this->assertDatabaseCount('jobs', 1);
+        $this->assertSame($this->admin->id, AuditLog::where('action', 'user.password_link_sent')->sole()->actor_id);
+        Mail::assertNothingSent();
+    }
+
+    #[DataProvider('ineligible')]
+    public function test_invite_rechecks_current_eligibility_and_preserves_admin_exceptions(string $state): void
+    {
+        $this->assertTrue(PasswordSetupService::eligible($this->user));
+        if ($state === 'deleted') {
+            $this->user->fresh()->delete();
+        } else {
+            User::whereKey($this->user->id)->update(match ($state) {
+                'pending', 'rejected' => ['status' => $state],
+                default => [$state => true],
+            });
+        }
+        // The caller's model is stale; invite must use the locked current row.
+        $this->assertTrue(PasswordSetupService::eligible($this->user));
+        $this->assertFalse($this->setup->invite($this->user->id));
+        try {
+            $this->setup->invite($this->user->id, $this->admin);
+            $this->fail('Admin failures must throw, not return false.');
+        } catch (AuthorizationException $exception) {
+            $this->assertNotSame('deleted', $state);
+        } catch (HttpException $exception) {
+            $this->assertSame('deleted', $state);
+            $this->assertSame(404, $exception->getStatusCode());
+        }
+        $this->assertDatabaseCount('password_reset_tokens', 0);
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertFalse(AuditLog::where('action', 'user.password_link_sent')->exists());
+        Mail::assertNothingSent();
+    }
+
+    public function test_admin_invite_keeps_validation_exception_if_policy_allows_ineligible_target(): void
+    {
+        $this->user->update(['disabled' => true]);
+        Gate::before(fn () => true);
+        try {
+            $this->setup->invite($this->user->id, $this->admin);
+            $this->fail('Ineligible admin target must raise validation, not return false.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['action' => ['Установка пароля недоступна.']], $exception->errors());
+        }
+        $this->assertDatabaseCount('password_reset_tokens', 0);
+        $this->assertDatabaseCount('jobs', 0);
+        Mail::assertNothingSent();
     }
 
     private function job(): SendPasswordSetup

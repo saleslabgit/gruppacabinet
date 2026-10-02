@@ -37,10 +37,10 @@ class PasswordSetupService
             && $user->status === UserStatus::Approved;
     }
 
-    public function invite(int $userId, ?User $actor = null): void
+    public function invite(int $userId, ?User $actor = null): bool
     {
         // The database queue insert and token replacement commit together.
-        DB::transaction(function () use ($userId, $actor): void {
+        return DB::transaction(function () use ($userId, $actor): bool {
             $user = User::query()->lockForUpdate()->find($userId);
             if ($actor) {
                 abort_unless($user !== null, 404);
@@ -51,7 +51,7 @@ class PasswordSetupService
                     throw ValidationException::withMessages(['action' => 'Установка пароля недоступна.']);
                 }
 
-                return;
+                return false;
             }
             $token = $this->broker()->createToken($user);
             $jobId = Bus::dispatch((new SendPasswordSetup($user->id, $token))->onConnection('database')->beforeCommit());
@@ -63,6 +63,8 @@ class PasswordSetupService
             if ($actor) {
                 app(AuditService::class)->record('user', $user->id, 'user.password_link_sent', [], $actor);
             }
+
+            return true;
         });
     }
 

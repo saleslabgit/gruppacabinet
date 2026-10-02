@@ -13,6 +13,9 @@ ineligible accounts hash a fresh dummy value through the same configured framewo
 hasher, with no per-call cost override. The dummy hash is discarded without a
 token row or queued job. This removes the cryptographic-work differential, not
 all variation from database/queue work or infrastructure failures.
+The same dummy fallback applies when the locked eligibility recheck in `invite()`
+returns `false`; successful issuance returns `true`. Exceptions after real token
+hashing keep the generic response without performing a second hash.
 
 ## Broker and setup flow
 

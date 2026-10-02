@@ -115,6 +115,53 @@ class PasswordRecoveryTimingTest extends TestCase
         $this->assertPrivateValuesNotLogged($email);
     }
 
+    public static function hashDrivers(): array
+    {
+        return [['bcrypt'], ['argon2id']];
+    }
+
+    #[DataProvider('hashDrivers')]
+    public function test_locked_recheck_after_account_is_disabled_still_hashes_once(string $driver): void
+    {
+        $setup = app(PasswordSetupService::class);
+        $hasher = $this->observeHasher($driver);
+        $success = $this->post('/password/forgot', ['email' => 'unknown@example.test'])->assertOk();
+        $this->hashes = [];
+        $this->partialMock(PasswordSetupService::class)->shouldReceive('invite')->once()
+            ->with($this->user->id)->andReturnUsing(function (int $userId) use ($setup): bool {
+                // Called only after the controller has resolved an eligible account.
+                $this->assertTrue(PasswordSetupService::eligible($this->user->fresh()));
+                User::whereKey($userId)->update(['disabled' => true]);
+                // Run the real service, including its locked reload, rather than mock its result.
+                $issued = $setup->invite($userId);
+                $this->assertFalse($issued);
+                $this->assertCount(0, $this->hashes);
+
+                return $issued;
+            });
+
+        $response = $this->post('/password/forgot', ['email' => $this->user->email])
+            ->assertOk()->assertViewHas('variant', 'success');
+        $this->assertTrue($this->user->fresh()->disabled);
+        $this->assertCount(1, $this->hashes);
+        $entry = $this->hashes[0];
+        $this->assertSame(64, strlen($entry['value']));
+        $this->assertSame([], $entry['options']);
+        $this->assertTrue($hasher->check($entry['value'], $entry['hash']));
+        $this->assertSame($driver, $hasher->info($entry['hash'])['algoName']);
+        $this->assertSame($driver === 'bcrypt' ? ['cost' => 6] : ['memory_cost' => 1024, 'time_cost' => 2, 'threads' => 1], $hasher->info($entry['hash'])['options']);
+        $this->assertSame($success->getContent(), $response->getContent());
+        foreach (['Cache-Control', 'Referrer-Policy', 'Location', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'] as $header) {
+            $this->assertSame($success->headers->get($header), $response->headers->get($header));
+        }
+        $this->assertDatabaseCount('password_reset_tokens', 0);
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertStringNotContainsString($entry['value'], serialize(session()->all()));
+        $this->assertStringNotContainsString($entry['hash'], serialize(session()->all()));
+        Mail::assertNothingSent();
+        $this->assertPrivateValuesNotLogged($this->user->email);
+    }
+
     public function test_malformed_and_throttled_requests_do_not_hash(): void
     {
         $this->observeHasher();

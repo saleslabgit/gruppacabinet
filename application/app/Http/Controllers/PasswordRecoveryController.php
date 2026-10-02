@@ -39,9 +39,11 @@ class PasswordRecoveryController extends Controller
 
         try {
             $user = User::query()->where('email', $email)->first();
+            $issued = false;
             if (PasswordSetupService::eligible($user)) {
-                $setup->invite($user->id);
-            } else {
+                $issued = $setup->invite($user->id);
+            }
+            if (! $issued) {
                 // Match DatabaseTokenRepository's configured hash cost without storing a token.
                 app('hash')->make(Str::random(64));
             }
