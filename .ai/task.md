@@ -1,458 +1,534 @@
-# Task: TASK-2026-10-01-05
+# Task: TASK-2026-10-02-01
 
 Status: planned
-Created from: 695ee2e6e234a177a12b3dd00b53540157c045ae (main)
+Created from: a632e01cc5776c57d568d9592196782a18203d2b (main)
 
 ## Title
 
-Correct pause timing semantics and hidden-group lifecycle processing
+Add self-service password recovery and reusable admin password-link sending
 
 ## Goal
 
-Correct TASK-2026-10-01-04 before acceptance.
+Close the current password-recovery gap without introducing a second token system.
 
-Two product rules are authoritative:
+A psychologist who can normally use the Cabinet must be able to recover access
+without contacting an administrator:
 
-1. **Pause means publication control only.**
-   Pausing a group removes it from publication, but the placement end date never
-   moves. Time continues to run while the group is paused.
-2. A group hidden/deleted by its psychologist must no longer receive placement
-   warning mail or later be processed by the placement-expiration scheduler.
+1. open the login page;
+2. choose “Forgot password?”;
+3. submit the account email;
+4. receive a one-time email link;
+5. set a new password;
+6. log in with the new password.
 
-Keep the rest of TASK-2026-10-01-04 intact.
+An administrator must also be able to send the same password-link flow from the
+psychologist card at any time while that psychologist is currently eligible to
+use the Cabinet, regardless of whether the psychologist has never set a password
+or already has one.
+
+Reuse the existing Laravel password-broker/token infrastructure from Stage 12.
+Do not create a custom reset-token table or a parallel password-reset mechanism.
 
 ## Facts
 
-- Current implementation commit:
-  `695ee2e6e234a177a12b3dd00b53540157c045ae`.
-- Current TASK-2026-10-01-04 implementation is not accepted yet.
-- It currently implements:
-  - `active -> paused`;
-  - async MODX unpublish on pause/delete/expiration;
-  - async MODX publish on resume;
-  - publication revisions/idempotency/stale-result protection;
-  - deletion semantics requested by the product owner;
-  - optional secondary-currency price and editor/UI changes.
-- Current implementation **incorrectly freezes placement time**:
-  - it records `paused_at`;
-  - successful resume adds `now - paused_at` to `expires_at`.
-- Current `GroupLifecycleService::expireDueGroups()` only processes `active`.
-- Current expiry-warning command/job only process `active`.
-- Psychologist deletion keeps the row non-soft-deleted for admin visibility and
-  sets `psychologist_deleted_at`. Therefore an active psychologist-hidden group
-  can currently still be selected by expiry warnings and later expiration.
-- Participant intake already rejects `psychologist_deleted_at !== null`.
+- Current main HEAD is
+  `a632e01cc5776c57d568d9592196782a18203d2b`.
+- Existing first-password flow uses:
+  - `PasswordSetupService`;
+  - Laravel `PasswordBroker` + `DatabaseTokenRepository`;
+  - existing `password_reset_tokens`;
+  - configurable `password_setup_link_ttl_hours`;
+  - `SendPasswordSetup` database-queue job;
+  - `PasswordSetupMail`;
+  - GET `/password/setup/{token}?email=...`;
+  - POST `/password/setup`.
+- Existing token replacement invalidates the previous link.
+- Existing password completion is currently restricted to users whose
+  `password === null`.
+- Existing admin password action is also restricted to `password === null`.
+- Existing login page has no “Forgot password?” path.
+- Existing setup Blade page is the approved Stage 3 password page.
+- Existing mail transport rules allow only SMTP/sendmail for password links and
+  use the database queue.
+- Password setup/recovery URLs and tokens are sensitive and must not be logged.
+- `SessionInvalidator` already deletes the target user’s database sessions and
+  rotates `remember_token`.
+- Account login eligibility is currently:
+  - non-admin psychologist;
+  - status `approved`;
+  - not disabled;
+  - not soft-deleted.
+- No migration is expected to be necessary.
+- Do not touch unrelated MODX, WEBPAY, intake, route-405, HTTPS redirect, or
+  production private artifacts.
 
-## Product decisions
+## Product Decisions
 
-### Pause does not freeze placement time
+### Eligible account
 
-Pause remains:
+A password link may be issued for a psychologist only when the account is:
 
-```text
-active -> paused
-```
+- non-admin;
+- `approved`;
+- enabled;
+- not soft-deleted.
 
-and still asynchronously requests MODX `published=false`.
+Password presence is **not** an eligibility condition anymore.
 
-However:
+Thus both of these are supported:
 
-- **never modify `expires_at` when pausing**;
-- **never modify `expires_at` when resuming**;
-- the placement clock continues normally while paused;
-- `paused_at` may remain as operational/history metadata, but must not be used
-  to add time to the placement;
-- successful resume clears `paused_at` and transitions `paused -> active`
-  only after confirmed remote publish;
-- successful resume does not reset/extend the placement end date.
+- first password: `password === null`;
+- password recovery/replacement: `password !== null`.
 
-Example:
+Pending, rejected, disabled, deleted and admin accounts do not receive a usable
+password link.
 
-```text
-expires_at = 2026-10-20 12:00
-pause      = 2026-10-10 12:00
-resume     = 2026-10-15 12:00
+“Admin can send at any time” means at any time for a currently login-eligible
+psychologist, including when a password is already configured. It does not bypass
+account access restrictions.
 
-after resume:
-expires_at = 2026-10-20 12:00
-```
+### Public privacy semantics
 
-### Paused groups can expire
+The public recovery request must not reveal whether an email exists, whether the
+account is approved/enabled, or whether a password is currently configured.
 
-Because the end date keeps running, a paused group must not remain paused past
-its placement deadline.
+After a syntactically valid request, return the same generic success state for:
 
-Add allowed transition:
+- an eligible existing account;
+- unknown email;
+- pending/rejected/disabled/deleted/admin account.
 
-```text
-paused -> expired
-```
+Only the eligible account receives a token/job/email.
 
-`groups:expire` must process due groups in both statuses:
+Do not expose different HTTP status, copy, redirect target, timing-dependent
+application state, or validation detail that intentionally identifies account
+existence.
 
-```text
-active
-paused
-```
+Normal malformed-email validation may be shown because it describes request
+syntax, not account existence.
 
-provided:
+### Link/token semantics
 
-- `expires_at <= now()`;
-- the group has not been hidden by its psychologist;
-- normal soft-delete/global-scope rules still apply.
+Use the same Laravel broker repository and configured TTL as the first-password
+flow.
 
-For due paused groups:
+Issuing a new link from any source:
 
-- transition `paused -> expired`;
-- clear `paused_at`;
-- desired MODX publication state remains/becomes `unpublished`;
-- schedule a newer unpublished publication revision when a remote Resource ID
-  exists, so any older pending/in-flight resume publish cannot win;
-- local expiration commits independently of MODX.
+- public recovery;
+- admin action;
+- automatic post-approval invitation;
 
-### Resume is allowed only before expiry
+must replace the previous broker token for that email, making older links invalid.
 
-Owner resume requires:
+The link remains one-time. Successful password submission deletes the token.
 
-- status `paused`;
-- not disabled;
-- visible to owner;
-- valid remote Resource ID;
-- `expires_at > now()`.
+### Successful password change
 
-If the group is already due, resume must not publish it.
+On successful completion:
 
-The publication job must recheck the deadline:
+1. validate current account eligibility again under the existing safe boundary;
+2. validate the one-time broker token;
+3. hash/store the new password via the existing model cast;
+4. invalidate all existing sessions for that user;
+5. rotate remember-token state through the existing session invalidation service;
+6. delete the broker token;
+7. do not auto-login.
 
-- before remote publish;
-- after remote publish returns, before local `paused -> active`.
-
-Race rule:
-
-If a resume request was valid when queued but `expires_at` is reached while the
-remote publish request is in flight:
-
-1. do **not** reactivate the group;
-2. locally move/leave it in `expired` through the normal transition/history
-   boundary;
-3. create a newer desired `unpublished` publication revision;
-4. queue remote unpublish after commit.
-
-Thus a late publish response can never leave an expired local group publicly
-visible.
-
-### Expiry warning while paused
-
-Pause is only publication state; placement time still runs.
-
-Therefore expiry warnings should treat a visible paused placement the same as a
-visible active placement for the remaining-time threshold.
-
-Eligible warning statuses:
-
-```text
-active
-paused
-```
-
-All existing owner/account/disabled/date/sent guards remain.
-
-A queued warning job must recheck the current status and may send only for
-`active` or `paused`.
-
-### Psychologist-hidden groups leave placement automation
-
-Once:
-
-```text
-psychologist_deleted_at IS NOT NULL
-```
-
-the group is intentionally removed from that psychologist's lifecycle.
-
-It must not:
-
-- be selected by `groups:queue-expiry-warnings`;
-- send a previously queued expiry-warning email;
-- be selected by `groups:expire`;
-- be expired by a stale/direct `expireOne()` call;
-- have `expiry_warning_sent_at` marked by a stale warning job.
-
-The delete-triggered MODX publication job still runs because it is the mechanism
-that removes the already synchronized group from the public site.
-
-Admin visibility/history/payment preservation from TASK-2026-10-01-04 remains.
+Other users’ sessions must remain untouched.
 
 ## Scope
 
-### 1. Remove pause-duration extension
+### 1. Generalize the existing password-link domain service
 
-Update `SetGroupModxPublication` resume success handling.
+Refactor the existing Stage 12 password setup implementation surgically so that
+the same broker flow supports both first-password setup and recovery.
 
-Remove:
+Do not add a second broker or token storage.
 
-- calculation of pause duration;
-- `expires_at->addSeconds(...)`;
-- any test/docs/UI wording claiming paused time is returned to the placement.
+The shared account/link eligibility must no longer require `password === null`.
 
-Successful current resume revision:
+Preserve:
 
-1. remote publication is confirmed;
-2. row-lock/recheck group;
-3. confirm it is still current, paused, not deleted/hidden/disabled, same remote
-   identity, and `expires_at > now()`;
-4. clear `paused_at`;
-5. transition `paused -> active`;
-6. mark publication state published.
+- approved/enabled/non-admin/non-deleted guards;
+- configured TTL;
+- one-time tokens;
+- token replacement;
+- database queue;
+- SMTP/sendmail transport restrictions;
+- safe logging;
+- base-path-safe URLs;
+- no auto-login.
 
-Do not mutate `expires_at`.
+Keep naming changes minimal. A broad rename/refactor of Stage 12 is not required
+if the existing service can remain understandable with focused methods.
 
-Do not reset `expiry_warning_sent_at` merely because the group was resumed;
-the original placement warning semantics/time window continue.
+### 2. Add self-service recovery request page
 
-### 2. Add paused expiration
+Add a public recovery request route and page using the existing public auth
+layout, tokens and Blade components.
 
-Update `GroupStatus::canTransitionTo()`:
+Preferred route shape:
 
-```text
-paused -> active
-paused -> expired
-```
+- GET `/password/forgot` — form;
+- POST `/password/forgot` — request link.
 
-Update `GroupLifecycleService`:
+Use stable Laravel route names under the existing `password.*` namespace so
+the existing password exception redaction/rendering boundary still applies.
 
-- bulk candidate query: status active OR paused;
-- add `whereNull('psychologist_deleted_at')`;
-- `expireOne()` row-lock recheck:
-  - status active/paused;
-  - due expires_at;
-  - psychologist_deleted_at null.
+The page must include:
 
-On expiration:
+- page title for password recovery;
+- email input;
+- submit action;
+- link back to login;
+- validation state;
+- generic sent/success state;
+- rate-limit state.
 
-- normal system history transition to expired;
-- clear `paused_at` if set;
-- schedule desired MODX unpublished after commit when remote ID exists.
+The login page must expose a visible “Забыли пароль?” link.
 
-Do not duplicate remote calls if no remote Resource exists.
+Do not redesign the login page or create a new visual language.
 
-### 3. Protect resume/expiry race
+### 3. Public recovery request behavior
 
-Update resume policy/domain validation to require future `expires_at`.
+For a valid email-shaped request:
 
-Before publication HTTP, a publish revision that is no longer resumable because
-the deadline is due must not send publish.
+- normalize using the same account-email semantics already used by auth;
+- look up a possible user without exposing the result;
+- if eligible, issue/replace the broker token and queue the password email;
+- if ineligible or unknown, perform no password mutation and queue no email;
+- return the same generic success message in either case.
 
-After successful publication HTTP, recheck deadline under row lock.
+Suggested user-facing meaning:
 
-If it became due during HTTP:
+“Если аккаунт с таким email доступен для восстановления, мы отправили ссылку для установки нового пароля.”
 
-- transition paused -> expired;
-- clear paused_at;
-- create/schedule a newer unpublished publication revision;
-- do not transition active;
-- do not extend expires_at.
+Do not claim that an email definitely exists or was definitely sent.
 
-The old publish revision must not overwrite the newer publication intent/state.
+Queue insertion / token replacement for an eligible user must retain the current
+transactional safety properties of the Stage 12 invite flow.
 
-Add concurrency/stale tests for this exact race.
+Infrastructure failure for an eligible request must not leak account existence.
+Use the same generic public result; log only safe technical context without
+recipient/token/URL/body.
 
-### 4. Correct paused UI copy
+### 4. Rate limiting / abuse protection
 
-Remove/rewrite any text such as:
+Add explicit public recovery throttling.
 
-- `Время размещения остановится`;
-- `Оставшееся время размещения сохранится`;
-- `Дата окончания будет сдвинута после возобновления`;
-- equivalent documentation claims that the clock is frozen.
+Protect at least:
 
-Pause confirmation must clearly say:
+- by client IP;
+- by normalized email-derived key, without logging/storing plaintext email in
+  application diagnostics.
 
-- group will be removed from publication;
-- participant applications stop;
-- **placement end date does not change**.
+A practical target is:
 
-Paused summary must show that the group is unpublished/paused while its placement
-continues until the existing `expires_at`.
+- a small per-minute IP allowance for form submissions;
+- no more than one issued request per minute for the same normalized email.
 
-Resume confirmation must not promise recovered time.
+Use existing Laravel rate-limiter patterns.
 
-The displayed `Размещение до` date remains unchanged through pause/resume.
+Do not weaken the existing:
 
-### 5. Expiry warnings for paused but not hidden groups
+- password link GET/POST limiter;
+- admin resend limiter;
+- login limiter.
 
-Update `QueueExpiryWarnings`:
+Do not return an account-existence-specific throttle result.
 
-- status active OR paused;
-- `whereNull('psychologist_deleted_at')`;
-- preserve every other existing eligibility condition and unique-lock behavior.
+### 5. Reuse the existing password form for both first setup and recovery
 
-Update `SendExpiryWarning::handle()` recheck:
+The current `auth/password.blade.php` must work for a user who already has a
+password.
 
-- status active OR paused;
-- psychologist_deleted_at must be null.
+Update its copy so it does not falsely claim that every operation is a “first
+login”.
 
-Update the final row-locked `expiry_warning_sent_at` write with the same status
-and hidden-group guard.
+The normal form should clearly ask for a new password.
 
-Do not send warning mail to psychologist-hidden groups.
+The invalid/expired state must tell the user that they may request another link
+themselves from password recovery, rather than saying that only the administrator
+can help.
 
-### 6. Expiration exclusion for psychologist-hidden groups
+Keep:
 
-Update both:
+- email;
+- token;
+- new password;
+- confirmation;
+- existing password requirements;
+- invalid/expired state;
+- success state;
+- login link;
+- no auto-login.
 
-- `expireDueGroups()` query;
-- `expireOne()` row-lock recheck;
+### 6. Password email copy
 
-to require `psychologist_deleted_at IS NULL`.
+Reuse the existing queued password-link mail path.
 
-A psychologist-hidden active/paused group remains in its retained admin/audit
-state and is not mutated later by placement scheduler.
+The email must be truthful for both:
 
-### 7. Preserve accepted TASK-04 work
+- first-password onboarding;
+- later recovery/reset.
 
-Do not undo unrelated implemented behavior:
+It may either:
 
-- simplified rich-text toolbar;
-- removed helper texts;
-- optional secondary-currency field / `price_usd` mapping;
-- delete available across lifecycle statuses;
-- successful payments no longer block delete;
-- no automatic refund;
-- psychologist delete via `psychologist_deleted_at`;
-- admin soft delete;
-- async MODX publication endpoint/client;
-- revision-scoped publication idempotency;
-- shared content/publication remote lock;
-- no remote Resource delete;
-- initial publication remains manual;
-- expired renewal remains manual publication + admin activation.
+- use purpose-specific subject/body selected when the link is issued; or
+- use one neutral password-link copy that is correct for both cases.
+
+It must not falsely say “your questionnaire was just approved” for a later reset.
+
+For a recovery-capable message, include the meaning:
+
+- a link was created to set a new Cabinet password;
+- the link is one-time;
+- show configured TTL;
+- if the recipient did not expect the message, they can ignore it;
+- merely receiving/opening the email does not change the password.
+
+Do not include passwords.
+
+### 7. Admin action
+
+Keep the action on the existing psychologist detail page and existing security
+boundaries.
+
+The administrator must be able to send a new password link for any currently
+eligible psychologist even if `password !== null`.
+
+The action must:
+
+- use CSRF;
+- require admin/account middleware and policy;
+- retain the per-admin/target rate limiter;
+- replace the prior token;
+- queue mail asynchronously;
+- never set a password directly;
+- never expose the token in admin UI or logs.
+
+Update button/copy from “first password setup” semantics to a truthful generic
+meaning such as “Отправить ссылку для нового пароля”.
+
+Update audit semantics so newly generated events do not falsely imply “first
+password setup” when the user already had a password. Historical existing audit
+action values must remain renderable; no migration/rewrite of old audit rows.
+
+### 8. Successful reset invalidates existing sessions
+
+Integrate the existing `SessionInvalidator` into password completion.
+
+Prove that:
+
+- all database sessions for the reset user are removed;
+- `remember_token` rotates;
+- another user’s sessions remain;
+- the new password works;
+- the old password no longer works.
+
+This must also be safe for first-password setup where no prior authenticated
+session normally exists.
+
+### 9. New approved UI state
+
+This feature necessarily adds one new public auth page that was not in the
+original Stage 3 page catalogue.
+
+Use the existing Blade/layout/component system and add development/testing
+prototype coverage for the new page instead of inventing a parallel HTML mock.
+
+Cover at least:
+
+- normal;
+- validation;
+- sent/success;
+- rate-limit.
+
+Update the prototype/page catalogue and counts as required by the repository’s
+existing catalogue conventions.
+
+Do not redesign unrelated approved pages.
+
+### 10. Preserve initial onboarding
+
+Approval of a new eligible psychologist with `password === null` must still
+queue the initial password link after commit.
+
+Existing guarantees remain:
+
+- approval is not rolled back by later mail infrastructure failure;
+- stale/replaced queued token jobs become no-ops;
+- configured TTL applies;
+- initial password may still be set from the emailed link;
+- login succeeds afterward.
 
 ## Tests
 
-Add/update focused tests proving:
+Add/update focused tests for all of the following.
 
-### Pause date semantics
+### Public recovery
 
-- pause leaves `expires_at` byte/time-equivalent;
-- successful resume leaves `expires_at` unchanged;
-- repeated pause/resume leaves the original expiration unchanged;
-- resume does not reset `expiry_warning_sent_at`;
-- UI continues to display the same placement end date;
-- no UI/docs claim time is frozen/recovered.
+- login page contains “Forgot password?” link;
+- GET recovery page renders approved real Blade UI;
+- eligible approved/enabled psychologist with existing password can request a link;
+- approved/enabled psychologist with null password can also request a link;
+- unknown email gets the same public success state and queues nothing;
+- pending, rejected, disabled, deleted and admin emails get the same success state
+  and queue nothing;
+- malformed email gets only syntax validation;
+- public result does not expose whether an account exists;
+- repeated issuance replaces the prior token;
+- old link becomes invalid;
+- newest link remains valid;
+- rate limiting works by IP and normalized email;
+- case-normalized email behavior matches login/account lookup behavior;
+- infrastructure/queue failure does not disclose account existence.
 
-### Paused expiration
+### Link completion
 
-- paused + future expires_at is not expired;
-- paused + due expires_at transitions to expired;
-- `paused_at` clears;
-- history records paused -> expired system transition;
-- remote ID schedules unpublished after commit;
-- no remote ID queues nothing.
+For an account with an existing password:
 
-### Resume deadline/race
+- GET valid link renders the password form;
+- POST valid token + confirmed password changes the password;
+- old password stops authenticating;
+- new password authenticates;
+- token cannot be reused;
+- expired/invalid link is rejected;
+- disabled/rejected/deleted state after issuance invalidates the flow;
+- no auto-login occurs;
+- target user sessions are deleted;
+- target remember token changes;
+- unrelated user sessions remain.
 
-- resume action is forbidden/rejected once expires_at <= now;
-- queued publish skips before HTTP if deadline becomes due;
-- deadline crossing while HTTP is in flight never produces local active;
-- late successful remote publish produces expired + newer unpublished intent;
-- stale publish revision cannot overwrite the new unpublished revision;
-- expires_at never changes in this race.
+Retain first-password setup coverage.
 
-### Hidden-group warning/expiry regression
+### Admin
 
-For psychologist-hidden active and paused groups:
+- admin action is available for eligible `password === null`;
+- admin action is also available for eligible `password !== null`;
+- non-admin cannot call it;
+- ineligible account states remain blocked;
+- CSRF/form request/policy remain enforced;
+- new action replaces an older public/admin token;
+- queue failure returns safe admin error;
+- audit entry contains no token/email/body/URL;
+- historical `user.password_setup_resent` display remains supported if a new audit
+  action name is introduced.
 
-- warning scheduler queues nothing;
-- already queued SendExpiryWarning sends nothing;
-- warning marker stays null;
-- expiration command ignores them;
-- direct/stale expireOne returns false;
-- status remains unchanged.
+### Mail / security / deployment semantics
 
-Confirm delete still queues publication-unpublished where a remote Resource ID
-exists.
+- queued mail contains a base-path-safe password URL;
+- production APP_URL generates
+  `https://gruppa.info/cabinet/...`;
+- recovery/reset email copy is truthful for a previously configured password;
+- no password/token/URL/recipient is written to application diagnostic logs;
+- unsupported mail transports stay rejected;
+- tests make no real SMTP/sendmail request.
 
-### Existing regressions
+### Regression
 
-Re-run all TASK-04 focused publication/delete tests after adjusting their
-time-freeze expectations.
+Re-run existing complete:
+
+- PasswordSetupTest;
+- AuthenticationTest;
+- admin psychologist workflow/policy tests;
+- prototype tests;
+- session invalidation tests;
+- mail/deployment preflight tests affected by the copy/flow.
 
 ## Documentation
 
-Correct all TASK-04 statements in:
+Update implemented-state documentation at least in:
 
 - `SPEC.md`;
-- `docs/modx-api.md`;
-- `docs/modx-group-sync-plan.md`;
+- `docs/email.md`;
 - `docs/project-status.md`;
-- `docs/architecture.md`;
-- `docs/development.md`;
-- `docs/deployment.md`;
-- `docs/ui-pages.md` where relevant.
+- `docs/ui-pages.md`;
+- `docs/architecture.md` / `docs/development.md` / `docs/deployment.md` where
+  current password-flow or operational statements require correction.
 
-The documentation must say:
+Documentation must state:
 
-- pause controls publication only;
-- expires_at does not change;
-- paused placement continues counting down;
-- paused groups can automatically expire;
-- expiry warnings may still be sent while paused;
-- psychologist-hidden groups receive no future warning/expiration processing;
-- resume before expiry republishes the same Resource and returns to active;
-- initial/expired-renewal publication rules remain unchanged.
+- self-service forgot-password now exists;
+- public request does not disclose account existence;
+- the same Laravel broker/token table is reused;
+- admin may send a link for an eligible account regardless of existing password;
+- issuing a newer link invalidates the older link;
+- successful password change invalidates prior sessions;
+- initial onboarding remains supported;
+- password-link mail remains queued through database queue and SMTP/sendmail;
+- no plaintext password/reset token belongs in logs.
+
+Correct stale documentation that currently explicitly states no forgot-password
+or password replacement exists.
+
+Do not perform unrelated documentation cleanup.
 
 ## Out Of Scope
 
 Do NOT:
 
-- change the external MODX endpoint contract from
-  `POST /cabinet/resources/publication`;
-- add remote delete;
-- auto-publish initial approved groups;
-- auto-refund payments;
-- restore psychologist-hidden groups;
-- change price/editor work from TASK-04 except regressions needed by this correction;
-- make real MODX HTTP requests;
-- add packages/Node/Vite;
-- create an accept commit.
+- add a custom token table;
+- add SMS/phone recovery;
+- add security questions;
+- let an administrator assign or see a password;
+- email plaintext/generated passwords;
+- auto-login after reset;
+- allow pending/rejected/disabled/deleted users to bypass account restrictions;
+- change password complexity beyond the existing 8–255 confirmed rule unless
+  required by an existing shared validator;
+- change login authentication semantics unrelated to recovery;
+- change MODX, WEBPAY, integration intake or group lifecycle behavior;
+- read/change/commit production private env files such as `.env_save`;
+- make a real mail send to a production recipient;
+- add Node/Vite/packages;
+- run `migrate:fresh`;
+- create an `accept:` commit.
 
 ## Acceptance Criteria
 
-1. Pause/resume never changes `expires_at`.
-2. Paused placement time continues to elapse and paused groups expire at the
-   original deadline.
-3. Resume cannot reactivate/publish a group whose placement has expired.
-4. A deadline race during remote publish results in expired + desired unpublished,
-   never active/public.
-5. Visible paused groups continue to receive normal expiry warnings.
-6. Psychologist-hidden groups receive no expiry warnings and no later local
-   expiration processing.
-7. Delete-triggered MODX unpublish still operates for hidden/deleted groups.
-8. All accepted TASK-04 editor/price/delete/publication behavior remains intact.
-9. Full regression/static checks pass.
-10. No real MODX request or secret/private artifact is introduced.
+1. Login page has a working self-service “Forgot password?” entry point.
+2. An eligible psychologist with an existing password can request a one-time
+   recovery link without administrator involvement.
+3. Unknown/ineligible emails receive the same generic public response and no
+   account existence is disclosed.
+4. The recovery link uses the existing Laravel broker/token repository and
+   configured TTL; no new token store exists.
+5. A valid link can replace an already configured password.
+6. Issuing a newer link invalidates the older link.
+7. Successful password replacement invalidates all existing sessions for that
+   user, rotates remember state and leaves other users’ sessions untouched.
+8. The administrator can issue a new password link for any currently eligible
+   psychologist regardless of whether the password is null or already configured.
+9. Existing first-password onboarding after approval still works.
+10. Mail remains queued and safe; no password/token/URL/recipient is leaked to
+    application diagnostics.
+11. New public UI uses the approved auth layout/components and has prototype
+    state coverage.
+12. Full regression/static checks pass and no unrelated behavior changes.
 
 ## Checks
 
 Run and report exact results for:
 
-1. focused GroupPublicationTest corrections;
-2. full ExpiryWarningTest;
-3. full GroupLifecycleTest + concurrency;
-4. full GroupWorkflowTest;
-5. ModxGroupSyncTest + ModxGroupClientTest;
-6. IntegrationIntakeTest;
-7. GroupContent/Prototype/payment regressions affected by TASK-04;
-8. full MySQL suite;
-9. Pint;
-10. PHPStan;
-11. composer check-platform-reqs;
-12. composer validate --no-check-publish;
-13. artisan view:cache;
+1. focused password recovery/setup tests;
+2. full `PasswordSetupTest`;
+3. full `AuthenticationTest`;
+4. affected admin psychologist/policy/session tests;
+5. full `PrototypeTest`;
+6. affected mail/preflight tests;
+7. full MySQL test suite;
+8. Pint;
+9. PHPStan;
+10. composer check-platform-reqs;
+11. composer validate --no-check-publish;
+12. artisan view:cache;
+13. artisan route:list (verify recovery/setup/admin routes);
 14. artisan schedule:list;
 15. git diff --check;
 16. final status/diff/staged secret/artifact review.
+
+Do not make a real external email delivery call as part of automated acceptance.
 
 ## Hard Workflow Gate
 
@@ -460,36 +536,39 @@ Before editing:
 
 - run `git log --oneline -5`;
 - run `git status --short`;
-- confirm HEAD is this planner commit and parent is
-  `695ee2e6e234a177a12b3dd00b53540157c045ae`;
-- read WORKFLOW.md, AGENTS.md, task/report;
-- inspect TASK-04 implementation diff and relevant lifecycle/publication/warning
-  code/tests/docs;
-- verify clean/known local tree.
+- confirm HEAD is this planner commit and its parent is
+  `a632e01cc5776c57d568d9592196782a18203d2b`;
+- read `WORKFLOW.md`, `AGENTS.md`, this task and the previous report;
+- inspect current PasswordSetupService/controller/job/mail, auth routes, login and
+  password Blade, UserPolicy, PsychologistActions, SessionInvalidator,
+  PasswordSetupTest, AuthenticationTest, docs/email.md and prototype catalogue;
+- verify the local tree is clean/known;
+- do not touch unknown local changes.
 
 During implementation:
 
-- work only within this corrective task;
+- work only within this task;
 - do not edit `.ai/task.md`;
-- no real MODX;
-- no external plugin source;
-- keep publication control async/after-commit;
-- preserve revision/stale protections;
-- never modify expires_at because of pause/resume;
-- ensure hidden groups leave placement automation;
+- preserve the single Laravel broker/token storage;
+- preserve generic account-existence-safe public behavior;
+- keep mail queued;
+- never log password/token/link/recipient;
+- preserve existing account eligibility boundaries;
+- invalidate target sessions only after successful password completion;
+- keep UI changes within approved auth components/layout;
 - avoid unrelated refactors.
 
 Before commit:
 
-- run required checks;
-- inspect complete diff/staged files;
-- verify no secrets, production fixtures, uploads/base64/log/cache/vendor/private
-  artifacts are staged;
+- run all required checks;
+- inspect complete diff and staged files;
+- verify no secrets, production data, env/private files, mail captures, queue
+  payload dumps, storage/cache/log/vendor or temporary artifacts are staged;
 - update `.ai/report.md` factually;
-- explicitly state live publication endpoint was not called.
+- explicitly state that no real external mail was sent.
 
 If complete, commit with:
 
-`codex: TASK-2026-10-01-05 correct pause timing lifecycle`
+`codex: TASK-2026-10-02-01 add password recovery`
 
 Do not create an accept commit.
