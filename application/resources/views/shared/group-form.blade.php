@@ -50,7 +50,7 @@ $weekdayOptions = $weekdayOptions ?? \App\Services\GroupContent::DAYS;
 </x-panel>
 <x-panel title="Условия участия">
 @if(($realGroups ?? false) && (count($formatOptions) === 1 || count($genderOptions) === 1 || count($groupTypeOptions) === 1 || !$approachesOptions || !$tagsOptions))
-<x-alert tone="warning">Отправка на модерацию или создание полной группы невозможны: нужные варианты справочников отсутствуют в Cabinet. Обратитесь к администратору для обновления справочников. Сохранение доступных полей черновика остаётся возможным.</x-alert>
+<x-alert tone="warning">{{ $admin ? 'Отправка на модерацию или создание полной группы невозможны: нужные варианты справочников отсутствуют в Cabinet. Обратитесь к администратору для обновления справочников. Сохранение доступных полей черновика остаётся возможным.' : 'Не хватает вариантов для заполнения анкеты. Обратитесь к администратору. Пока можно сохранить черновик.' }}</x-alert>
 @endif
 <div class="row">
 <div class="col-md-6">

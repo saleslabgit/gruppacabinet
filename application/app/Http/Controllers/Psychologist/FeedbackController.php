@@ -30,9 +30,9 @@ class FeedbackController extends Controller
         try {
             Bus::dispatch((new SendAdminTelegram('feedback', $request->user()->id, $data['message']))->onConnection('database'));
         } catch (Throwable) {
-            return back()->withErrors(['message' => 'Не удалось поставить сообщение в очередь. Попробуйте позже.'])->withInput();
+            return back()->withErrors(['message' => 'Не удалось отправить сообщение. Попробуйте ещё раз позже.'])->withInput();
         }
 
-        return redirect()->route('psychologist.feedback')->with('success', 'Сообщение принято и поставлено в очередь отправки.');
+        return redirect()->route('psychologist.feedback')->with('success', 'Сообщение принято. Спасибо за обратную связь.');
     }
 }

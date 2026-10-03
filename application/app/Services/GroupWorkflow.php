@@ -74,7 +74,7 @@ class GroupWorkflow
 
             $contentChanged = $this->syncRelations($locked, $data) || $contentChanged;
             if ($submit) {
-                app(GroupModxReadiness::class)->validate($locked);
+                app(GroupModxReadiness::class)->validate($locked, (bool) $actor->admin);
             }
             if ($actor->admin && $contentChanged && ($locked->public_site_resource_id !== null || $locked->status === GroupStatus::Approved)) {
                 app(GroupModxSyncScheduler::class)->schedule($locked);
@@ -93,7 +93,7 @@ class GroupWorkflow
         return DB::transaction(function () use ($group, $actor): Group {
             $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
             Gate::forUser($actor)->authorize('submit', $locked);
-            app(GroupModxReadiness::class)->validate($locked);
+            app(GroupModxReadiness::class)->validate($locked, (bool) $actor->admin);
             $saved = $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user');
             app(ActionNotifications::class)->telegram('group_moderation', $saved->id);
 

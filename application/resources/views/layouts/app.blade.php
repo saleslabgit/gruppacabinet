@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    @include('shared.favicon')
     <title>@yield('title', config('app.name'))</title>
     <link rel="stylesheet" href="{{ asset('vendor/bootstrap/5.3.8/css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('app.css') }}">

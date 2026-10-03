@@ -3,7 +3,7 @@
 <x-panel title="Сообщить об ошибке">
 <p>Опишите проблему. Только текст, до 2800 символов, без вложений.</p>
 <x-validation-summary :errors="$errors" />
-@if(($prototype ?? false) && $variant === 'error')<x-alert tone="danger">Не удалось поставить сообщение в очередь. Попробуйте позже.</x-alert>@endif
+@if(($prototype ?? false) && $variant === 'error')<x-alert tone="danger">Не удалось отправить сообщение. Попробуйте ещё раз позже.</x-alert>@endif
 <form @if($prototype ?? false) data-prototype-form @else method="POST" action="{{ route('psychologist.feedback.store') }}" @endif>
 @unless($prototype ?? false)
 @csrf

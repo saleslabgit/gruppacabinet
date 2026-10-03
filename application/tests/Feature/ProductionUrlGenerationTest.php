@@ -31,7 +31,8 @@ class ProductionUrlGenerationTest extends TestCase
         $group = Group::create(['owner_id' => $owner->id, 'title' => 'HTTPS Synthetic']);
         foreach ([[$owner, '/'], [$admin, '/admin/groups/'.$group->id]] as [$user, $path]) {
             $this->actingAs($user)->get('http://localhost'.$path)->assertOk()->assertDontSee('http://gruppa.info')
-                ->assertSee('https://gruppa.info/cabinet');
+                ->assertSee('https://gruppa.info/cabinet')
+                ->assertSee('<link rel="icon" type="image/png" sizes="32x32" href="https://gruppa.info/cabinet/favicon.png">', false);
         }
         $this->assertStringStartsWith('https://', asset('ui.css'));
         $mail = new GroupModerationMail('Synthetic', 'approved', null, route('psychologist.groups.show', $group));
@@ -49,6 +50,22 @@ class ProductionUrlGenerationTest extends TestCase
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true])]);
         (new SendAdminTelegram('psychologist_pending', $owner->id))->handle();
         Http::assertSent(fn ($request) => str_contains($request['text'], 'https://gruppa.info/cabinet/admin/psychologists/') && ! str_contains($request['text'], 'http://gruppa.info'));
+    }
+
+    public function test_public_and_prototype_layouts_include_local_favicon(): void
+    {
+        URL::forceRootUrl('http://localhost');
+        foreach (['/login', '/password/forgot', '/password/setup/synthetic-token?email=synthetic@example.test', '/_prototype/feedback/normal'] as $path) {
+            $this->get($path)->assertOk()->assertSee('<link rel="icon" type="image/png" sizes="32x32" href="http://localhost/favicon.png">', false);
+        }
+        $this->assertSame([32, 32], array_slice(getimagesize(public_path('favicon.png')), 0, 2));
+        $this->app->instance('env', 'production');
+        config(['app.url' => 'https://gruppa.info/cabinet']);
+        URL::forceRootUrl('http://gruppa.info/cabinet');
+        (new AppServiceProvider($this->app))->boot();
+        foreach (['/login', '/password/forgot', '/password/setup/synthetic-token?email=synthetic@example.test'] as $path) {
+            $this->get('http://localhost'.$path)->assertOk()->assertSee('href="https://gruppa.info/cabinet/favicon.png"', false);
+        }
     }
 
     public function test_testing_http_links_remain_supported(): void

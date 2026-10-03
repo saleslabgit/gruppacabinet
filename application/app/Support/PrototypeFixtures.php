@@ -156,7 +156,7 @@ final class PrototypeFixtures
         }
 
         if ($slug === 'feedback' && $variant === 'success') {
-            $data['notice'] = ['tone' => 'success', 'text' => 'Сообщение принято и поставлено в очередь отправки.'];
+            $data['notice'] = ['tone' => 'success', 'text' => 'Сообщение принято. Спасибо за обратную связь.'];
         }
 
         return $data;

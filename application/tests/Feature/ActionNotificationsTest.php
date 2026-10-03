@@ -41,7 +41,7 @@ class ActionNotificationsTest extends TestCase
         $this->actingAs($admin)->get('/feedback')->assertForbidden();
         $this->actingAs($this->owner)->get('/feedback')->assertOk()->assertSee('Сообщить об ошибке');
         $this->post('/feedback', ['message' => '  <b>Synthetic feedback</b>  '])->assertRedirect('/feedback');
-        $this->get('/feedback')->assertSee('поставлено в очередь');
+        $this->get('/feedback')->assertSee('Сообщение принято. Спасибо за обратную связь.')->assertDontSee('очеред');
         Queue::assertPushed(SendAdminTelegram::class, fn ($job) => $job->entityId === $this->owner->id && $job->feedback === '<b>Synthetic feedback</b>' && $job->connection === 'database');
         $this->post('/feedback', ['message' => 'Second'])->assertRedirect();
         $this->post('/feedback', ['message' => 'Third'])->assertTooManyRequests();
@@ -57,7 +57,8 @@ class ActionNotificationsTest extends TestCase
         $this->post('/feedback', ['message' => 'File', 'photo' => UploadedFile::fake()->create('test.txt')])->assertSessionHasErrors('message');
         Queue::assertNothingPushed();
         Bus::shouldReceive('dispatch')->once()->andThrow(new \RuntimeException('Synthetic queue failure'));
-        $this->from('/feedback')->post('/feedback', ['message' => 'Retry'])->assertRedirect('/feedback')->assertSessionHasErrors('message');
+        $this->from('/feedback')->post('/feedback', ['message' => 'Retry'])->assertRedirect('/feedback')->assertSessionHasErrors(['message' => 'Не удалось отправить сообщение. Попробуйте ещё раз позже.']);
+        $this->get('/feedback')->assertOk()->assertSee('Не удалось отправить сообщение. Попробуйте ещё раз позже.')->assertDontSee('очеред');
     }
 
     public function test_telegram_plain_text_request_contains_identity_and_exact_https_endpoint(): void

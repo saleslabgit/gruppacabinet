@@ -10,7 +10,7 @@ use Illuminate\Validation\ValidationException;
 
 class GroupModxReadiness
 {
-    public function validate(Group $group): void
+    public function validate(Group $group, bool $technicalDetails = true): void
     {
         $group->load(['owner', 'format.dictionary', 'gender.dictionary', 'groupType.dictionary', 'approaches.dictionary', 'tags.dictionary']);
         $data = $group->getAttributes();
@@ -27,7 +27,7 @@ class GroupModxReadiness
         ], ['required' => 'Заполните это поле.', 'integer' => 'Введите целое число.'])->validate();
         $errors = [];
         if ($group->meeting_price % 100 !== 0) {
-            $errors['meeting_price'] = 'Для синхронизации укажите стоимость в целых BYN, без копеек.';
+            $errors['meeting_price'] = $technicalDetails ? 'Для синхронизации укажите стоимость в целых BYN, без копеек.' : 'Укажите стоимость в целых BYN, без копеек.';
         }
         foreach (['first_name', 'last_name'] as $field) {
             $name = trim((string) preg_replace('/\s+/u', ' ', $group->owner->$field ?? ''));
@@ -47,7 +47,7 @@ class GroupModxReadiness
                     || ($dictionary->modx_tv_name ?? null) !== DictionaryClient::DEFINITIONS[$code]['tv']) {
                     $label = ['format_id' => 'Формат', 'gender_id' => 'Пол участников', 'group_type_id' => 'Тип группы',
                         'approach_ids' => 'Подходы', 'tag_ids' => 'Теги'][$field];
-                    $errors[$field] = $label.': выберите доступное значение справочника, связанное с MODX.';
+                    $errors[$field] = $label.($technicalDetails ? ': выберите доступное значение справочника, связанное с MODX.' : ': выберите доступный вариант. Если нужного варианта нет, обратитесь к администратору.');
                 }
             }
         }
