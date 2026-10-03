@@ -6,6 +6,7 @@ use App\Models\Group;
 use App\Models\GroupApplication;
 use App\Models\Payment;
 use App\Models\User;
+use App\Support\PrototypeFixtures;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
@@ -36,6 +37,18 @@ class CabinetImprovementsUiTest extends TestCase
         $this->assertStringContainsString('class="sidebar"', $html);
         $this->assertStringContainsString('aria-controls="admin-navigation"', $html);
         $this->assertStringContainsString('Выход', $html);
+    }
+
+    public function test_renewal_prototype_cannot_render_manual_activation(): void
+    {
+        foreach ([null, 123] as $resourceId) {
+            $data = PrototypeFixtures::page('admin-group', 'approved');
+            $data['republication'] = true;
+            $data['group']['public_site_resource_id'] = $resourceId;
+            $this->view('admin.groups.show', $data)->assertDontSee('Отметить активной')
+                ->assertDontSee('id="activate"', false)
+                ->assertSee($resourceId === null ? 'ID ресурса отсутствует' : 'Новый срок начнётся после подтверждения публикации.');
+        }
     }
 
     public function test_trusted_terminal_payment_pages_have_retry_without_pending_actions_or_provider_brand(): void

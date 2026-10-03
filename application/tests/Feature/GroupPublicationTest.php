@@ -14,6 +14,7 @@ use App\Services\GroupLifecycleService;
 use App\Services\GroupModxPublicationScheduler;
 use App\Services\GroupStatusTransitionService;
 use App\Services\GroupWorkflow;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Artisan;
@@ -573,6 +574,110 @@ class GroupPublicationTest extends TestCase
         app()->call([$this->currentIntent(), 'handle']);
         Http::assertNothingSent();
         $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
+    }
+
+    public static function renewalResourceIds(): array
+    {
+        return ['missing resource' => [null], 'existing resource' => [123]];
+    }
+
+    #[DataProvider('renewalResourceIds')]
+    public function test_renewal_manual_activation_is_forbidden_without_mutation(?int $resourceId): void
+    {
+        Queue::fake();
+        if ($resourceId === null) {
+            $this->group = Group::create(['owner_id' => $this->owner->id, 'status' => 'active',
+                'published_at' => now()->subDays(40), 'expires_at' => now()->subDays(10), 'placement_days' => 30]);
+        }
+        $this->group->update(['status' => 'expired', 'expires_at' => now()->subDay(), 'public_site_resource_id' => $resourceId]);
+        app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+        $renewed = $this->group->fresh();
+        $before = $renewed->getAttributes();
+        $history = $renewed->statusHistory()->get()->toArray();
+        $this->assertSame(GroupStatus::Approved, $renewed->status);
+        $this->assertFalse($this->admin->can('activate', $renewed));
+        $this->actingAs($this->admin)->post('/admin/groups/'.$renewed->id.'/activate', ['confirmed' => 1])->assertForbidden();
+        $this->assertManualActivationRejected($renewed);
+        $this->assertSame($before, $renewed->fresh()->getAttributes());
+        $this->assertSame($history, $renewed->statusHistory()->get()->toArray());
+        $this->get('/admin/groups/'.$renewed->id)->assertOk()->assertDontSee('Отметить активной')
+            ->assertDontSee('id="activate"', false)
+            ->assertSee($resourceId === null ? 'ID ресурса отсутствует' : 'Новый срок начнётся после подтверждения публикации.');
+        Http::assertNothingSent();
+
+        if ($resourceId === null) {
+            $renewed->update(['public_site_resource_id' => 124]);
+            $this->fakeHttp(fn ($request) => Http::response(['data' => ['resource_id' => 124, 'published' => $request['published'], 'changed' => true], 'meta' => []]));
+            app(GroupWorkflow::class)->retryRenewal($renewed, $this->admin);
+        }
+        $this->assertSame(GroupStatus::Approved, $renewed->fresh()->status);
+        $this->assertEquals($before['expires_at'], $renewed->fresh()->getRawOriginal('expires_at'));
+        app()->call([$this->currentIntent(), 'handle']);
+        $this->assertSame(GroupStatus::Active, $renewed->fresh()->status);
+        $this->assertEquals(now()->utc(), $renewed->fresh()->published_at);
+        $this->assertEquals(now()->utc()->addDays(30), $renewed->fresh()->expires_at);
+        Http::assertSentCount(1);
+    }
+
+    #[DataProvider('renewalResourceIds')]
+    public function test_initial_approval_still_allows_manual_activation(?int $resourceId): void
+    {
+        Queue::fake();
+        if ($resourceId === null) {
+            $this->group = Group::create(['owner_id' => $this->owner->id, 'status' => 'active',
+                'published_at' => now()->subDays(40), 'expires_at' => now()->subDays(10), 'placement_days' => 30]);
+        }
+        $this->group->update(['status' => 'moderation', 'public_site_resource_id' => $resourceId, 'published_at' => null, 'expires_at' => null]);
+        app(GroupStatusTransitionService::class)->transition($this->group, GroupStatus::Approved, $this->admin, 'user');
+        $approved = $this->group->fresh();
+        $this->assertNull($approved->renewalHistoryId());
+        $this->assertTrue($this->admin->can('activate', $approved));
+        $this->actingAs($this->admin)->get('/admin/groups/'.$approved->id)->assertOk()->assertSee('Отметить активной');
+        $this->post('/admin/groups/'.$approved->id.'/activate', ['confirmed' => 1])->assertRedirect();
+        $active = $approved->fresh();
+        $this->assertSame(GroupStatus::Active, $active->status);
+        $this->assertEquals(now()->utc(), $active->published_at);
+        $this->assertEquals(now()->utc()->addDays(30), $active->expires_at);
+        $this->assertSame(30, $active->placement_days);
+        $this->assertSame('published', $active->modx_publication_status);
+        Queue::assertNotPushed(SetGroupModxPublication::class);
+        Http::assertNothingSent();
+    }
+
+    #[DataProvider('renewalResourceIds')]
+    public function test_locked_manual_activation_rejects_stale_initial_approval(?int $resourceId): void
+    {
+        Queue::fake();
+        if ($resourceId === null) {
+            $this->group = Group::create(['owner_id' => $this->owner->id, 'status' => 'active',
+                'published_at' => now()->subDays(40), 'expires_at' => now()->subDays(10), 'placement_days' => 30]);
+        }
+        $this->group->update(['status' => 'approved', 'public_site_resource_id' => $resourceId, 'expires_at' => now()->subDay()]);
+        $this->group->statusHistory()->create(['from_status' => 'moderation', 'to_status' => 'approved', 'actor_type' => 'system']);
+        $stale = $this->group->fresh()->load('statusHistory');
+        $this->assertTrue($this->admin->can('activate', $stale));
+
+        // Deterministic interleaving after authorization, before the workflow locks the row.
+        app(GroupStatusTransitionService::class)->transition($this->group, GroupStatus::Active, $this->admin, 'user');
+        app(GroupStatusTransitionService::class)->transition($this->group->fresh(), GroupStatus::Expired);
+        app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+        $before = $this->group->fresh()->getAttributes();
+        $history = $this->group->statusHistory()->get()->toArray();
+        $this->assertManualActivationRejected($stale);
+        $this->assertSame($before, $this->group->fresh()->getAttributes());
+        $this->assertSame($history, $this->group->statusHistory()->get()->toArray());
+        $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
+        Http::assertNothingSent();
+    }
+
+    private function assertManualActivationRejected(Group $group): void
+    {
+        try {
+            app(GroupWorkflow::class)->activate($group, $this->admin);
+            $this->fail('Renewal manual activation must be rejected under the row lock.');
+        } catch (AuthorizationException $exception) {
+            $this->assertSame('This action is unauthorized.', $exception->getMessage());
+        }
     }
 
     public function test_renewal_stale_delete_and_date_races_cannot_activate(): void

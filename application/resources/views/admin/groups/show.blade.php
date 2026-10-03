@@ -24,7 +24,7 @@ foreach (['withdraw' => ['withdraw', 'Снять с размещения'], 'res
 <x-button icon="arrow-counterclockwise" kind="secondary" data-bs-toggle="modal" data-bs-target="#revision">На доработку</x-button>
 <x-button icon="x-lg" kind="danger" data-bs-toggle="modal" data-bs-target="#reject">Отклонить</x-button>
 @endif
-@if($group['status'] === 'approved' && (!($realGroups ?? false) || auth()->user()->can('activate', $groupModel)))
+@if($group['status'] === 'approved' && !($republication ?? false) && (!($realGroups ?? false) || auth()->user()->can('activate', $groupModel)))
 <x-button icon="check-circle" data-bs-toggle="modal" data-bs-target="#activate">Отметить активной</x-button>
 @endif
 @foreach($placementActions as $ability => [$action, $label])
@@ -100,7 +100,7 @@ foreach (['withdraw' => ['withdraw', 'Снять с размещения'], 'res
 @endif
 </x-confirmation>
 @endif
-@if(!($realGroups ?? false) || auth()->user()->can('activate', $groupModel))
+@if(!($republication ?? false) && (!($realGroups ?? false) || auth()->user()->can('activate', $groupModel)))
 <x-confirmation id="activate" :url="($realGroups ?? false) ? route('admin.groups.activate', $group['id']) : null" title="Подтвердить публикацию" action="Отметить активной" kind="primary">
 <p class="confirmation-object">{{ $group['title'] }}</p>
 <p>Убедитесь, что группа опубликована на gruppa.info и ID {{ $group['public_uuid'] }} сохранён у этой группы. Срок размещения начнётся с активации.</p>

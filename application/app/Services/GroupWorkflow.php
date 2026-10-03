@@ -157,6 +157,7 @@ class GroupWorkflow
     {
         return DB::transaction(function () use ($group, $actor): Group {
             $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            // Recheck the latest renewal history under the lock, never the caller's model.
             Gate::forUser($actor)->authorize('activate', $locked);
             $published = now()->utc();
             $days = $this->settings->placementDurationDays();

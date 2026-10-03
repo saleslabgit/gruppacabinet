@@ -55,7 +55,7 @@ class GroupPolicy
     public function activate(User $actor, Group $group): bool
     {
         return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Approved
-            && ! ($group->public_site_resource_id > 0 && $group->renewalHistoryId() !== null);
+            && $group->renewalHistoryId() === null;
     }
 
     public function withdraw(User $actor, Group $group): bool

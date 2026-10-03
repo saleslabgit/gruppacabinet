@@ -3,16 +3,19 @@
 namespace Tests\Feature;
 
 use App\Enums\GroupStatus;
+use App\Jobs\SetGroupModxPublication;
 use App\Models\Group;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\GroupLifecycleService;
 use App\Services\GroupStatusTransitionService;
+use App\Services\GroupWorkflow;
 use App\Services\SettingService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
@@ -240,7 +243,16 @@ class GroupLifecycleTest extends TestCase
         $this->actingAs($this->admin)->get('/admin/groups?quick=approved')->assertViewHas('groups', fn ($groups) => $groups->pluck('id')->all() === [$group->id]);
         $this->get('/admin/groups/'.$group->id)->assertSee('Продление принято, но ID ресурса отсутствует')->assertSee($uuid);
         $this->setting('placement_duration_days', 43);
-        $this->post('/admin/groups/'.$group->id.'/activate', ['confirmed' => 1])->assertSessionHasNoErrors();
+        $before = $group->fresh()->getAttributes();
+        $this->post('/admin/groups/'.$group->id.'/activate', ['confirmed' => 1])->assertForbidden();
+        $this->assertSame($before, $group->fresh()->getAttributes());
+        $this->noSideEffects();
+        $group->update(['public_site_resource_id' => 987]);
+        config(['services.modx.base_url' => 'https://modx.example.test/api/v1', 'services.modx.token' => 'synthetic-token']);
+        Http::fake(fn () => Http::response(['data' => ['resource_id' => 987, 'published' => true, 'changed' => true], 'meta' => []]));
+        app(GroupWorkflow::class)->retryRenewal($group, $this->admin);
+        $job = Queue::pushed(SetGroupModxPublication::class)->sole();
+        app()->call([$job, 'handle']);
         $fresh = $group->fresh();
         $this->assertEquals(now(), $fresh->published_at);
         $this->assertEquals(now()->addDays(43), $fresh->expires_at);
@@ -251,8 +263,13 @@ class GroupLifecycleTest extends TestCase
         $history = $group->statusHistory()->latest('id')->first();
         $this->assertSame(GroupStatus::Approved, $history->from_status);
         $this->assertSame(GroupStatus::Active, $history->to_status);
-        $this->assertSame($this->admin->id, $history->actor_id);
-        $this->noSideEffects();
+        $this->assertNull($history->actor_id);
+        $this->assertSame('system', $history->actor_type);
+        Http::assertSentCount(1);
+        Queue::assertPushed(SetGroupModxPublication::class, 1);
+        $this->assertDatabaseCount('gp_payments', 0);
+        Mail::assertNothingSent();
+        Mail::assertNothingQueued();
     }
 
     public static function extensionStatuses(): array
