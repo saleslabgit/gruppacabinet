@@ -10,6 +10,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\PasswordRecoveryController;
 use App\Http\Controllers\PasswordSetupController;
 use App\Http\Controllers\Psychologist\ApplicationController;
+use App\Http\Controllers\Psychologist\FeedbackController;
 use App\Http\Controllers\Psychologist\GroupController;
 use App\Http\Controllers\Psychologist\ProfileController;
 use App\Http\Controllers\SessionController;
@@ -34,6 +35,8 @@ Route::middleware('account')->group(function (): void {
 });
 
 Route::middleware(['account', 'role:psychologist'])->group(function (): void {
+    Route::get('/feedback', [FeedbackController::class, 'show'])->name('psychologist.feedback');
+    Route::post('/feedback', [FeedbackController::class, 'store'])->middleware('throttle:feedback')->name('psychologist.feedback.store');
     Route::get('/profile', [ProfileController::class, 'show'])->name('psychologist.profile');
     Route::get('/profile/documents/{document}/view', [ProfileController::class, 'view'])->name('psychologist.documents.view');
     Route::get('/profile/documents/{document}/download', [ProfileController::class, 'download'])->name('psychologist.documents.download');
@@ -67,12 +70,14 @@ Route::middleware(['account', 'role:psychologist'])->prefix('groups')->name('psy
     Route::put('/{group}', [$controller, 'update'])->name('update');
     Route::post('/{group}/pause', [$controller, 'publication'])->name('pause');
     Route::post('/{group}/resume', [$controller, 'publication'])->name('resume');
+    Route::post('/{group}/submit-stored', [$controller, 'submitStored'])->name('submit-stored');
     Route::post('/{group}/submit', [$controller, 'update'])->name('submit');
     Route::get('/{group}/extension', [$controller, 'extension'])->name('extension');
     Route::post('/{group}/extension', [$controller, 'extend'])->name('extend');
     Route::delete('/{group}', [$controller, 'destroy'])->name('destroy');
     $applications = ApplicationController::class;
     Route::get('/{group}/applications', [$applications, 'index'])->name('applications.index');
+    Route::delete('/{group}/applications/{application}', [$applications, 'destroy'])->name('applications.destroy');
     Route::get('/{group}/applications/{application}', [$applications, 'show'])->name('applications.show');
     Route::post('/{group}/applications/{application}/processed', [$applications, 'action'])->name('applications.processed');
     Route::post('/{group}/applications/{application}/unprocessed', [$applications, 'action'])->name('applications.unprocessed');
@@ -94,7 +99,7 @@ Route::middleware(['account', 'role:admin'])->prefix('admin/groups')->name('admi
     Route::get('/{group}/edit', [$controller, 'edit'])->name('edit');
     Route::put('/{group}', [$controller, 'update'])->name('update');
     Route::post('/{group}/sync-modx', [$controller, 'syncModx'])->name('sync-modx');
-    foreach (['approve', 'revision', 'reject', 'activate'] as $action) {
+    foreach (['approve', 'revision', 'reject', 'activate', 'withdraw', 'restore-placement', 'retry-renewal'] as $action) {
         Route::post('/{group}/'.$action, [$controller, 'action'])->name($action);
     }
     Route::delete('/{group}', [$controller, 'action'])->name('destroy');

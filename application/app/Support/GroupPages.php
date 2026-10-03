@@ -32,7 +32,7 @@ class GroupPages
 
     public static function data(Group $group, ?array $context = null): array
     {
-        return $group->only(['id', 'public_uuid', 'owner_id', 'disabled', 'free', 'description', 'schedule', 'format_id', 'gender_id',
+        return $group->only(['id', 'public_uuid', 'psychologist_deleted_at', 'public_site_resource_id', 'owner_id', 'disabled', 'free', 'description', 'schedule', 'format_id', 'gender_id',
             'full_description_html', 'meeting_days', 'start_time', 'frequency', 'city', 'group_type_id', 'cover_original_name', 'cover_size',
             'meeting_duration_minutes', 'participant_capacity', 'meeting_price', 'meeting_price_currency', 'paused_at', 'modx_publication_desired', 'modx_publication_status', 'moderator_comment', 'rejection_reason', 'created_at', 'published_at', 'expires_at', 'placement_days']) + [
                 'title' => $group->title ?: 'Новая группа', 'status' => $group->status->value,

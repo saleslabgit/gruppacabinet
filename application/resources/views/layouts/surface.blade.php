@@ -10,7 +10,7 @@
 </head>
 <body class="surface-{{ $surface }}">
 <a href="#main" class="skip-link">К содержимому</a>
-<x-navbar :home-url="$homeUrl ?? null" :logout-url="($prototype ?? false) ? null : ($logoutUrl ?? null)" :navigation="$surface === 'psychologist' ? ($navigation ?? []) : []" />
+<x-navbar :home-url="$homeUrl ?? null" :logout-url="($prototype ?? false) ? null : ($logoutUrl ?? null)" :admin-menu="$surface === 'admin'" :navigation="$surface === 'psychologist' ? ($navigation ?? []) : []" />
 @if($prototype ?? false)
 <div class="prototype-note"><div class="container">Прототип · Все данные вымышлены. Действия не сохраняются. <a href="{{ $links['catalog'] }}">Все страницы и состояния</a></div></div>
 @endif

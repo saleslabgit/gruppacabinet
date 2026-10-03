@@ -9,7 +9,9 @@ use App\Jobs\SyncGroupToModx;
 use App\Models\Group;
 use App\Models\Setting;
 use App\Models\User;
+use App\Payments\PaymentAttempts;
 use App\Services\GroupLifecycleService;
+use App\Services\GroupModxPublicationScheduler;
 use App\Services\GroupStatusTransitionService;
 use App\Services\GroupWorkflow;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,6 +24,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\WebpayFixture;
 use Tests\TestCase;
 
 class GroupPublicationTest extends TestCase
@@ -418,5 +421,272 @@ class GroupPublicationTest extends TestCase
         $this->assertSame('pending', $this->group->fresh()->modx_publication_status);
         (new SetGroupModxPublication($this->group->id, 2, 123))->failed(new ModxGroupSyncException('connection'));
         $this->assertNull($this->group->fresh()->modx_publication_error_code);
+    }
+
+    private function currentIntent(): SetGroupModxPublication
+    {
+        $group = $this->group->fresh();
+
+        return Queue::pushed(SetGroupModxPublication::class)->last(fn ($job) => $job->revision === $group->modx_publication_revision);
+    }
+
+    public function test_admin_withdraw_restore_preserves_dates_and_blocks_owner_until_current_remote_success(): void
+    {
+        Queue::fake();
+        $dates = $this->group->only(['published_at', 'expires_at', 'placement_days']);
+        $url = '/admin/groups/'.$this->group->id;
+        $this->actingAs($this->owner)->post($url.'/withdraw', ['confirmed' => 1])->assertForbidden();
+        $this->actingAs($this->admin)->post($url.'/withdraw')->assertSessionHasErrors('confirmed');
+        DB::beginTransaction();
+        $this->post($url.'/withdraw', ['confirmed' => 1])->assertRedirect();
+        Queue::assertNothingPushed();
+        DB::commit();
+        $withdraw = $this->currentIntent();
+        $this->assertTrue($this->group->fresh()->disabled);
+        $this->assertSame(GroupStatus::Active, $this->group->fresh()->status);
+        $this->assertEquals($dates, $this->group->fresh()->only(array_keys($dates)));
+        $this->actingAs($this->owner)->post('/groups/'.$this->group->id.'/pause', ['confirmed' => 1])->assertForbidden();
+        $this->post('/groups/'.$this->group->id.'/extension', ['confirmed' => 1])->assertForbidden();
+        $this->postJson('/api/v1/group-applications', ['group_uuid' => $this->group->public_uuid, 'first_name' => 'Test', 'last_name' => 'Synthetic', 'phone' => '+12025550100'], ['X-Request-Id' => 'withdraw-intake'])->assertUnprocessable();
+        app()->call([$withdraw, 'handle']);
+        $this->actingAs($this->admin)->post($url.'/restore-placement', ['confirmed' => 1])->assertRedirect();
+        $restore = $this->currentIntent();
+        $this->assertSame('admin_restore', $restore->mode);
+        $this->assertTrue($this->group->fresh()->disabled);
+        app()->call([$restore, 'handle']);
+        $this->assertFalse($this->group->fresh()->disabled);
+        $this->assertSame(GroupStatus::Active, $this->group->fresh()->status);
+        $this->assertEquals($dates, $this->group->fresh()->only(array_keys($dates)));
+        app()->call([$restore, 'handle']);
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request) => $request['resource_id'] === 123 && $request['published'] === true);
+    }
+
+    public function test_admin_restore_failure_stays_disabled_and_action_can_retry(): void
+    {
+        Queue::fake();
+        app(GroupWorkflow::class)->withdraw($this->group, $this->admin);
+        app(GroupWorkflow::class)->restorePlacement($this->group, $this->admin);
+        $job = $this->currentIntent();
+        $this->fakeHttp(fn () => Http::response([], 422));
+        app()->call([$job, 'handle']);
+        $this->assertTrue($this->group->fresh()->disabled);
+        $this->fakeHttp();
+        app(GroupWorkflow::class)->restorePlacement($this->group, $this->admin);
+        app()->call([$this->currentIntent(), 'handle']);
+        $this->assertFalse($this->group->fresh()->disabled);
+    }
+
+    public function test_admin_restore_deadline_before_and_during_http_expires_without_reenable(): void
+    {
+        Queue::fake();
+        foreach ([false, true] as $during) {
+            $this->group->refresh()->update(['status' => 'active', 'disabled' => false, 'expires_at' => now()->addMinute()]);
+            app(GroupWorkflow::class)->withdraw($this->group, $this->admin);
+            app(GroupWorkflow::class)->restorePlacement($this->group, $this->admin);
+            $job = $this->currentIntent();
+            if ($during) {
+                $this->fakeHttp(function ($request) {
+                    $this->travel(61)->seconds();
+
+                    return Http::response(['data' => ['resource_id' => $request['resource_id'], 'published' => $request['published'], 'changed' => true], 'meta' => []]);
+                });
+            } else {
+                $this->travel(61)->seconds();
+            }
+            app()->call([$job, 'handle']);
+            $current = $this->group->fresh();
+            $this->assertTrue($current->disabled);
+            $this->assertSame(GroupStatus::Expired, $current->status);
+            $this->assertSame('unpublished', $current->modx_publication_desired);
+            $this->assertGreaterThan($job->revision, $current->modx_publication_revision);
+        }
+    }
+
+    public function test_free_and_paid_expired_renewal_start_clock_only_after_remote_success(): void
+    {
+        Queue::fake();
+        WebpayFixture::configure();
+        Setting::create(['key' => 'extension_price_minor_units', 'type' => 'integer', 'value' => '5000']);
+        foreach ([true, false] as $free) {
+            $this->owner->update(['free' => $free]);
+            $this->group->refresh()->update(['status' => 'expired', 'published_at' => now()->subDays(40), 'expires_at' => now()->subDays(10), 'expiry_warning_sent_at' => now()->subDays(11)]);
+            $before = $this->group->fresh()->only(['published_at', 'expires_at']);
+            DB::beginTransaction();
+            if ($free) {
+                app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+            } else {
+                $payment = app(PaymentAttempts::class)->extend($this->group, $this->owner);
+                app(PaymentAttempts::class)->start($payment);
+                $notify = WebpayFixture::notify($payment);
+                $this->post('/webpay/notify', $notify)->assertOk();
+                $this->assertSame('extension-expired', $payment->fresh()->product_effect);
+                $this->assertSame('succeeded', $payment->fresh()->status->value);
+                $this->post('/webpay/notify', $notify)->assertOk();
+            }
+            $revision = $this->group->fresh()->modx_publication_revision;
+            Queue::assertNotPushed(SetGroupModxPublication::class, fn ($job) => $job->revision === $revision);
+            $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
+            $this->assertEquals($before, $this->group->fresh()->only(array_keys($before)));
+            DB::commit();
+            $job = $this->currentIntent();
+            $this->assertSame('renewal', $job->mode);
+            $this->travel(3)->hours();
+            app()->call([$job, 'handle']);
+            $group = $this->group->fresh();
+            $this->assertSame(GroupStatus::Active, $group->status);
+            $this->assertEquals(now()->utc(), $group->published_at);
+            $this->assertEquals(now()->utc()->addDays(30), $group->expires_at);
+            $this->assertNull($group->expiry_warning_sent_at);
+            $this->assertSame('published', $group->modx_publication_status);
+            $this->assertSame('system', $group->statusHistory()->latest('id')->first()->actor_type);
+            app()->call([$job, 'handle']);
+        }
+        Http::assertSentCount(2);
+    }
+
+    public function test_renewal_failure_missing_resource_and_initial_approval_remain_truthful(): void
+    {
+        Queue::fake();
+        $this->group->update(['status' => 'expired', 'expires_at' => now()->subDay()]);
+        $before = $this->group->fresh()->only(['published_at', 'expires_at']);
+        app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+        $job = $this->currentIntent();
+        $this->fakeHttp(fn () => Http::response([], 422));
+        app()->call([$job, 'handle']);
+        $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
+        $this->assertEquals($before, $this->group->fresh()->only(array_keys($before)));
+        $this->actingAs($this->admin)->post('/admin/groups/'.$this->group->id.'/activate', ['confirmed' => 1])->assertForbidden();
+        $this->fakeHttp();
+        app(GroupWorkflow::class)->retryRenewal($this->group, $this->admin);
+        app()->call([$this->currentIntent(), 'handle']);
+        $this->assertSame(GroupStatus::Active, $this->group->fresh()->status);
+        $missing = Group::create(['owner_id' => $this->owner->id, 'status' => 'expired', 'expires_at' => now()->subDay()]);
+        app(GroupLifecycleService::class)->extend($missing, $this->owner);
+        Queue::assertNotPushed(SetGroupModxPublication::class, fn ($queued) => $queued->groupId === $missing->id);
+        $this->assertSame(GroupStatus::Approved, $missing->fresh()->status);
+        $this->assertNull($missing->fresh()->published_at);
+        $this->group->update(['status' => 'approved']);
+        $this->group->statusHistory()->create(['from_status' => 'moderation', 'to_status' => 'approved', 'actor_type' => 'system']);
+        DB::transaction(fn () => app(GroupModxPublicationScheduler::class)->schedule($this->group->fresh(), true));
+        $this->fakeHttp();
+        app()->call([$this->currentIntent(), 'handle']);
+        Http::assertNothingSent();
+        $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
+    }
+
+    public function test_renewal_stale_delete_and_date_races_cannot_activate(): void
+    {
+        Queue::fake();
+        foreach (['owner-delete', 'admin-delete', 'date', 'unpublish', 'disabled'] as $index => $mutation) {
+            $this->group = Group::create(['owner_id' => $this->owner->id, 'status' => 'expired', 'public_site_resource_id' => 124 + $index,
+                'published_at' => now()->subDays(40), 'expires_at' => now()->subDays(10), 'placement_days' => 30]);
+            app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+            $job = $this->currentIntent();
+            $this->fakeHttp(function ($request) use ($mutation) {
+                match ($mutation) {
+                    'owner-delete' => app(GroupWorkflow::class)->delete($this->group, $this->owner),
+                    'admin-delete' => app(GroupWorkflow::class)->delete($this->group, $this->admin),
+                    'date' => $this->group->fresh()->update(['expires_at' => now()->addDay()]),
+                    'disabled' => $this->group->fresh()->update(['disabled' => true]),
+                    default => DB::transaction(fn () => app(GroupModxPublicationScheduler::class)->schedule($this->group->fresh(), false)),
+                };
+
+                return Http::response(['data' => ['resource_id' => $request['resource_id'], 'published' => $request['published'], 'changed' => true], 'meta' => []]);
+            });
+            app()->call([$job, 'handle']);
+            $group = Group::withTrashed()->findOrFail($this->group->id);
+            $this->assertNotSame(GroupStatus::Active, $group->status);
+            $this->assertSame('unpublished', $group->modx_publication_desired);
+            $this->assertGreaterThan($job->revision, $group->modx_publication_revision);
+        }
+    }
+
+    public function test_rejected_owner_delete_retains_history_payments_and_admin_marker(): void
+    {
+        Queue::fake();
+        $this->group->update(['status' => 'rejected']);
+        $history = $this->group->statusHistory()->create(['from_status' => 'moderation', 'to_status' => 'rejected', 'actor_type' => 'system']);
+        $payment = $this->group->payments()->create(['owner_id' => $this->owner->id, 'type' => 'placement', 'status' => 'succeeded', 'order_number' => 'synthetic-retained', 'amount' => 100]);
+        app(GroupWorkflow::class)->delete($this->group, $this->owner);
+        $group = $this->group->fresh();
+        $this->assertSame(GroupStatus::Rejected, $group->status);
+        $this->assertNotNull($group->psychologist_deleted_at);
+        $this->assertNull($group->deleted_at);
+        $this->assertNotNull($history->fresh());
+        $this->assertNotNull($payment->fresh());
+        $this->assertSame('unpublished', $group->modx_publication_desired);
+        $this->actingAs($this->owner)->get('/groups/'.$group->id)->assertNotFound();
+        $this->actingAs($this->admin)->get('/admin/groups/'.$group->id)->assertOk()->assertSee('Психолог удалил группу');
+    }
+
+    public function test_legacy_queued_pause_job_payload_keeps_resume_defaults(): void
+    {
+        Queue::fake();
+        $this->pause();
+        $this->resume();
+        $job = $this->currentIntent();
+        unset($job->mode, $job->expectedIdentity);
+        $restored = unserialize(serialize($job));
+        $this->assertSame('resume', $restored->mode);
+        $this->assertNull($restored->expectedIdentity);
+        app()->call([$restored, 'handle']);
+        $this->assertSame(GroupStatus::Active, $this->group->fresh()->status);
+    }
+
+    public function test_stale_restore_response_cannot_reenable_newer_unpublish_intent(): void
+    {
+        Queue::fake();
+        app(GroupWorkflow::class)->withdraw($this->group, $this->admin);
+        app(GroupWorkflow::class)->restorePlacement($this->group, $this->admin);
+        $job = $this->currentIntent();
+        $this->fakeHttp(function ($request) {
+            DB::transaction(fn () => app(GroupModxPublicationScheduler::class)->schedule($this->group->fresh(), false));
+
+            return Http::response(['data' => ['resource_id' => 123, 'published' => $request['published'], 'changed' => true], 'meta' => []]);
+        });
+        app()->call([$job, 'handle']);
+        $this->assertTrue($this->group->fresh()->disabled);
+        $this->assertSame('unpublished', $this->group->fresh()->modx_publication_desired);
+        $this->assertSame(GroupStatus::Active, $this->group->fresh()->status);
+    }
+
+    public function test_free_and_paid_renewal_queue_failure_does_not_undo_product_effect(): void
+    {
+        WebpayFixture::configure();
+        Setting::create(['key' => 'extension_price_minor_units', 'type' => 'integer', 'value' => '5000']);
+        Bus::shouldReceive('dispatch')->twice()->andThrow(new \RuntimeException('Synthetic queue outage'));
+        foreach ([true, false] as $free) {
+            $this->owner->update(['free' => $free]);
+            $this->group->refresh()->update(['status' => 'expired', 'expires_at' => now()->subDay()]);
+            $before = $this->group->fresh()->only(['published_at', 'expires_at']);
+            if ($free) {
+                app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+            } else {
+                $payment = app(PaymentAttempts::class)->extend($this->group, $this->owner);
+                app(PaymentAttempts::class)->start($payment);
+                $notify = WebpayFixture::notify($payment);
+                $this->post('/webpay/notify', $notify)->assertOk();
+                $this->assertSame('succeeded', $payment->fresh()->status->value);
+                $this->assertSame('extension-expired', $payment->fresh()->product_effect);
+                $this->post('/webpay/notify', $notify)->assertOk();
+            }
+            $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
+            $this->assertSame('queue_unavailable', $this->group->fresh()->modx_publication_error_code);
+            $this->assertEquals($before, $this->group->fresh()->only(array_keys($before)));
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_renewal_mutation_before_http_is_rejected_without_remote_publish(): void
+    {
+        Queue::fake();
+        $this->group->update(['status' => 'expired', 'expires_at' => now()->subDay()]);
+        app(GroupLifecycleService::class)->extend($this->group, $this->owner);
+        $job = $this->currentIntent();
+        $this->group->fresh()->update(['published_at' => now()->subDays(100)]);
+        app()->call([$job, 'handle']);
+        Http::assertNothingSent();
+        $this->assertSame(GroupStatus::Approved, $this->group->fresh()->status);
     }
 }

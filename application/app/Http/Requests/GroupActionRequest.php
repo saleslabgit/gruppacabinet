@@ -17,6 +17,10 @@ class GroupActionRequest extends FormRequest
     public function authorize(): bool
     {
         $ability = match (true) {
+            $this->routeIs('*.submit-stored') => 'submit',
+            $this->routeIs('*.withdraw') => 'withdraw',
+            $this->routeIs('*.restore-placement') => 'restorePlacement',
+            $this->routeIs('*.retry-renewal') => 'retryRenewal',
             $this->routeIs('*.pause') => 'pause',
             $this->routeIs('*.resume') => 'resume',
             $this->routeIs('*.extend') => 'extend',

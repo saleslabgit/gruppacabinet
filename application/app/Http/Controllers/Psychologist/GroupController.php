@@ -52,7 +52,7 @@ class GroupController extends Controller
         Gate::authorize('view', $model);
 
         return view('psychologist.groups.show', GroupPages::detail($model, false) + [
-            'latestApplication' => $model->applications()->orderByDesc('created_at')->orderByDesc('id')->first(),
+            'latestApplication' => $model->applications()->whereNull('psychologist_deleted_at')->orderByDesc('created_at')->orderByDesc('id')->first(),
         ]);
     }
 
@@ -89,6 +89,13 @@ class GroupController extends Controller
         }
 
         return redirect()->route('psychologist.groups.show', $group)->with('success', 'Продление выполнено.');
+    }
+
+    public function submitStored(GroupActionRequest $request, GroupWorkflow $workflow): RedirectResponse
+    {
+        $group = $workflow->submitStored($request->group(), $request->user());
+
+        return redirect()->route('psychologist.groups.show', $group)->with('success', 'Группа отправлена на модерацию.');
     }
 
     public function update(GroupRequest $request, GroupWorkflow $workflow): RedirectResponse

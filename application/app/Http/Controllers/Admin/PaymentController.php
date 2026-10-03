@@ -69,6 +69,6 @@ class PaymentController extends Controller
             app(AuditService::class)->record('payment', $locked->id, 'payment.refunded', [], $request->user());
         });
 
-        return redirect()->route('admin.payments.show', $payment)->with('success', 'Возврат, выполненный в WEBPAY, учтён.');
+        return redirect()->route('admin.payments.show', $payment)->with('success', 'Возврат, выполненный в платёжном сервисе, учтён.');
     }
 }

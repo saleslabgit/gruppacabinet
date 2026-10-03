@@ -14,6 +14,11 @@ return [
     |
     */
 
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'admin_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
+    ],
+
     'modx' => [
         'base_url' => env('MODX_BASE_URL'),
         'token' => env('MODX_TOKEN'),

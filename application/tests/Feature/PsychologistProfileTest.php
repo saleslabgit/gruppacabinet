@@ -67,13 +67,16 @@ class PsychologistProfileTest extends TestCase
         $response = $this->actingAs($this->owner)->get('/profile?user_id='.$other->id.'&id='.$other->id)
             ->assertOk()->assertViewIs('psychologist.profile.show')->assertSee($this->owner->email)
             ->assertSeeInOrder(['First program', 'Second program'])->assertSee('Center')->assertSee('2011')->assertSee('678')
-            ->assertSee('Stored education')->assertSee('21.09.2026 12:30')->assertSee('Да')->assertSee('Нет')->assertSee('Не указано')
+            ->assertSee('Stored education')->assertDontSee('Подтверждения и согласие')->assertDontSee('consent-v3')->assertDontSee('21.09.2026 12:30')
             ->assertSee($ownDocument->original_name)->assertSee('2 КБ')->assertSee('Диплом')
             ->assertSee(route('psychologist.documents.view', $ownDocument), false)
             ->assertSee(route('psychologist.documents.download', $ownDocument), false);
-        foreach ($fields as $value) {
-            $response->assertSee((string) $value);
+        foreach ($fields as $field => $value) {
+            if ($field !== 'personal_data_consent_version') {
+                $response->assertSee((string) $value);
+            }
         }
+        $this->assertSame('consent-v3', $this->owner->fresh()->personal_data_consent_version);
         foreach ([$other->email, $other->first_name, $otherDocument->original_name, $ownDocument->path, $this->owner->password,
             'private-recaller', 'active_email', session()->getId(), '/storage/', 'storage/app/private',
             'Редактировать', 'Загрузить', 'Удалить', 'type="file"', 'data-noop', '_prototype', '/admin/'] as $hidden) {
@@ -122,7 +125,7 @@ class PsychologistProfileTest extends TestCase
         $this->post('/logout')->assertRedirect(route('login'));
         $this->get('/profile')->assertRedirect(route('login'));
         foreach (Route::getRoutes() as $route) {
-            if (str_starts_with($route->getName() ?? '', 'psychologist.') && ! str_starts_with($route->getName(), 'psychologist.groups.') && ! str_starts_with($route->getName(), 'psychologist.payments.')) {
+            if (str_starts_with($route->getName() ?? '', 'psychologist.') && ! str_starts_with($route->getName(), 'psychologist.feedback') && ! str_starts_with($route->getName(), 'psychologist.groups.') && ! str_starts_with($route->getName(), 'psychologist.payments.')) {
                 $this->assertSame(['GET', 'HEAD'], $route->methods());
                 $this->assertContains($route->uri(), ['/', 'profile', 'profile/documents/{document}/view', 'profile/documents/{document}/download']);
             }

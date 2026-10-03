@@ -29,13 +29,14 @@ class ApplicationPages
         $owner = $admin ? $group->owner : null;
         $params = ['group' => $group->id, 'application' => $application->id];
 
-        return $application->only(['id', 'phone', 'created_at', 'updated_at', 'processed_at']) + [
+        return $application->only(['id', 'phone', 'created_at', 'updated_at', 'processed_at', 'psychologist_deleted_at']) + [
             'name' => trim($application->last_name.' '.$application->first_name),
             'group_title' => $group->title ?: 'Новая группа',
             'group_url' => route($admin ? 'admin.groups.show' : 'psychologist.groups.show', $group),
             'owner_name' => $owner ? PsychologistPages::profile($owner)['name'] : null,
             'owner_url' => $owner ? route('admin.psychologists.show', $owner) : null,
             'show_url' => $admin ? route('admin.applications.show', $application) : route('psychologist.groups.applications.show', $params),
+            'delete_url' => $admin ? null : route('psychologist.groups.applications.destroy', $params),
             'action_url' => $admin ? null : route('psychologist.groups.applications.'.($application->processed_at ? 'unprocessed' : 'processed'), $params),
         ];
     }

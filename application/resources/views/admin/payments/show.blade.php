@@ -8,7 +8,7 @@
 @section('content')
 <x-validation-summary :errors="$errors" />
 @if($payment['manual_review'])
-<x-alert tone="warning">Требуется ручная проверка. Достоверное подтверждение оплаты не получено. Проверьте платёж в WEBPAY.</x-alert>
+<x-alert tone="warning">Требуется ручная проверка. Достоверное подтверждение оплаты не получено. Проверьте платёж в платёжном сервисе.</x-alert>
 @endif
 <x-panel title="Платёж">
 @include('shared.payment-data')
@@ -33,15 +33,15 @@
 </x-panel>
 @elseif($payment['status'] === 'succeeded')
 <x-panel title="Учёт выполненного возврата">
-<x-alert tone="warning">«Отметить возврат выполненным в WEBPAY» только фиксирует уже выполненный возврат. Это действие не отправляет деньги и не вызывает API возврата. Сначала выполните возврат вручную в кабинете WEBPAY.</x-alert>
+<x-alert tone="warning">«Отметить возврат выполненным в платёжном сервисе» только фиксирует уже выполненный возврат. Это действие не отправляет деньги и не вызывает API возврата. Сначала выполните возврат вручную в платёжном сервисе.</x-alert>
 <form id="refund-accounting" method="POST" @if($realPayments ?? false) action="{{ route('admin.payments.refund', $payment['id']) }}" @else data-prototype-form @endif>
 @if($realPayments ?? false)@csrf @endif
 <x-textarea name="refund_comment" :value="old('refund_comment')" maxlength="16000" label="Комментарий к возврату" :required="true" :error="$errors['refund_comment'] ?? null" />
-<x-button kind="danger" data-bs-toggle="modal" data-bs-target="#refund">Отметить возврат выполненным в WEBPAY</x-button>
+<x-button kind="danger" data-bs-toggle="modal" data-bs-target="#refund">Отметить возврат выполненным в платёжном сервисе</x-button>
 </form>
 </x-panel>
-<x-confirmation id="refund" :form="($realPayments ?? false) ? 'refund-accounting' : null" title="Зафиксировать выполненный возврат?" action="Отметить возврат выполненным в WEBPAY" :open="$variant === 'confirmation'">
-<p>Подтвердите, что возврат по заказу {{ $payment['order_number'] }} уже выполнен в WEBPAY. Деньги этим действием не отправляются.</p>
+<x-confirmation id="refund" :form="($realPayments ?? false) ? 'refund-accounting' : null" title="Зафиксировать выполненный возврат?" action="Отметить возврат выполненным в платёжном сервисе" :open="$variant === 'confirmation'">
+<p>Подтвердите, что возврат по заказу {{ $payment['order_number'] }} уже выполнен в платёжном сервисе. Деньги этим действием не отправляются.</p>
 </x-confirmation>
 @else
 <x-alert>Учёт возврата доступен только для подтверждённой успешной оплаты.</x-alert>

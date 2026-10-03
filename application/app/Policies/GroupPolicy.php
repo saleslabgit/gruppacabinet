@@ -54,7 +54,27 @@ class GroupPolicy
 
     public function activate(User $actor, Group $group): bool
     {
-        return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Approved;
+        return $actor->admin && $this->view($actor, $group) && $group->status === GroupStatus::Approved
+            && ! ($group->public_site_resource_id > 0 && $group->renewalHistoryId() !== null);
+    }
+
+    public function withdraw(User $actor, Group $group): bool
+    {
+        return $actor->admin && $this->view($actor, $group) && $group->psychologist_deleted_at === null
+            && $group->status === GroupStatus::Active && ! $group->disabled && $group->public_site_resource_id > 0;
+    }
+
+    public function restorePlacement(User $actor, Group $group): bool
+    {
+        return $actor->admin && $this->view($actor, $group) && $group->psychologist_deleted_at === null
+            && $group->status === GroupStatus::Active && $group->disabled && $group->public_site_resource_id > 0
+            && $group->expires_at !== null && $group->expires_at->isFuture();
+    }
+
+    public function retryRenewal(User $actor, Group $group): bool
+    {
+        return $actor->admin && $this->view($actor, $group) && $group->psychologist_deleted_at === null
+            && ! $group->disabled && $group->public_site_resource_id > 0 && $group->renewalHistoryId() !== null;
     }
 
     public function pause(User $actor, Group $group): bool

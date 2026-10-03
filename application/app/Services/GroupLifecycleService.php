@@ -77,7 +77,10 @@ class GroupLifecycleService
                 throw ValidationException::withMessages(['extension' => 'Срок продления закончился. Создайте новую группу.']);
             }
 
-            return $this->transitions->transition($locked, GroupStatus::Approved);
+            $renewed = $this->transitions->transition($locked, GroupStatus::Approved);
+            app(GroupModxPublicationScheduler::class)->schedule($renewed, true);
+
+            return $renewed;
         });
     }
 

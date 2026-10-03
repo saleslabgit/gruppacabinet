@@ -18,6 +18,9 @@ class ApplicationController extends Controller
         Gate::authorize('viewAny', GroupApplication::class);
         $filters = $request->validated();
         $query = GroupApplication::query()->with(['group' => fn ($q) => $q->withTrashed(), 'group.owner' => fn ($q) => $q->withTrashed()]);
+        if ($filters['group_id'] ?? null) {
+            $query->where('group_id', $filters['group_id']);
+        }
         $search = $filters['search'] ?? '';
         if ($search !== '') {
             $digits = $phones->digitsForSearch($search);

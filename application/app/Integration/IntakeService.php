@@ -8,6 +8,7 @@ use App\Models\DictionaryItem;
 use App\Models\Group;
 use App\Models\IntegrationRequest;
 use App\Models\User;
+use App\Services\ActionNotifications;
 use App\Services\PsychologistDocuments;
 use App\Services\UserStatusTransitionService;
 use Carbon\CarbonImmutable;
@@ -99,6 +100,7 @@ class IntakeService
         }
         $user = $matches->first();
         $new = $user === null;
+        $notify = $new || $user->status === UserStatus::Rejected;
         $code = $fields['education_type_code'];
         unset($fields['education_type_code']);
         $fields['education_type_id'] = null;
@@ -130,6 +132,10 @@ class IntakeService
             if ($descriptor['training_position'] !== null) {
                 $document->update(['user_training_id' => $currentTrainings[$descriptor['training_position']]->id]);
             }
+        }
+
+        if ($notify) {
+            app(ActionNotifications::class)->telegram('psychologist_pending', $user->id);
         }
 
         return $new ? 201 : 200;

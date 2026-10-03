@@ -129,7 +129,7 @@ final class PrototypeFixtures
         }
         $payment = ['id' => $variant === 'pagination' ? 502 : 501, 'order_number' => ($variant === 'pagination' ? 'DEMO-ORDER-20260920-0002' : 'DEMO-ORDER-20260920-0001').($long ? str_repeat('-DEMO', 10) : ''), 'transaction_id' => in_array($paymentStatus, ['created', 'pending'], true) ? null : 'DEMO-TRANSACTION-0001', 'amount' => 5000, 'currency' => 'BYN', 'type' => str_starts_with($variant, 'extension') ? 'extension' : 'placement', 'status' => $paymentStatus, 'created_at' => $date->subHour(), 'paid_at' => in_array($paymentStatus, ['succeeded', 'refunded'], true) ? $date : null, 'refunded_at' => $paymentStatus === 'refunded' ? $date->addHour() : null, 'last_status_check_at' => $paymentStatus === 'created' ? null : $date, 'status_check_attempts' => $variant === 'manual-review' ? 3 : 1, 'refund_comment' => 'Демонстрационная отметка ручного возврата.', 'manual_review' => $variant === 'manual-review'];
         $navigation = [];
-        $nav = $admin ? ['admin-home' => 'Рабочая сводка', 'admin-users' => 'Психологи', 'admin-groups' => 'Группы', 'admin-applications' => 'Заявки', 'admin-payments' => 'Платежи', 'admin-dictionaries' => 'Справочники', 'admin-settings' => 'Настройки'] : ['groups' => 'Мои группы', 'profile' => 'Мои данные'];
+        $nav = $admin ? ['admin-home' => 'Рабочая сводка', 'admin-users' => 'Психологи', 'admin-groups' => 'Группы', 'admin-applications' => 'Заявки', 'admin-payments' => 'Платежи', 'admin-dictionaries' => 'Справочники', 'admin-settings' => 'Настройки'] : ['groups' => 'Мои группы', 'profile' => 'Мои данные', 'feedback' => 'Сообщить об ошибке'];
         $section = match ($slug) {
             'groups-empty', 'group', 'group-form', 'extension', 'placement', 'payment-pending', 'payment-success', 'payment-result', 'applications', 'application' => 'groups',
             'admin-user', 'admin-user-form', 'admin-documents' => 'admin-users',
@@ -146,10 +146,17 @@ final class PrototypeFixtures
         if ($variant === 'validation' && $slug === 'login') {
             $errors['password'] = 'Введите пароль.';
         }
+        if ($slug === 'feedback' && $variant === 'validation') {
+            $errors = ['message' => 'Введите сообщение.'];
+        }
         $data = compact('slug', 'variant', 'links', 'admin', 'long', 'date', 'group', 'groups', 'user', 'application', 'payment', 'navigation', 'errors');
         $data += ['title' => PrototypeCatalog::pages()[$slug]['title'], 'prototype' => true, 'empty' => in_array($variant, ['empty', 'no-results', 'pre-webpay'], true), 'pages' => [1 => route('prototype.'.$slug), 2 => route('prototype.'.$slug, ['variant' => in_array('pagination', PrototypeCatalog::pages()[$slug]['variants'], true) ? 'pagination' : PrototypeCatalog::pages()[$slug]['variants'][0]])], 'currentPage' => $variant === 'pagination' ? 2 : 1];
         if ($variant === 'success' && ! in_array($slug, ['password', 'password-forgot', 'notices'], true)) {
             $data['notice'] = ['tone' => 'success', 'text' => 'Изменения сохранены. Демонстрационное состояние.'];
+        }
+
+        if ($slug === 'feedback' && $variant === 'success') {
+            $data['notice'] = ['tone' => 'success', 'text' => 'Сообщение принято и поставлено в очередь отправки.'];
         }
 
         return $data;

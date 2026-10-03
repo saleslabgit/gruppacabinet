@@ -12,7 +12,7 @@ class GroupModxPublicationScheduler
     // Caller owns the transaction and group row lock, including for soft-deleted rows.
     public function schedule(Group $group, bool $published): void
     {
-        if ($group->public_site_resource_id === null) {
+        if ($group->public_site_resource_id === null || $group->public_site_resource_id < 1) {
             return;
         }
         $group->forceFill(['modx_publication_revision' => $group->modx_publication_revision + 1,
@@ -23,9 +23,11 @@ class GroupModxPublicationScheduler
         $id = $group->id;
         $revision = $group->modx_publication_revision;
         $resourceId = $group->public_site_resource_id;
-        DB::afterCommit(function () use ($id, $revision, $resourceId): void {
+        $mode = $group->renewalHistoryId() !== null ? 'renewal' : ($group->disabled ? 'admin_restore' : 'resume');
+        $identity = SetGroupModxPublication::identity($group);
+        DB::afterCommit(function () use ($id, $revision, $resourceId, $mode, $identity): void {
             try {
-                SetGroupModxPublication::dispatch($id, $revision, $resourceId)->onConnection('database');
+                SetGroupModxPublication::dispatch($id, $revision, $resourceId, $mode, $identity)->onConnection('database');
             } catch (Throwable) {
                 Group::withTrashed()->whereKey($id)->where('modx_publication_revision', $revision)
                     ->update(['modx_publication_status' => 'failed', 'modx_publication_failed_at' => now(),

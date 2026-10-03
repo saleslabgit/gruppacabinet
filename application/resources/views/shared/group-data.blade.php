@@ -1,6 +1,8 @@
 <x-panel :title="$group['title']">
+@unless($omitSummary ?? false)
 @include('shared.group-summary')
 <hr class="my-4">
+@endunless
 <h3>Краткое описание</h3>
 <p class="mb-4 readable-text">{{ $group['description'] }}</p>
 @if(!empty($group['full_description_html']))

@@ -7,7 +7,7 @@ $weekdayOptions = $weekdayOptions ?? \App\Services\GroupContent::DAYS;
 <x-alert tone="warning" title="Доработайте описание">
 <p>{{ $group['moderator_comment'] }}</p>
 </x-alert>
-@include('shared.group-history')@endif
+@endif
 @if($admin)
 <x-alert tone="warning">Администратор может редактировать группу независимо от статуса. Изменения содержимого одобренной группы или группы с MODX Resource ID синхронизируются через очередь. Статус синхронизации доступен в карточке группы.</x-alert>
 @endif
@@ -108,3 +108,5 @@ $weekdayOptions = $weekdayOptions ?? \App\Services\GroupContent::DAYS;
 <x-button icon="arrow-left" kind="ghost" :href="(($creating ?? false) || $variant === 'create') ? $links[$admin ? 'admin-groups' : 'groups'] : (($realGroups ?? false) ? route($admin ? 'admin.groups.show' : 'psychologist.groups.show', $group['id']) : $links[$admin ? 'admin-group' : 'group'])">Отмена</x-button>
 </div>
 </form>
+
+@if($variant === 'revision')@include('shared.group-history')@endif

@@ -25,8 +25,8 @@ class PrototypeTest extends TestCase
         DB::purge();
         config()->set('database.default', 'missing-prototype-database');
         $catalog = $this->get('http://localhost/_prototype')->assertOk();
-        $this->assertCount(32, PrototypeCatalog::pages());
-        $this->assertSame(263, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
+        $this->assertCount(33, PrototypeCatalog::pages());
+        $this->assertSame(267, array_sum(array_map(fn ($page) => count($page['variants']), PrototypeCatalog::pages())));
         foreach (PrototypeCatalog::pages() as $slug => $page) {
             foreach ($page['variants'] as $variant) {
                 $path = '/_prototype/'.$slug.'/'.$variant;
@@ -35,7 +35,7 @@ class PrototypeTest extends TestCase
                 if ($variant === 'permission') {
                     $expectedView = 'errors.403';
                 }
-                $this->get('http://localhost'.$path)->assertOk()->assertViewIs($expectedView);
+                $this->get('http://localhost'.$path)->assertOk()->assertViewIs($expectedView)->assertDontSee('WEBPAY');
             }
         }
     }
@@ -114,7 +114,7 @@ class PrototypeTest extends TestCase
             $response->assertDontSee($external);
         }
         $this->get('http://localhost/_prototype/groups/normal')->assertOk()->assertSee('group:awaiting_payment')->assertSee('group:revision')->assertSee('group:expired');
-        $this->get('http://localhost/_prototype/payment-result/browser-cancel')->assertOk()->assertSee('Оплата подтверждается WEBPAY')->assertDontSee('Отмена оплаты подтверждена');
+        $this->get('http://localhost/_prototype/payment-result/browser-cancel')->assertOk()->assertSee('Оплата подтверждается')->assertDontSee('Отмена оплаты подтверждена');
         $this->get('http://localhost/_prototype/admin-payment/succeeded')->assertOk()->assertSee('не отправляет деньги');
         $css = file_get_contents(public_path('ui.css'));
         foreach ([500, 600] as $weight) {
@@ -146,7 +146,7 @@ class PrototypeTest extends TestCase
         $this->assertStringContainsString('<strong class="notice-title">Notice</strong>', $html);
         $this->assertDoesNotMatchRegularExpression('/<h[1-6]\b/', $html);
         $this->get('http://localhost/_prototype/payment-pending/pending')->assertOk()
-            ->assertSee('<strong class="notice-title">Оплата подтверждается WEBPAY</strong>', false);
+            ->assertSee('<strong class="notice-title">Оплата подтверждается</strong>', false);
     }
 
     public function test_unrefunded_payment_blocks_delete_even_for_a_historically_free_group(): void

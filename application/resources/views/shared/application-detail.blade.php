@@ -1,4 +1,5 @@
 <x-panel :title="$application['name']">
+@if($admin && !empty($application['psychologist_deleted_at']))<p class="meta">Психолог удалил заявку</p>@endif
 <div class="mb-4">
 <x-status domain="application" :value="$application['processed_at'] ? 'processed' : 'new'" />
 </div>
@@ -42,6 +43,7 @@
 </dl>
 <div class="actions mt-4">
 @unless($admin)
+@if($application['delete_url'] ?? null)<x-button kind="danger" data-bs-toggle="modal" data-bs-target="#delete-application">Удалить</x-button>@endif
 @if($application['action_url'] ?? null)
 <form method="POST" action="{{ $application['action_url'] }}">@csrf
 <x-button icon="check-lg" type="submit">{{ $application['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
@@ -53,3 +55,6 @@
 <x-button icon="arrow-left" kind="ghost" :href="$links[$admin ? 'admin-applications' : 'applications']">Назад к заявкам</x-button>
 </div>
 </x-panel>
+@if(!$admin && ($application['delete_url'] ?? null))
+<x-confirmation id="delete-application" title="Удалить заявку?" action="Удалить" :url="$application['delete_url']" method="DELETE"><p>Заявка исчезнет из вашего кабинета. История сохранится у администратора.</p></x-confirmation>
+@endif

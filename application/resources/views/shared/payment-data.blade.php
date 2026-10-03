@@ -4,11 +4,11 @@
 <dd>{{ $payment['id'] }}</dd>
 </div>
 <div>
-<dt>Номер заказа WEBPAY</dt>
+<dt>Номер заказа</dt>
 <dd>{{ $payment['order_number'] }}</dd>
 </div>
 <div>
-<dt>Транзакция WEBPAY</dt>
+<dt>Транзакция</dt>
 <dd>{{ $payment['transaction_id'] ?? 'Ещё не получена' }}</dd>
 </div>
 <div>

@@ -23,9 +23,8 @@
 @foreach($groups as $group)
 <article class="group-row">
 <div>
-<p class="eyebrow">Группа № {{ $group['id'] }}</p>
 <h2>{{ $group['title'] }}</h2>
-@include('shared.group-summary')
+@include('shared.group-summary', ['preview' => true])
 </div>
 <div>
 <h3>Заявки участников</h3>

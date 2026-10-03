@@ -139,12 +139,22 @@ class Group extends Model
         return $this->hasMany(GroupApplication::class);
     }
 
-    public static function applicationCounts(): array
+    public function renewalHistoryId(): ?int
+    {
+        if ($this->status !== GroupStatus::Approved) {
+            return null;
+        }
+        $history = $this->statusHistory()->latest('id')->first();
+
+        return $history?->from_status === GroupStatus::Expired && $history->to_status === GroupStatus::Approved ? $history->id : null;
+    }
+
+    public static function applicationCounts(bool $includeHidden = false): array
     {
         return [
-            'applications as all_count',
-            'applications as new_count' => fn ($query) => $query->whereNull('processed_at'),
-            'applications as processed_count' => fn ($query) => $query->whereNotNull('processed_at'),
+            'applications as all_count' => fn ($query) => $query->when(! $includeHidden, fn ($q) => $q->whereNull('psychologist_deleted_at')),
+            'applications as new_count' => fn ($query) => $query->whereNull('processed_at')->when(! $includeHidden, fn ($q) => $q->whereNull('psychologist_deleted_at')),
+            'applications as processed_count' => fn ($query) => $query->whereNotNull('processed_at')->when(! $includeHidden, fn ($q) => $q->whereNull('psychologist_deleted_at')),
         ];
     }
 

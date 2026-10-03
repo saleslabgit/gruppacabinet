@@ -11,22 +11,22 @@
 <x-money :value="$payment['amount']" />
 </p>
 @if($payment['type'] === 'extension')
-<x-alert>Продление применяется только после подтверждения оплаты WEBPAY.</x-alert>
+<x-alert>Продление применяется только после подтверждения оплаты платёжным сервисом.</x-alert>
 @else
-<x-alert>Форма группы откроется после подтверждения оплаты WEBPAY. Срок размещения начнётся после ручной публикации администратором.</x-alert>
+<x-alert>Форма группы откроется после подтверждения оплаты платёжным сервисом. Срок размещения начнётся после ручной публикации администратором.</x-alert>
 @endif
 <div class="actions">
 @if($realPayments ?? false)
 @if(isset($providerForm))
 <form method="POST" action="{{ $providerForm['url'] }}">
 @foreach($providerForm['fields'] as $name => $value)<input type="hidden" name="{{ $name }}" value="{{ $value }}">@endforeach
-<x-button type="submit">Перейти в WEBPAY</x-button>
+<x-button type="submit">Оплатить картой</x-button>
 </form>
 @else
-<form method="POST" action="{{ route('psychologist.payments.start', $payment['id']) }}">@csrf<x-button type="submit">Оплатить через WEBPAY</x-button></form>
+<form method="POST" action="{{ route('psychologist.payments.start', $payment['id']) }}">@csrf<x-button type="submit">Оплатить картой</x-button></form>
 @endif
 @else
-<x-button data-noop :disabled="$variant === 'disabled'">{{ $variant === 'retry' ? 'Повторить оплату через WEBPAY' : 'Оплатить через WEBPAY' }}</x-button>
+<x-button data-noop :disabled="$variant === 'disabled'">{{ $variant === 'retry' ? 'Повторить оплату' : 'Оплатить картой' }}</x-button>
 @endif
 <x-button icon="arrow-left" kind="ghost" :href="$links['groups']">К моим группам</x-button>
 </div>

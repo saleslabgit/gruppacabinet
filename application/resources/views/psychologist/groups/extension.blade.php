@@ -23,8 +23,8 @@
 <x-alert>Срок размещения истёк. Дождитесь обновления статуса и обновите страницу.</x-alert>
 @else
 <p>Стоимость продления: <x-money :value="$extensionPrice" /></p>
-<x-alert>{{ $group['status'] === 'expired' ? 'После оплаты группа будет ожидать повторной ручной публикации.' : 'Размещение будет продлено после подтверждения оплаты WEBPAY.' }}</x-alert>
-<form method="POST" action="{{ route('psychologist.groups.extend', $group['id']) }}">@csrf<input type="hidden" name="confirmed" value="1"><x-button type="submit">Оплатить продление через WEBPAY</x-button></form>
+<x-alert>{{ $group['status'] === 'expired' ? 'После оплаты группа будет ожидать подтверждения повторной публикации.' : 'Размещение будет продлено после подтверждения оплаты платёжным сервисом.' }}</x-alert>
+<form method="POST" action="{{ route('psychologist.groups.extend', $group['id']) }}">@csrf<input type="hidden" name="confirmed" value="1"><x-button type="submit">Оплатить продление картой</x-button></form>
 @endif
 @elseif($group['expiry_due'])
 <x-alert tone="warning">Срок размещения истёк. Дождитесь обновления статуса и обновите страницу.</x-alert>
@@ -32,14 +32,14 @@
 <x-alert tone="warning">Продление недоступно для текущего срока размещения. Обратитесь к администратору.</x-alert>
 @else
 @if($group['status'] === 'expired')
-<x-alert>После продления группа вернётся в статус «Одобрена, ожидает публикации». Администратор должен вручную опубликовать её повторно и отметить активной. Даты будут установлены при активации; повторная модерация не нужна.</x-alert>
+<x-alert>После продления группа вернётся в статус «Одобрена, ожидает публикации». Синхронизированная группа будет опубликована автоматически. Новый срок начнётся после подтверждения публикации; повторная модерация не нужна.</x-alert>
 <p>Продление доступно до: <x-date :value="$group['extension_deadline']" /></p>
 @else
 <x-alert>К текущей дате окончания добавится {{ $group['placement_days'] }} дн. Группа останется активной; действия администратора не требуются.</x-alert>
 @endif
 <x-button icon="calendar-plus" data-bs-toggle="modal" data-bs-target="#extend-group">Продлить бесплатно</x-button>
 <x-confirmation id="extend-group" title="Продлить размещение?" action="Продлить бесплатно" kind="primary" :url="route('psychologist.groups.extend', $group['id'])">
-<p>{{ $group['status'] === 'expired' ? 'Группа будет ожидать ручной повторной публикации администратором.' : 'К текущей дате окончания добавится '.$group['placement_days'].' дн.' }}</p>
+<p>{{ $group['status'] === 'expired' ? 'Группа будет ожидать подтверждения повторной публикации.' : 'К текущей дате окончания добавится '.$group['placement_days'].' дн.' }}</p>
 </x-confirmation>
 @endif
 @else
@@ -47,7 +47,7 @@
 <x-alert tone="warning">Срок продления закончился. Создайте новую группу.</x-alert>
 <x-button icon="plus-lg" :href="$links['group-form']">Создать группу</x-button>
 @elseif($variant === 'pending')
-<x-alert tone="warning">Оплата подтверждается WEBPAY. Даты размещения пока не изменены.</x-alert>
+<x-alert tone="warning">Оплата подтверждается. Даты размещения пока не изменены.</x-alert>
 <x-button :href="$links['payment-pending']">Посмотреть состояние</x-button>
 @else
 <p>
@@ -57,8 +57,8 @@
 <p>Демонстрационная стоимость: <x-money :value="5000" />
 </p>
 @endif
-<x-alert>{{ str_ends_with($variant, 'expired') ? 'После продления группа ожидает ручной повторной публикации администратором. Даты будут установлены при публикации; повторная модерация не нужна.' : 'К текущей дате окончания добавятся 30 дней. Группа останется активной; действия администратора не требуются.' }}</x-alert>
-<x-button data-noop>{{ str_starts_with($variant, 'free') ? 'Продлить бесплатно' : 'Оплатить продление через WEBPAY' }}</x-button>
+<x-alert>{{ str_ends_with($variant, 'expired') ? 'После продления группа ожидает подтверждения повторной публикации. Даты будут установлены при публикации; повторная модерация не нужна.' : 'К текущей дате окончания добавятся 30 дней. Группа останется активной; действия администратора не требуются.' }}</x-alert>
+<x-button data-noop>{{ str_starts_with($variant, 'free') ? 'Продлить бесплатно' : 'Оплатить продление картой' }}</x-button>
 @endif
 @endif
 <p class="mt-4">

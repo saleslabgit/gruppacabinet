@@ -169,3 +169,18 @@ the local transport accepted the message, not that a remote inbox received it.
 The hosting MTA may defer, reject or relay it later. Continue delivery diagnosis
 in the hosting MTA/Exim facilities or support using its message ID; no specific
 MTA log path or account access is assumed. See deployment.md for the operator check.
+
+## Group moderation outcomes
+
+`SendGroupModeration` is queued on the database connection after committed admin
+moderation → approved/revision/rejected. The job reads that status-history result/comment
+and sends `GroupModerationMail` to the owner with the title and Cabinet link.
+Approved explains that first publication is pending; revision includes the moderator
+comment, rejected includes the reason. Rollback queues nothing; delivery or insertion
+failure never reverses moderation. Retrying delivery does not repeat the transition.
+
+SMTP/sendmail only, 3 attempts, 45-second job timeout and 60/300-second backoff,
+matching existing mail jobs. Safe logs contain history ID, event, transport and attempt;
+no body, recipient, credentials or chained transport exception. Production links use
+HTTPS. Transport acceptance still does not guarantee inbox delivery; existing
+password/recovery/access and expiry-warning semantics remain unchanged.

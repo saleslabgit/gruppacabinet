@@ -587,3 +587,12 @@ Check paused expiration, paused warnings, hidden-group exclusions, and deadline
 crossing before/during publish: expired plus a newer queued unpublished revision. Test paid deletion without refund and admin
 visibility. Currency old input/empty/max and legacy safe HTML must remain readable.
 No automated real MODX calls; external endpoint acceptance is operator-managed.
+
+## Post-manual-testing verification
+
+Focused checks: `php artisan test --compact --filter='ActionNotificationsTest|GroupWorkflowTest|GroupPublicationTest|ApplicationWorkflowTest|ApplicationHideMigrationTest|ApplicationRetentionTest|IntegrationIntakeTest|CabinetImprovementsUiTest|ProductionUrlGenerationTest|PrototypeTest'`.
+Run the complete MySQL suite and existing concurrency/auth/payment/preflight checks after these.
+Tests use HTTP/mail fakes and synthetic users only; never run a worker against real Telegram/MODX/mail credentials for verification.
+
+Feedback prototypes add four normal/validation/success/queue-error states. Browser smoke should check 390/1024/1440 widths, header menu placement, open/close, Escape returning focus, no-JS links, applications-before-description and final history.
+For renewal test expired → approved without date changes, then process the synthetic successful publish: same resource, active and fresh dates. Also exercise withdraw/restore before and during the original deadline, deletes and stale revisions. Initial approval must not automatically publish.

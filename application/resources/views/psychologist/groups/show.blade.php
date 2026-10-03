@@ -13,7 +13,7 @@
 <x-alert tone="warning">Группа отключена администратором. Редактирование, пауза и продление недоступны.</x-alert>
 @endif
 
-@include('shared.group-data')
+<x-panel :title="$group['title']">@include('shared.group-summary')</x-panel>
 <x-panel title="Заявки участников">
 @if($realGroups ?? false)
 @include('shared.application-counters')
@@ -32,6 +32,7 @@
 <a href="{{ $links['applications'] }}">Все заявки группы</a>
 @endif
 </x-panel>
+@include('shared.group-data', ['omitSummary' => true])
 @if(($canPause ?? false) || (!($realGroups ?? false) && $group['status'] === 'active'))
 <x-confirmation id="pause-group" title="Поставить группу на паузу?" action="Поставить на паузу" kind="primary" :url="($realGroups ?? false) ? route('psychologist.groups.pause', $group['id']) : null">
 <p>Группа будет снята с публикации на основном сайте. Приём заявок прекратится. Дата окончания размещения не изменится.</p>

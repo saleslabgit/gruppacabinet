@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Integration\IntakeService;
+use App\Jobs\SendAdminTelegram;
 use App\Models\Dictionary;
 use App\Models\DictionaryItem;
 use App\Models\Group;
@@ -15,6 +16,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -238,7 +240,7 @@ class IntegrationIntakeTest extends TestCase
         $this->assertStringNotContainsString('synthetic.pdf', IntegrationRequest::sole()->toJson());
         Mail::assertNothingSent();
         Mail::assertNothingQueued();
-        Queue::assertNothingPushed();
+        Queue::assertPushed(SendAdminTelegram::class, 1);
     }
 
     public function test_repeat_matrix_preserves_internal_fields_and_appends_documents(): void
@@ -709,5 +711,34 @@ class IntegrationIntakeTest extends TestCase
         $this->psychologist(id: 'third-generation')->assertCreated();
         $this->assertSame(3, User::withTrashed()->where('email', 'synthetic@example.test')->count());
         $this->assertSame($before, $old->fresh()->getAttributes());
+    }
+
+    public function test_pending_telegram_is_after_commit_and_replay_safe_including_rejected_resubmission(): void
+    {
+        DB::beginTransaction();
+        $this->psychologist(id: 'telegram-first')->assertCreated();
+        Queue::assertNotPushed(SendAdminTelegram::class);
+        DB::commit();
+        Queue::assertPushed(SendAdminTelegram::class, 1);
+        $this->psychologist(id: 'telegram-first')->assertCreated();
+        Queue::assertPushed(SendAdminTelegram::class, 1);
+        User::where('email', 'synthetic@example.test')->update(['status' => 'rejected']);
+        $this->psychologist(id: 'telegram-resubmit')->assertOk();
+        $this->psychologist(id: 'telegram-resubmit')->assertOk();
+        Queue::assertPushed(SendAdminTelegram::class, 2);
+        DB::beginTransaction();
+        $fields = $this->questionnaire();
+        $fields['email'] = 'rollback@example.test';
+        $this->psychologist($fields, id: 'telegram-rollback')->assertCreated();
+        DB::rollBack();
+        Queue::assertPushed(SendAdminTelegram::class, 2);
+    }
+
+    public function test_intake_commits_if_telegram_queue_insertion_fails(): void
+    {
+        Bus::shouldReceive('dispatch')->once()->andThrow(new \RuntimeException('Synthetic queue failure'));
+        $this->psychologist(id: 'telegram-no-queue')->assertCreated();
+        $this->assertDatabaseHas('gp_users', ['email' => 'synthetic@example.test', 'status' => 'pending']);
+        $this->psychologist(id: 'telegram-no-queue')->assertCreated();
     }
 }

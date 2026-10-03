@@ -8,6 +8,7 @@ final class PrototypeCatalog
     public static function pages(): array
     {
         return [
+            'feedback' => ['title' => 'Сообщить об ошибке', 'view' => 'psychologist.feedback', 'variants' => ['normal', 'validation', 'success', 'error']],
             'login' => ['title' => 'Вход', 'view' => 'auth.login', 'variants' => ['normal', 'validation', 'error', 'rate-limit', 'disabled']],
             'password-forgot' => ['title' => 'Восстановление пароля', 'view' => 'auth.password-forgot', 'variants' => ['normal', 'validation', 'success', 'rate-limit']],
             'password' => ['title' => 'Установка пароля', 'view' => 'auth.password', 'variants' => ['normal', 'validation', 'expired', 'invalid', 'success', 'long']],

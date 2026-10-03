@@ -132,7 +132,7 @@ class PaymentEraGroupsTest extends TestCase
         $this->payment($group, 'failed');
         $latest = $this->payment($group, 'created');
         $this->actingAs($this->owner)->get('/')->assertOk()->assertDontSee('Историческая запись')->assertSee('Ожидается оплата размещения')->assertSee('Оплатить размещение');
-        $this->get('/groups/'.$group->id)->assertOk()->assertDontSee('Историческая запись')->assertSee('доверенного подтверждения WEBPAY')
+        $this->get('/groups/'.$group->id)->assertOk()->assertDontSee('Историческая запись')->assertSee('доверенного подтверждения оплаты')
             ->assertSee(route('psychologist.payments.show', $latest), false);
         $group->update(['disabled' => true]);
         $this->get('/groups/'.$group->id)->assertOk()->assertSee('Группа отключена')->assertDontSee('Оплатить размещение');

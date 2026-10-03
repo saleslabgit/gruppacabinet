@@ -387,3 +387,12 @@ of an existing password. New links replace old ones; completion invalidates targ
 database sessions and remember state. Onboarding remains supported. Keep database
 queue/SMTP or sendmail operational; never log passwords, tokens, reset URLs or
 recipients. Queue/transport acceptance does not guarantee inbox delivery.
+
+## Telegram and publication updates (TASK-2026-10-03-01)
+
+Apply the additive nullable application-hide timestamp migration with the normal `php artisan migrate --force`; existing rows are preserved. Rollback removes only this column.
+Set private `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ADMIN_CHAT_ID` (numeric chat ID); repository placeholders remain empty. Rebuild config cache and restart/allow turnover of database workers after deployment. Never print token-bearing Telegram URLs, bot tokens, chat IDs, private env, queue payloads or feedback bodies in diagnostics. See [telegram.md](telegram.md).
+
+Keep `APP_URL=https://gruppa.info/cabinet`. Production route/asset generation forces HTTPS, including queued links and payment return/cancel/notify; `deployment:preflight` rejects an insecure scheme. Existing web-server redirect configuration is unchanged. Local/testing HTTP continues working.
+
+Monitor publication status in admin group detail. Restore keeps active groups disabled until successful current publish, with the old deadline still running. Renewed expired groups remain approved until MODX success starts the new clock. Retry through the admin restore/republication actions; investigate conflict rather than blindly replaying an obsolete job. Missing resource requires manual sync/publication recovery. Initial approved publication remains manual. No payment deletion or automatic refund is introduced.

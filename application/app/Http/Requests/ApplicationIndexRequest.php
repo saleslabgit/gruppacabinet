@@ -17,6 +17,7 @@ class ApplicationIndexRequest extends FormRequest
         return [
             'processed' => ['nullable', Rule::in(['all', 'new', 'processed'])],
             'search' => ['nullable', 'string', 'max:255'],
+            'group_id' => ['nullable', 'integer', 'min:1'],
             'page' => ['nullable', 'integer', 'min:1'],
         ];
     }

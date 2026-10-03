@@ -256,7 +256,7 @@ class ApplicationWorkflowTest extends TestCase
     public function test_web_routes_have_no_application_intake_or_admin_mutations(): void
     {
         $routes = collect(Route::getRoutes()->getRoutes())->filter(fn ($route) => str_contains($route->uri(), 'applications') && ! str_contains($route->uri(), '_prototype') && ! str_starts_with($route->uri(), 'api/'));
-        $this->assertCount(6, $routes);
+        $this->assertCount(7, $routes);
         foreach ($routes as $route) {
             $this->assertStringNotContainsString('api/', $route->uri());
             $this->assertStringNotContainsString('create', $route->uri());
@@ -266,5 +266,41 @@ class ApplicationWorkflowTest extends TestCase
         }
         $this->actingAs($this->admin)->post('/admin/applications')->assertStatus(405);
         $this->actingAs($this->owner)->post($this->path())->assertStatus(405);
+    }
+
+    public function test_owner_hide_preserves_admin_history_excludes_counters_and_blocks_processing(): void
+    {
+        $record = GroupApplication::factory()->for($this->group)->create();
+        $other = GroupApplication::factory()->for($this->foreign)->create();
+        $before = $record->only(['first_name', 'last_name', 'phone', 'phone_normalized', 'processed_at']);
+        $this->actingAs($this->other)->delete($this->path($record), ['confirmed' => 1])->assertNotFound();
+        $this->actingAs($this->owner)->delete($this->path($record))->assertSessionHasErrors('confirmed');
+        $this->delete($this->path($record), ['confirmed' => 1])->assertRedirect($this->path());
+        $this->assertNotNull($record->fresh()->psychologist_deleted_at);
+        $this->assertSame($before, $record->fresh()->only(array_keys($before)));
+        $this->get($this->path($record))->assertNotFound();
+        $this->post($this->path($record).'/processed')->assertNotFound();
+        $this->post($this->path($record).'/unprocessed')->assertNotFound();
+        $this->get($this->path())->assertOk()->assertDontSee($record->phone);
+        $this->get('/')->assertOk()->assertViewHas('groups', fn ($groups) => $groups->first()['all_count'] === 0);
+        $this->get('/groups/'.$this->group->id)->assertOk()->assertViewHas('latestApplication', null)->assertDontSee($record->phone);
+        $this->actingAs($this->admin)->get('/admin/applications/'.$record->id)->assertOk()->assertSee('Психолог удалил заявку')->assertSee($record->phone);
+        $this->get('/admin/applications?group_id='.$this->group->id)->assertOk()->assertSee('Психолог удалил заявку')->assertDontSee($other->phone);
+        $this->get('/admin/groups/'.$this->group->id)->assertOk()->assertSee('Психолог удалил заявку')->assertSee('group_id='.$this->group->id)
+            ->assertViewHas('group', fn ($data) => $data['all_count'] === 1);
+    }
+
+    public function test_admin_recent_application_query_is_bounded(): void
+    {
+        GroupApplication::factory()->for($this->group)->count(2)->create();
+        DB::enableQueryLog();
+        $this->actingAs($this->admin)->get('/admin/groups/'.$this->group->id)->assertOk();
+        $count = count(DB::getQueryLog());
+        GroupApplication::factory()->for($this->group)->count(15)->create(['psychologist_deleted_at' => now()]);
+        DB::flushQueryLog();
+        $this->get('/admin/groups/'.$this->group->id)->assertOk()->assertViewHas('recentApplications', fn ($rows) => $rows->count() === 5)
+            ->assertViewHas('group', fn ($data) => $data['all_count'] === 17);
+        $this->assertLessThanOrEqual($count, count(DB::getQueryLog()));
+        DB::disableQueryLog();
     }
 }

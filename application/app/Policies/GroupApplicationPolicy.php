@@ -15,7 +15,12 @@ class GroupApplicationPolicy
 
     public function view(User $actor, GroupApplication $application): bool
     {
-        return $this->viewAny($actor) && ($actor->admin || ($application->group !== null && (new GroupPolicy)->view($actor, $application->group)));
+        return $this->viewAny($actor) && ($actor->admin || ($application->psychologist_deleted_at === null && $application->group !== null && (new GroupPolicy)->view($actor, $application->group)));
+    }
+
+    public function delete(User $actor, GroupApplication $application): bool
+    {
+        return $this->process($actor, $application);
     }
 
     public function process(User $actor, GroupApplication $application): bool

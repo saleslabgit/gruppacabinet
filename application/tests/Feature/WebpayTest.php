@@ -135,7 +135,7 @@ class WebpayTest extends TestCase
         $payment = Payment::sole();
         $this->assertSame(PaymentStatus::Created, $payment->status);
         $this->assertSame(GroupStatus::AwaitingPayment, $payment->group->status);
-        $this->get('/payments/'.$payment->id)->assertOk()->assertSee('Оплатить через WEBPAY');
+        $this->get('/payments/'.$payment->id)->assertOk()->assertSee('Оплатить картой');
         $this->get('/payments/'.$payment->id)->assertOk();
         $this->assertDatabaseCount('gp_payments', 1);
         $this->post('/payments/'.$payment->id.'/start')->assertOk()->assertSee('wsb_signature')->assertDontSee('synthetic-secret')->assertDontSee('synthetic-password');

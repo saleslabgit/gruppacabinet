@@ -4,6 +4,7 @@
 <x-button :href="($placementPayment ?? null) ? route('psychologist.payments.show', $placementPayment) : route('psychologist.groups.show', $group['id'])">Оплатить размещение</x-button>
 @endif
 @if(!$group['disabled'] && in_array($group['status'], ['draft', 'revision']))
+@if($detail ?? false)<form method="POST" action="{{ route('psychologist.groups.submit-stored', $group['id']) }}">@csrf<input type="hidden" name="confirmed" value="1"><x-button type="submit">Отправить на модерацию</x-button></form>@endif
 <x-button icon="pencil" :href="route('psychologist.groups.edit', $group['id'])">{{ $group['status'] === 'revision' ? 'Исправить и отправить' : 'Заполнить группу' }}</x-button>
 @endif
 @if(!$group['disabled'] && in_array($group['status'], ['active', 'expired']))
@@ -37,6 +38,7 @@
 @elseif($group['status'] === 'awaiting_payment')
 <x-button :href="$links['placement']">Оплатить размещение</x-button>
 @elseif(in_array($group['status'], ['draft','revision']))
+@if($detail ?? false)<x-button data-noop>Отправить на модерацию</x-button>@endif
 <x-button icon="pencil" :href="route('prototype.group-form', ['variant' => $group['status']])">{{ $group['status'] === 'revision' ? 'Исправить и отправить' : 'Заполнить группу' }}</x-button>
 @elseif(in_array($group['status'], ['active','expired']) && !$group['outside_window'])
 <x-button icon="calendar-plus" :href="route('prototype.extension', ['variant' => ($user['free'] ? 'free-' : 'paid-').$group['status']])">Продлить размещение</x-button>

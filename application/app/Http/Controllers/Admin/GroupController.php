@@ -85,7 +85,10 @@ class GroupController extends Controller
     {
         Gate::authorize('view', $group);
 
-        return view('admin.groups.show', GroupPages::detail($group, true));
+        $group->loadCount(Group::applicationCounts(true));
+        $recent = $group->applications()->orderByDesc('created_at')->orderByDesc('id')->limit(5)->get();
+
+        return view('admin.groups.show', GroupPages::detail($group, true) + ['recentApplications' => $recent]);
     }
 
     public function cover(Group $group, GroupCovers $covers): StreamedResponse
@@ -126,7 +129,13 @@ class GroupController extends Controller
 
             return redirect()->route('admin.groups.index')->with('success', 'Группа удалена.');
         }
-        if ($request->routeIs('*.activate')) {
+        if ($request->routeIs('*.withdraw')) {
+            $workflow->withdraw($group, $request->user());
+        } elseif ($request->routeIs('*.restore-placement')) {
+            $workflow->restorePlacement($group, $request->user());
+        } elseif ($request->routeIs('*.retry-renewal')) {
+            $workflow->retryRenewal($group, $request->user());
+        } elseif ($request->routeIs('*.activate')) {
             $workflow->activate($group, $request->user());
         } else {
             $target = match (true) {

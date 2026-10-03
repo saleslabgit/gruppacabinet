@@ -343,3 +343,19 @@ only before expiry and preserves the warning marker. A deadline reached during
 publish commits expired plus a newer unpublished revision and queues unpublish
 after commit. Initial publication and expired renewal still require manual
 publication and admin activation. The publication endpoint contract is unchanged.
+
+## TASK-2026-10-03-01 — post-manual-testing improvements
+
+Implemented text feedback and administrator Telegram events, moderation-result mail,
+provider-neutral payment UI, terminal failed/cancelled screens, stored-content submission,
+owner application hiding with admin history, bounded admin group applications,
+production HTTPS generation and header mobile menu. Group summary/profile/history
+presentation is corrected without replacing the approved Blade components.
+
+Current expired-renewal behavior supersedes the older manual-renewal description above:
+synchronized free/paid renewals republish automatically and start their new clock only
+on current remote success. Admin withdraw/restore preserves the active deadline and
+keeps local intake disabled until restore succeeds. First publication remains manual.
+
+Verification and any limitations are recorded in `.ai/report.md`. Live Telegram/mail,
+MODX and payment delivery are not exercised by automated verification.

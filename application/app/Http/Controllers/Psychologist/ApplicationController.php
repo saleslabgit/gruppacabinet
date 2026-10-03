@@ -19,7 +19,7 @@ class ApplicationController extends Controller
         $model = Group::query()->visibleToPsychologist($request->user()->id)->withCount(Group::applicationCounts())->findOrFail($group);
         Gate::authorize('view', $model);
         $filters = $request->validated();
-        $query = $model->applications();
+        $query = $model->applications()->whereNull('psychologist_deleted_at');
         if (($filters['processed'] ?? null) === 'new') {
             $query->whereNull('processed_at');
         } elseif (($filters['processed'] ?? null) === 'processed') {
@@ -34,11 +34,19 @@ class ApplicationController extends Controller
     public function show(Request $request, string $group, string $application): View
     {
         $model = Group::query()->visibleToPsychologist($request->user()->id)->findOrFail($group);
-        $record = $model->applications()->findOrFail($application);
+        $record = $model->applications()->whereNull('psychologist_deleted_at')->findOrFail($application);
         $record->setRelation('group', $model);
         Gate::authorize('view', $record);
 
         return view('psychologist.applications.show', ApplicationPages::layout(false, $model) + ['application' => ApplicationPages::data($record, false)]);
+    }
+
+    public function destroy(Request $request, string $group, string $application, ApplicationWorkflow $workflow): RedirectResponse
+    {
+        $request->validate(['confirmed' => ['required', 'accepted']]);
+        $workflow->hide($group, $application, $request->user());
+
+        return redirect()->route('psychologist.groups.applications.index', $group)->with('success', 'Заявка удалена из вашего кабинета.');
     }
 
     public function action(Request $request, string $group, string $application, ApplicationWorkflow $workflow): RedirectResponse

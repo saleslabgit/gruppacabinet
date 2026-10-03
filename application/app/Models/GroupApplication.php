@@ -18,7 +18,7 @@ class GroupApplication extends Model
 
     protected function casts(): array
     {
-        return ['processed_at' => 'datetime'];
+        return ['processed_at' => 'datetime', 'psychologist_deleted_at' => 'datetime'];
     }
 
     /** @return BelongsTo<Group, $this> */

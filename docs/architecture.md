@@ -641,3 +641,21 @@ nullable, max 255; nonempty maps to price_usd, empty omits the TV. BYN is unchan
 The external publication endpoint is maintained by the MODX operator outside this
 repository. Automated work uses HTTP fakes only. Live endpoint acceptance remains
 manual and unverified.
+
+## Post-manual-testing behavior (TASK-2026-10-03-01)
+
+This section supersedes earlier stage descriptions of expired renewal and application visibility.
+`ActionNotifications` registers transaction after-commit callbacks for database jobs.
+Intake only registers the pending event on new/rejected-to-pending processing, after the replay guard.
+Both owner submit paths validate `GroupModxReadiness`; moderation mail references the committed status-history ID so later decisions cannot rewrite its result/comment.
+Queue insertion errors log only event/entity IDs. Feedback queues directly and reports insertion failures to its caller. Telegram transport errors discard raw exceptions and never chain the token-bearing HTTP URL.
+
+Application hiding adds only nullable `psychologist_deleted_at`; no global scope changes admin or retention visibility.
+Owner queries and row-locked mutations explicitly exclude hidden applications. `Group::applicationCounts(true)` includes hidden rows for admin; the detail queries at most five recent rows without per-row relations.
+
+Publication jobs retain revision/resource/shared-overlap guards and carry mode plus an identity snapshot (status, disabled, renewal history, dates, duration, pause).
+Admin restore preserves active dates and clears disabled only after the current successful publish.
+Expired free/paid renewal queues after commit; approved renewal is proved by latest expired → approved history. It activates only after remote success, using current placement-duration settings, as manual activation previously did.
+Identity is rechecked before HTTP and under row lock after response. Deadline crossing expires placement and schedules newer unpublish; invalid state mutation during HTTP also schedules unpublish. Payment success/product_effect is independent of MODX. Initial moderation approval remains manual; missing-resource renewal stays approved for admin recovery.
+
+Production `AppServiceProvider` forces HTTPS scheme for route/asset/mail/payment links; preflight already rejects an insecure production APP_URL. Local/testing are unchanged. Navigation retains one sidebar; its progressive toggle is rendered in the header.

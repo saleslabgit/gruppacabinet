@@ -80,8 +80,24 @@ class GroupWorkflow
                 app(GroupModxSyncScheduler::class)->schedule($locked);
             }
             $saved = $submit ? $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user') : $locked;
+            if ($submit) {
+                app(ActionNotifications::class)->telegram('group_moderation', $saved->id);
+            }
 
             return [$saved, $oldCover];
+        });
+    }
+
+    public function submitStored(Group $group, User $actor): Group
+    {
+        return DB::transaction(function () use ($group, $actor): Group {
+            $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            Gate::forUser($actor)->authorize('submit', $locked);
+            app(GroupModxReadiness::class)->validate($locked);
+            $saved = $this->transitions->transition($locked, GroupStatus::Moderation, $actor, 'user');
+            app(ActionNotifications::class)->telegram('group_moderation', $saved->id);
+
+            return $saved;
         });
     }
 
@@ -118,6 +134,7 @@ class GroupWorkflow
                 app(GroupModxReadiness::class)->validate($locked);
             }
             $saved = $this->transitions->transition($locked, $target, $actor, 'user', $comment);
+            app(ActionNotifications::class)->moderation($saved->statusHistory()->latest('id')->firstOrFail()->id);
             if ($target === GroupStatus::Approved) {
                 app(GroupModxSyncScheduler::class)->schedule($saved);
             }
@@ -153,6 +170,42 @@ class GroupWorkflow
                 'modx_publication_error_code' => null])->save();
 
             return $this->transitions->transition($locked, GroupStatus::Active, $actor, 'user');
+        });
+    }
+
+    public function withdraw(Group $group, User $actor): void
+    {
+        DB::transaction(function () use ($group, $actor): void {
+            $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            Gate::forUser($actor)->authorize('withdraw', $locked);
+            $locked->update(['disabled' => true]);
+            app(GroupModxPublicationScheduler::class)->schedule($locked, false);
+        });
+    }
+
+    public function restorePlacement(Group $group, User $actor): void
+    {
+        $this->requestPublication($group, $actor, 'restorePlacement');
+    }
+
+    public function retryRenewal(Group $group, User $actor): void
+    {
+        $this->requestPublication($group, $actor, 'retryRenewal');
+    }
+
+    private function requestPublication(Group $group, User $actor, string $ability): void
+    {
+        DB::transaction(function () use ($group, $actor, $ability): void {
+            $locked = Group::query()->lockForUpdate()->findOrFail($group->id);
+            Gate::forUser($actor)->authorize($ability, $locked);
+            if ($locked->modx_publication_status === 'conflict') {
+                throw ValidationException::withMessages(['publication' => 'Требуется проверка публикации администратором.']);
+            }
+            if ($locked->modx_publication_desired === 'published'
+                && in_array($locked->modx_publication_status, ['pending', 'syncing'], true)) {
+                return;
+            }
+            app(GroupModxPublicationScheduler::class)->schedule($locked, true);
         });
     }
 

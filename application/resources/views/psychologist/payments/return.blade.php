@@ -5,20 +5,20 @@
 @section('content')
 <x-panel>
 @if($realPayments ?? false)<x-validation-summary :errors="$errors" />@endif
-@if($payment['manual_review'] ?? false)<x-alert tone="warning">Требуется ручная проверка в WEBPAY. Оплата пока не подтверждена. Обратитесь к администратору.</x-alert>@endif
+@if($payment['status'] === 'pending' && ($payment['manual_review'] ?? false))<x-alert tone="warning">Требуется ручная проверка в платёжном сервисе. Оплата пока не подтверждена. Обратитесь к администратору.</x-alert>@endif
 @if($payment['status'] === 'pending')
-<x-alert tone="warning" title="Оплата подтверждается WEBPAY">
+<x-alert tone="warning" title="Оплата подтверждается">
 <p>Подтверждение ещё не получено. Возврат или отмена в браузере не подтверждают финансовый результат. {{ ($realPayments ?? false) ? 'Не создавайте новую попытку, пока статус неизвестен.' : 'Не повторяйте оплату, пока статус неизвестен.' }}</p>
 </x-alert>
 @elseif($payment['status'] === 'refunded')
 <x-alert>Возврат учтён.</x-alert>
 @elseif($payment['status'] === 'succeeded')
 <x-alert tone="success" title="Оплата подтверждена">
-<p>{{ $variant === 'extension-expired' ? 'Группа ожидает повторной ручной публикации администратором. Повторная модерация не требуется.' : ($variant === 'extension-active' ? 'Размещение активной группы продлено. Действия администратора не нужны.' : 'Теперь можно заполнить анкету группы.') }}</p>
+<p>{{ $variant === 'extension-expired' ? 'Продление оплачено. Новый срок начинается после подтверждения повторной публикации. Текущее состояние доступно в карточке группы; повторная модерация не требуется.' : ($variant === 'extension-active' ? 'Размещение активной группы продлено. Действия администратора не нужны.' : 'Теперь можно заполнить анкету группы.') }}</p>
 </x-alert>
 @else
 <x-alert tone="warning" :title="$payment['status'] === 'failed' ? 'Оплата не прошла' : 'Отмена оплаты подтверждена'">
-<p>{{ ($realPayments ?? false) ? 'Результат подтверждён WEBPAY.' : 'Показан пример результата, подтверждённого сервером. Можно начать новую попытку.' }}</p>
+<p>{{ ($realPayments ?? false) ? 'Результат подтверждён платёжным сервисом.' : 'Показан пример результата, подтверждённого сервером. Можно начать новую попытку.' }}</p>
 </x-alert>
 @endif
 <dl class="detail-grid mb-4">

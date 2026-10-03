@@ -102,4 +102,14 @@ class ApplicationRetentionTest extends TestCase
         $this->assertSame('* * * * *', $expiry->expression);
         $this->assertTrue($expiry->withoutOverlapping);
     }
+
+    public function test_retention_deletes_old_psychologist_hidden_applications(): void
+    {
+        Setting::create(['key' => SettingService::PARTICIPANT_APPLICATION_RETENTION_MONTHS, 'type' => 'integer', 'value' => '12']);
+        $owner = User::create(['email' => 'hidden-retention@example.test']);
+        $group = Group::create(['owner_id' => $owner->id]);
+        $row = GroupApplication::factory()->for($group)->create(['psychologist_deleted_at' => now(), 'created_at' => now()->subMonths(13)]);
+        $this->assertSame(1, app(ApplicationRetentionService::class)->cleanup());
+        $this->assertDatabaseMissing('gp_group_applications', ['id' => $row->id]);
+    }
 }

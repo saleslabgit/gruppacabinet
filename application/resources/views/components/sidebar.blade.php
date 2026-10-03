@@ -1,6 +1,5 @@
 @props(['navigation' => [], 'logoutUrl' => null])
 <div class="admin-navigation">
-<button class="btn btn-ghost menu-toggle" type="button" aria-expanded="false" aria-controls="admin-navigation"><x-icon name="list" /><span class="control-label">Меню</span></button>
 <nav class="sidebar" id="admin-navigation" aria-label="Администрирование">
 @foreach($navigation as $item)
 <x-navigation-link :item="$item" />

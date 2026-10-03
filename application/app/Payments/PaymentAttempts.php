@@ -42,7 +42,7 @@ class PaymentAttempts
         try {
             $this->provider->configuration();
         } catch (ProviderException) {
-            throw ValidationException::withMessages(['payment' => 'Оплата WEBPAY не настроена. Обратитесь к администратору.']);
+            throw ValidationException::withMessages(['payment' => 'Оплата картой не настроена. Обратитесь к администратору.']);
         }
     }
 

@@ -236,9 +236,9 @@ class GroupLifecycleTest extends TestCase
         $this->setting('expired_extension_window_days', 32);
         $this->get('/groups/'.$group->id.'/extension')->assertSee('Продлить бесплатно');
         $this->post('/groups/'.$group->id.'/extension', ['confirmed' => 1])->assertSessionHasNoErrors();
-        $this->get('/groups/'.$group->id)->assertSee('ожидает ручной публикации');
+        $this->get('/groups/'.$group->id)->assertSee('Продление принято');
         $this->actingAs($this->admin)->get('/admin/groups?quick=approved')->assertViewHas('groups', fn ($groups) => $groups->pluck('id')->all() === [$group->id]);
-        $this->get('/admin/groups/'.$group->id)->assertSee('Продление:')->assertSee($uuid);
+        $this->get('/admin/groups/'.$group->id)->assertSee('Продление принято, но ID ресурса отсутствует')->assertSee($uuid);
         $this->setting('placement_duration_days', 43);
         $this->post('/admin/groups/'.$group->id.'/activate', ['confirmed' => 1])->assertSessionHasNoErrors();
         $fresh = $group->fresh();

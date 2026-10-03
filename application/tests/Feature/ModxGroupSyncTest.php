@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Enums\GroupStatus;
 use App\Exceptions\ModxGroupSyncException;
+use App\Jobs\SendAdminTelegram;
+use App\Jobs\SendGroupModeration;
 use App\Jobs\SyncGroupToModx;
 use App\Models\Group;
 use App\Models\Setting;
@@ -346,7 +348,9 @@ class ModxGroupSyncTest extends TestCase
         app(GroupWorkflow::class)->moderate($this->group, $this->admin, GroupStatus::Revision, 'Synthetic revision comment');
         $fields = $this->group->fresh()->only(GroupWorkflow::FIELDS) + ['approach_ids' => $this->group->approaches->modelKeys(), 'tag_ids' => $this->group->tags->modelKeys()];
         app(GroupWorkflow::class)->save($this->group, $this->owner, $fields, true);
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(SyncGroupToModx::class);
+        Queue::assertPushed(SendGroupModeration::class, 1);
+        Queue::assertPushed(SendAdminTelegram::class, 1);
         $this->approve();
         app(GroupWorkflow::class)->save($this->group, $this->admin, ['published_at' => now()]);
         $this->assertSame(1, $this->group->fresh()->modx_sync_revision);
@@ -393,7 +397,7 @@ class ModxGroupSyncTest extends TestCase
         $this->assertSame('moderation', $this->group->fresh()->status->value);
         $this->assertSame(0, $this->group->fresh()->modx_sync_revision);
         $this->assertDatabaseCount('jobs', 0);
-        Bus::shouldReceive('dispatch')->twice()->andThrow(new \RuntimeException('Synthetic queue outage'));
+        Bus::shouldReceive('dispatch')->times(3)->andThrow(new \RuntimeException('Synthetic queue outage'));
         $this->approve();
         $this->assertSame('approved', $this->group->fresh()->status->value);
         $this->assertSame('queue_unavailable', $this->group->fresh()->modx_sync_error_code);
@@ -421,6 +425,7 @@ class ModxGroupSyncTest extends TestCase
 
     public function test_database_worker_success_retry_exhaustion_and_overlap_lock(): void
     {
+        Bus::fake([SendGroupModeration::class]);
         config(['cache.default' => 'database']);
         $this->approve();
         $job = new SyncGroupToModx($this->group->id, 1);

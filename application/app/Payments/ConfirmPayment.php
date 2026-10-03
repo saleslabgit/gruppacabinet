@@ -6,6 +6,7 @@ use App\Enums\GroupStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Group;
 use App\Models\Payment;
+use App\Services\GroupModxPublicationScheduler;
 use App\Services\GroupStatusTransitionService;
 use Illuminate\Support\Facades\DB;
 
@@ -71,7 +72,8 @@ class ConfirmPayment
                     $group->update(['expires_at' => $group->expires_at->copy()->addDays($payment->extension_days), 'expiry_warning_sent_at' => null]);
                     $payment->product_effect = 'extension-active';
                 } elseif ($payment->type === 'extension') {
-                    $transitions->transition($group, GroupStatus::Approved);
+                    $renewed = $transitions->transition($group, GroupStatus::Approved);
+                    app(GroupModxPublicationScheduler::class)->schedule($renewed, true);
                     $payment->product_effect = 'extension-expired';
                 } else {
                     throw new ProviderException('invalid_local_type');

@@ -5,6 +5,7 @@
 @endunless
 <x-panel title="Поиск и фильтры" :compact="true" class="panel-compact filter-panel">
 <form @if($realApplications ?? false) method="GET" action="{{ $links[$admin ? 'admin-applications' : 'applications'] }}" @else data-prototype-form @endif>
+@if($admin && !empty($filters['group_id']))<input type="hidden" name="group_id" value="{{ $filters['group_id'] }}"><p>Заявки группы № {{ $filters['group_id'] }}</p>@endif
 <div class="row">
 @if($admin)
 <div class="col-md-6">
@@ -33,6 +34,7 @@
 <tr>
 <x-cell label="Участник">
 <strong>{{ $item['name'] }}</strong>
+@if($admin && !empty($item['psychologist_deleted_at']))<p class="meta">Психолог удалил заявку</p>@endif
 <p>{{ $item['phone'] }}</p>
 </x-cell>
 <x-cell :label="$admin ? 'Группа и психолог' : 'Дата'">
@@ -57,6 +59,7 @@
 <div class="actions">
 <x-button icon="arrow-up-right" kind="ghost" :href="$item['show_url'] ?? route('prototype.'.($admin ? 'admin-application' : 'application'), ['variant' => $variant === 'processed' ? 'processed' : 'new'])">Открыть</x-button>
 @unless($admin)
+@if($item['delete_url'] ?? null)<x-button kind="danger" data-bs-toggle="modal" :data-bs-target="'#delete-application-'.$item['id']">Удалить</x-button>@endif
 @if($item['action_url'] ?? null)
 <form method="POST" action="{{ $item['action_url'] }}">@csrf
 <x-button icon="check-lg" kind="secondary" type="submit">{{ $item['processed_at'] ? 'Вернуть в необработанные' : 'Отметить обработанной' }}</x-button>
@@ -70,5 +73,10 @@
 </tr>
 @endforeach
 </x-table>
+@if(!$admin && ($realApplications ?? false))
+@foreach($applications as $item)
+<x-confirmation :id="'delete-application-'.$item['id']" title="Удалить заявку?" action="Удалить" :url="$item['delete_url']" method="DELETE"><p>{{ $item['name'] }}. Заявка исчезнет из вашего кабинета. История сохранится у администратора.</p></x-confirmation>
+@endforeach
+@endif
 <x-pagination :pages="$pages" :current="$currentPage" />
 @endif

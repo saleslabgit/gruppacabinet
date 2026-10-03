@@ -6,8 +6,10 @@ use App\Enums\GroupStatus;
 use App\Exceptions\ModxGroupSyncException;
 use App\Models\Group;
 use App\Services\GroupLifecycleService;
+use App\Services\GroupModxPublicationScheduler;
 use App\Services\GroupStatusTransitionService;
 use App\Services\Modx\GroupClient;
+use App\Services\SettingService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -24,7 +26,16 @@ class SetGroupModxPublication implements ShouldQueue
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public int $groupId, public int $revision, public int $expectedResourceId) {}
+    // Class defaults also apply when an older queued payload is unserialized.
+    public string $mode = 'resume';
+
+    public ?array $expectedIdentity = null;
+
+    public function __construct(public int $groupId, public int $revision, public int $expectedResourceId, string $mode = 'resume', ?array $expectedIdentity = null)
+    {
+        $this->mode = $mode;
+        $this->expectedIdentity = $expectedIdentity;
+    }
 
     public function backoff(): array
     {
@@ -45,7 +56,7 @@ class SetGroupModxPublication implements ShouldQueue
                     return null;
                 }
                 $published = $group->modx_publication_desired === 'published';
-                if ($published && ! $this->resumable($group)) {
+                if ($published && (! $this->publishable($group) || ($this->expectedIdentity !== null && self::identity($group) !== $this->expectedIdentity))) {
                     if (app(GroupLifecycleService::class)->expireOne($group->id)) {
                         return null;
                     }
@@ -56,7 +67,7 @@ class SetGroupModxPublication implements ShouldQueue
                 // Desired state is immutable within a revision; retries reproduce identical bytes.
                 return ['body' => json_encode(['resource_id' => $this->expectedResourceId, 'published' => $published], JSON_THROW_ON_ERROR),
                     'key' => 'group-publication:'.$group->public_uuid.':'.$this->expectedResourceId.':'.$this->revision,
-                    'published' => $published];
+                    'published' => $published, 'identity' => self::identity($group)];
             });
             if ($request === null) {
                 return;
@@ -68,17 +79,29 @@ class SetGroupModxPublication implements ShouldQueue
                     return;
                 }
                 if ($request['published']) {
-                    if (! $this->resumable($group)) {
+                    if (! $this->publishable($group) || self::identity($group) !== $request['identity']) {
                         // Expiration schedules a newer unpublish revision after commit.
                         // A late publish response must not reactivate an expired placement.
                         if (app(GroupLifecycleService::class)->expireOne($group->id)) {
                             return;
                         }
-                        throw new ModxGroupSyncException('resume_unavailable');
+                        app(GroupModxPublicationScheduler::class)->schedule($group, false);
+
+                        return;
                     }
-                    $group->forceFill(['paused_at' => null])->save();
-                    // System actor: remote publication, not the earlier web request, completes resume.
-                    $group = $transitions->transition($group, GroupStatus::Active);
+                    if ($this->mode === 'admin_restore') {
+                        $group->update(['disabled' => false]);
+                    } else {
+                        if ($this->mode === 'renewal') {
+                            $publishedAt = now()->utc();
+                            $days = app(SettingService::class)->placementDurationDays();
+                            $group->update(['published_at' => $publishedAt, 'placement_days' => $days,
+                                'expires_at' => $publishedAt->copy()->addDays($days), 'expiry_warning_sent_at' => null]);
+                        }
+                        $group->forceFill(['paused_at' => null])->save();
+                        // Only the current successful remote publication starts/resumes placement.
+                        $group = $transitions->transition($group, GroupStatus::Active);
+                    }
                 }
                 // The publication marker and lifecycle transition commit atomically.
                 $group->forceFill(['modx_publication_status' => $group->modx_publication_desired,
@@ -104,10 +127,28 @@ class SetGroupModxPublication implements ShouldQueue
             && in_array($group->modx_publication_status, ['pending', 'syncing'], true);
     }
 
-    private function resumable(Group $group): bool
+    public static function identity(Group $group): array
     {
-        return ! $group->trashed() && $group->psychologist_deleted_at === null && ! $group->disabled
-            && $group->status === GroupStatus::Paused && $group->paused_at !== null && $group->expires_at !== null && $group->expires_at->isFuture();
+        return [$group->status->value, $group->disabled, $group->renewalHistoryId(),
+            $group->getRawOriginal('published_at'), $group->getRawOriginal('expires_at'),
+            $group->placement_days, $group->getRawOriginal('paused_at')];
+    }
+
+    private function publishable(Group $group): bool
+    {
+        if ($group->trashed() || $group->psychologist_deleted_at !== null) {
+            return false;
+        }
+        if ($this->mode === 'renewal') {
+            return ! $group->disabled && $group->renewalHistoryId() !== null;
+        }
+        if ($group->expires_at === null || ! $group->expires_at->isFuture()) {
+            return false;
+        }
+
+        return $this->mode === 'admin_restore'
+            ? $group->status === GroupStatus::Active && $group->disabled
+            : $group->status === GroupStatus::Paused && ! $group->disabled && $group->paused_at !== null;
     }
 
     public function failed(?Throwable $exception): void

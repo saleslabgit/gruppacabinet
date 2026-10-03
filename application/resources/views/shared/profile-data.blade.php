@@ -27,6 +27,7 @@
 @endforelse
 </section>
 </x-panel>
+@unless($hideConsent ?? false)
 <x-panel title="Подтверждения и согласие">
 <dl class="detail-grid">
 @foreach(['documents_confirmed'=>'Достоверность документов','education_confirmed'=>'Соответствие образования','live_session_ready'=>'Готовность провести вебинар или эфир'] as $key=>$label)
@@ -47,3 +48,4 @@
 </div>
 </dl>
 </x-panel>
+@endunless

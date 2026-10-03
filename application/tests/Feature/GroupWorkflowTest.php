@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\GroupStatus;
+use App\Jobs\SendAdminTelegram;
+use App\Jobs\SendGroupModeration;
 use App\Models\AuditLog;
 use App\Models\Dictionary;
 use App\Models\DictionaryItem;
 use App\Models\Group;
+use App\Models\GroupStatusHistory;
 use App\Models\Payment;
 use App\Models\Setting;
 use App\Models\User;
@@ -17,7 +20,9 @@ use App\Services\GroupStatusTransitionService;
 use App\Services\GroupWorkflow;
 use App\Services\SettingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -562,5 +567,58 @@ class GroupWorkflowTest extends TestCase
             $this->assertSame($before, $group->fresh()->getAttributes());
             $this->assertSame(1, $group->statusHistory()->count());
         }
+    }
+
+    public function test_stored_submit_validates_content_and_notifies_after_commit_for_draft_and_revision(): void
+    {
+        Queue::fake();
+        foreach ([GroupStatus::Draft, GroupStatus::Revision] as $status) {
+            $group = $this->draft();
+            $group->update(['status' => $status]);
+            $this->actingAs($this->owner)->from('/groups/'.$group->id)->post('/groups/'.$group->id.'/submit-stored', ['confirmed' => 1])
+                ->assertSessionHasErrors()->assertRedirect('/groups/'.$group->id);
+            $this->assertSame($status, $group->fresh()->status);
+            $this->put('/groups/'.$group->id, $this->fields)->assertSessionHasNoErrors();
+            DB::beginTransaction();
+            app(GroupWorkflow::class)->submitStored($group, $this->owner);
+            Queue::assertNotPushed(SendAdminTelegram::class, fn ($job) => $job->entityId === $group->id);
+            DB::commit();
+            Queue::assertPushed(SendAdminTelegram::class, fn ($job) => $job->event === 'group_moderation' && $job->entityId === $group->id);
+            $this->assertSame(GroupStatus::Moderation, $group->fresh()->status);
+            $this->assertSame($this->owner->id, $group->statusHistory()->latest('id')->first()->actor_id);
+            $this->post('/groups/'.$group->id.'/submit-stored', ['confirmed' => 1])->assertForbidden();
+        }
+        Queue::assertPushed(SendAdminTelegram::class, 2);
+    }
+
+    public function test_moderation_mail_uses_committed_history_and_queue_failure_does_not_revert_decision(): void
+    {
+        Queue::fake();
+        foreach ([GroupStatus::Approved, GroupStatus::Revision, GroupStatus::Rejected] as $target) {
+            $group = $this->draft();
+            $this->actingAs($this->owner)->post('/groups/'.$group->id.'/submit', $this->fields)->assertSessionHasNoErrors();
+            DB::beginTransaction();
+            app(GroupWorkflow::class)->moderate($group, $this->admin, $target, 'Synthetic moderator comment');
+            Queue::assertNotPushed(SendGroupModeration::class, fn ($job) => GroupStatusHistory::find($job->historyId)?->group_id === $group->id);
+            DB::rollBack();
+            $this->assertSame(GroupStatus::Moderation, $group->fresh()->status);
+            DB::transaction(fn () => app(GroupWorkflow::class)->moderate($group, $this->admin, $target, 'Synthetic moderator comment'));
+            Queue::assertPushed(SendGroupModeration::class, fn ($job) => GroupStatusHistory::find($job->historyId)?->group_id === $group->id);
+        }
+        Queue::assertPushed(SendGroupModeration::class, 3);
+        $group = $this->draft();
+        $group->update(['status' => GroupStatus::Moderation]);
+        Bus::shouldReceive('dispatch')->once()->andThrow(new \RuntimeException('Synthetic queue failure'));
+        app(GroupWorkflow::class)->moderate($group, $this->admin, GroupStatus::Rejected, 'Synthetic rejection reason');
+        $this->assertSame(GroupStatus::Rejected, $group->fresh()->status);
+    }
+
+    public function test_owner_submit_commits_when_notification_queue_is_unavailable(): void
+    {
+        $group = $this->draft();
+        $this->actingAs($this->owner)->put('/groups/'.$group->id, $this->fields)->assertSessionHasNoErrors();
+        Bus::shouldReceive('dispatch')->once()->andThrow(new \RuntimeException('Synthetic queue failure'));
+        app(GroupWorkflow::class)->submitStored($group, $this->owner);
+        $this->assertSame(GroupStatus::Moderation, $group->fresh()->status);
     }
 }

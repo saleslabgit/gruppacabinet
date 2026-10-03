@@ -1236,8 +1236,15 @@ textarea.form-control{
     .admin-navigation{
         position:static
     }
-    .admin-navigation.enhanced .menu-toggle{
-        display:inline-flex
+    .topbar .menu-toggle.enhanced{
+        display:inline-flex;
+        margin-left:auto
+    }
+    .admin-navigation.enhanced{
+        display:none
+    }
+    .admin-navigation.enhanced.is-open{
+        display:block
     }
     .admin-navigation.enhanced .sidebar{
         display:none;
