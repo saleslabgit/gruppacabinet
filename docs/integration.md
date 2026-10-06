@@ -103,8 +103,12 @@ The server derives type from the field, sanitizes the actual upload's original
 name (removes paths/control characters, limits to 255 characters), detects MIME
 from contents and measures bytes. Allowed MIME: `application/pdf`, `image/jpeg`,
 `image/png`; client MIME and filename extensions do not override detection.
-The default maximum is **10240 KiB (10 MiB) per file**, configurable by the cabinet
-administrator. PHP/Nginx total upload limits also apply. SHA-256 is computed only
+The default maximum is **20480 KiB (20 MiB) per file**, configurable by the cabinet
+administrator via `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480`. WEBP is not supported.
+PHP/web-server total upload limits also apply: allow at least 20M per file and
+recommend at least 128M for the full multipart POST. See the
+[deployment checks](deployment.md#psychologist-document-upload-limits) and
+[external public form handoff](#external-public-form-operator-handoff). SHA-256 is computed only
 on the server for semantic idempotency; callers do not compute or send it.
 
 Standard PHP/Laravel multipart parsing is retained by explicit product decision;
@@ -323,3 +327,84 @@ External work: implement plain requests/retries and durable outbound IDs on the
 public site, agree actual dictionary codes, store/link `cabinet_group_uuid`, set
 HTTPS/optional allowlist/proxy settings, and run a coordinated staging test. Public
 site code, SMTP, password setup and WEBPAY are outside Stage 11.
+
+## External public form operator handoff
+
+The public `/form` and PHP handler are external to this repository. These changes
+must be applied and deployed separately by their operator; Cabinet deployment
+alone does not fix their copy, validation or PHP limits.
+
+1. Replace exactly `const MAX_FILE_SIZE = 10 * 1024 * 1024;` with
+   `const MAX_FILE_SIZE = 20 * 1024 * 1024;` (20971520 bytes).
+   Keep allowed MIME exactly `image/jpeg`, `image/png`, `application/pdf`.
+   Keep server-side content detection; do not trust the extension or browser MIME.
+2. Replace **every** diploma/certificate/license/registration upload hint on `/form`
+   with `Допустимые форматы: JPG, PNG, PDF; размер — до 20 МБ.`
+   Remove WEBP and 50 МБ from static hints and dynamically added training blocks.
+   If present, align HTML `accept` to `.jpg,.jpeg,.png,.pdf`, client-side size
+   validation to 20971520 bytes and hidden `MAX_FILE_SIZE` to 20971520.
+   These browser hints do not replace server validation.
+3. Give local validation exceptions structured reason data, for example
+   `file_too_large`, `file_format`, `file_required`, `upload_failed`,
+   `body_too_large`, `fields_invalid`, plus an approved display label.
+   Map reasons to fixed public text; do not parse English exception strings or
+   show arbitrary exception messages. Labels must come from the known form fields
+   (Диплом, Сертификат, Лицензия / членство, Свидетельство о государственной
+   регистрации), not filenames/request input. Escape text when inserting into HTML,
+   or use `textContent` in the browser.
+
+| Local reason | Exact safe public message |
+|---|---|
+| `file_too_large` | `Файл «<label>» слишком большой. Максимальный размер — 20 МБ.` |
+| `file_format` | `Формат файла «<label>» не поддерживается. Используйте JPG, PNG или PDF.` |
+| `file_required` | `Загрузите файл «<label>».` |
+| `fields_invalid` | `Проверьте заполнение формы и попробуйте ещё раз.` |
+| `upload_failed` | `Не удалось загрузить файл «<label>». Попробуйте ещё раз.` |
+| `body_too_large` | `Общий размер файлов слишком большой. Уменьшите размер или количество файлов и попробуйте ещё раз. Максимальный размер одного файла — 20 МБ.` |
+
+Implement the handler checks in this order, before forwarding to Cabinet:
+
+- Before required-field checks, detect a rejected oversized multipart body when
+  possible: for a multipart POST, compare a valid numeric `CONTENT_LENGTH` to the
+  effective positive `post_max_size` converted from PHP K/M/G units to bytes.
+  If it exceeds that limit, return `body_too_large`, even if `$_POST`/`$_FILES`
+  are empty. Do not classify every empty POST as oversized; absent/unreliable
+  length is not proof. Handle a proxy HTTP 413 with equivalent safe form feedback;
+  the handler cannot run when the proxy rejects the request before PHP.
+- Inspect each upload's PHP error **before** accessing temporary files or MIME.
+  Map `UPLOAD_ERR_INI_SIZE` and `UPLOAD_ERR_FORM_SIZE` to `file_too_large`.
+  Map `UPLOAD_ERR_NO_FILE` / absent upload to `file_required` only if that field
+  is already required by the public form; allow omitted optional uploads.
+  Map other non-OK upload errors to `upload_failed`, not missing-field errors.
+- For `UPLOAD_ERR_OK`, verify the upload normally, measure actual bytes, reject
+  `> MAX_FILE_SIZE` as `file_too_large`, then detect actual MIME and reject anything
+  outside the three-type whitelist as `file_format`. Exactly 20971520 bytes passes
+  the size check. Preserve all existing questionnaire required-field rules.
+- Replace the current catch-all local `ValidationException` response with the
+  reason mapping above while retaining the established response envelope/status
+  and ordinary-field fallback. Ensure the public frontend actually displays the
+  safe response message rather than replacing it with the old generic message.
+  Never expose PHP error numbers, temporary paths, MIME internals, Cabinet/internal
+  exception messages or stack traces. Internal logs may retain diagnostic categories.
+
+Apply the [upload infrastructure checks](deployment.md#psychologist-document-upload-limits)
+to both runtimes. In particular, use PHP `upload_max_filesize >= 20M`, recommend
+`post_max_size >= 128M` unless a stricter host limit is approved, and align proxies
+and temporary-storage capacity. Do not use runtime `ini_set` to change these limits.
+PHP documents [upload errors](https://www.php.net/manual/en/features.file-upload.errors.php)
+and [POST limits](https://www.php.net/manual/en/ini.core.php#ini.post-max-size).
+
+Cabinet remains the primary destination. Once Cabinet accepts a psychologist
+submission, a secondary Telegram failure must not turn that accepted submission
+into a public failure or trigger a fresh Cabinet submission. Keep existing
+Telegram file limits; do not treat Telegram as document storage or redesign delivery.
+
+Rotate the exposed Telegram bot token and move the replacement into private
+external-handler configuration. Do not copy the old or new token into this
+repository, reports, examples or logs. Rotation/deployment is the external operator's
+responsibility; neither has been performed by this repository change.
+
+Operator staging acceptance: check 20 MiB and 20 MiB + 1 byte, JPEG/PNG/PDF,
+WEBP rejection, missing required file, ordinary required field, both PHP file-limit
+errors, complete-body/proxy rejection and a failed secondary Telegram delivery
+after successful Cabinet acceptance. Use stubs for external delivery when testing.

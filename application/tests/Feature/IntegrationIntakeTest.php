@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class IntegrationIntakeTest extends TestCase
@@ -346,6 +347,61 @@ class IntegrationIntakeTest extends TestCase
         $this->psychologist(files: ['diploma' => $this->file('<?php echo "bad";')])->assertStatus(422);
         config(['psychologist_documents.max_kb' => 1]);
         $this->psychologist(files: ['diploma' => $this->file("%PDF-1.4\n".str_repeat(' ', 2048))])->assertStatus(422);
+    }
+
+    public static function documentUploadSizes(): array
+    {
+        return [
+            'existing 10 MiB' => [10 * 1024 * 1024, true],
+            'exactly 20 MiB' => [20 * 1024 * 1024, true],
+            '20 MiB plus one byte' => [20 * 1024 * 1024 + 1, false],
+        ];
+    }
+
+    #[DataProvider('documentUploadSizes')]
+    public function test_document_upload_size_boundary(int $bytes, bool $accepted): void
+    {
+        $this->assertSame(20480, config('psychologist_documents.max_kb'));
+        $file = $this->file();
+        $stream = fopen($file->getPathname(), 'c+b');
+        try {
+            $this->assertTrue(ftruncate($stream, $bytes));
+        } finally {
+            fclose($stream);
+        }
+        clearstatcache(true, $file->getPathname());
+        $this->assertSame($bytes, $file->getSize());
+        $this->assertSame('application/pdf', $file->getMimeType());
+        // A valid first part must not be persisted when a later part is rejected.
+        $response = $this->psychologist(files: ['diploma' => $this->file(), 'certificate_0' => $file]);
+        if ($accepted) {
+            $response->assertCreated();
+            $this->assertDatabaseCount('gp_user_documents', 2);
+            $document = User::where('email', 'synthetic@example.test')->sole()->documents()->where('type', 'certificate')->sole();
+            $this->assertSame($bytes, $document->size);
+            $this->assertSame($bytes, Storage::disk('local')->size($document->path));
+        } else {
+            $response->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+            $this->assertDatabaseCount('gp_user_documents', 0);
+            $this->assertDatabaseCount('gp_integration_requests', 0);
+            $this->assertDatabaseMissing('gp_users', ['email' => 'synthetic@example.test']);
+            $this->assertSame([], Storage::disk('local')->allFiles());
+            Queue::assertNothingPushed();
+        }
+    }
+
+    public function test_document_upload_rejects_webp_despite_pdf_name(): void
+    {
+        $bytes = base64_decode('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA');
+        $file = $this->file($bytes);
+        $this->assertSame('image/webp', $file->getMimeType());
+        $this->psychologist(files: ['diploma' => $this->file(), 'certificate_0' => $file])
+            ->assertStatus(422)->assertJsonPath('code', 'validation_failed');
+        $this->assertDatabaseCount('gp_user_documents', 0);
+        $this->assertDatabaseCount('gp_integration_requests', 0);
+        $this->assertDatabaseMissing('gp_users', ['email' => 'synthetic@example.test']);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+        Queue::assertNothingPushed();
     }
 
     public function test_multiple_certificates_and_server_observed_file_fingerprint(): void

@@ -67,7 +67,7 @@ policies, row locks, the existing transition/audit/session services and database
 transactions. Historical group tariff snapshots remain unchanged. Documents
 are stored privately with random paths, content MIME validation and authorized
 nested-owner view/download/delete endpoints. Uploads have a configurable
-10 MiB technical ceiling. Stage 12 now adds queued first-password invitations after approval.
+20 MiB technical ceiling. Stage 12 now adds queued first-password invitations after approval.
 
 The same Blade files currently cover all 32 prototype groups / 263 variants. Real admin
 navigation now also exposes Payments, Dictionaries and Settings (Stage 8). New MySQL tests cover CRUD,

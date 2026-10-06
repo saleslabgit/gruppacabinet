@@ -21,6 +21,43 @@ The PHP binary selected in cron must match the deployed web runtime. If minute
 cron or a safe finite worker cannot run, resolve that hosting capability before
 activation; do not silently reduce lifecycle/recovery frequency or use sync jobs.
 
+## Psychologist document upload limits
+
+The Cabinet application default is **20480 KiB (20 MiB) per file**, inclusive.
+Set production `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480` in private configuration;
+rebuild the Laravel config cache through the normal release procedure after changing
+it. Existing explicit values of 10240 otherwise continue to override the new default.
+Allowed document MIME types remain JPEG, PNG and PDF; WEBP is not supported.
+Group-cover application limits remain unchanged at 5120 KiB.
+
+The operator must check effective settings separately on **both** the external
+public handler and Cabinet web PHP runtimes (CLI settings alone are insufficient):
+
+- `upload_max_filesize` must be at least `20M`.
+- `post_max_size` must comfortably exceed the largest expected complete questionnaire,
+  including every attachment, fields and multipart overhead. Recommend at least
+  **128M** for the current form unless the host has a stricter approved limit.
+  More attachments may require a larger approved total; 128M is not unlimited.
+- Apache/nginx/proxy request-body limits must not be below the intended total
+  multipart size. Local nginx uses `client_max_body_size 128m`.
+- Temporary upload storage must be writable and have sufficient free space for
+  concurrent multipart submissions; check hosting quotas and PHP `max_file_uploads`
+  against the expected attachment count.
+
+Use hosting configuration/private diagnostics to inspect only these settings;
+do not publish phpinfo or private environment files. Configure PHP/server settings
+at the hosting layer and reload the affected runtime as needed; application code
+must not attempt to raise PHP limits. Local Docker uses `upload_max_filesize=20M`,
+`post_max_size=128M`; restart PHP/web after deployment of those settings.
+The existing deployment preflight does not check upload limits and is unchanged.
+
+After separate deployment, verify a supported 20 MiB upload, a 20 MiB + 1 byte
+rejection and a multi-file submission below the approved total in a controlled
+staging environment. Verify safe errors for PHP/proxy total-body rejection too;
+requests rejected before PHP cannot be handled by the form handler itself.
+The external `/form` and its handler require the separate
+[operator handoff](integration.md#external-public-form-operator-handoff).
+
 ## Build a production artifact
 
 In a clean local/CI release directory containing the committed application and

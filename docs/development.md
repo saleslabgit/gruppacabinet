@@ -144,14 +144,15 @@ through protected endpoints, and confirm deletion. Files are stored under
 must never be copied to `public` or `storage/app/public`. Do not expose the
 private directory with a web-server alias or storage link.
 
-`application/.env.example` defines `PSYCHOLOGIST_DOCUMENT_MAX_KB=10240`.
-This is a configurable technical upload ceiling (10 MiB), not a product price
+`application/.env.example` defines `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480`.
+This is a configurable technical upload ceiling (20 MiB), not a product price
 or business setting. `config/psychologist_documents.php` defines the disk,
 document codes and allowed MIME types. PHP/web-server ceilings must also allow
 the chosen size plus multipart overhead. Local Docker mounts
-`docker/php/uploads.ini` (`upload_max_filesize=10M`, `post_max_size=12M`);
-nginx allows 12 MiB requests. After changing these files run
-`docker compose up -d --no-deps php web` and, for an nginx-only change,
+`docker/php/uploads.ini` (`upload_max_filesize=20M`, `post_max_size=128M`);
+nginx allows 128 MiB requests. After changing these files run
+`docker compose restart php web` so PHP reloads its ini settings and nginx
+reloads its request-body limit. For an nginx-only change use
 `docker compose exec -T web nginx -s reload`. Production PHP/web-server limits
 must be configured independently by hosting operations.
 
@@ -385,9 +386,11 @@ are `INTEGRATION_RATE_PER_MINUTE=60` and empty `INTEGRATION_ALLOWED_IPS` (option
 comma-separated exact IPs). See the guide for trusted-proxy/shared-cache settings
 and the public, unauthenticated trust model. Preserve `X-Request-Id` on retries.
 
-Keep standard `enable_post_data_reading=1`. Existing PHP limits are 10 MiB/file
-and 12 MiB total POST; Nginx also limits total requests to 12 MiB. Multiple small
-files work; keep the entire multipart request below the total limit. Send direct
+Keep standard `enable_post_data_reading=1`. Local PHP limits are 20 MiB/file
+and 128 MiB total POST; Nginx also limits total requests to 128 MiB. Allow room
+for all files, questionnaire fields and multipart overhead; keep the entire request
+below the total limit. Production settings require the separate operator checks in
+[deployment](deployment.md#psychologist-document-upload-limits). Send direct
 questionnaire JSON in `payload` and optional flat `diploma`, `certificate_N`,
 `license`, `registration` file parts. PHP collapses duplicate flat names; use unique
 names and see the documented parser limitation in the integration guide.

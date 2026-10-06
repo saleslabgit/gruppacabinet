@@ -2,7 +2,7 @@
 
 return [
     'disk' => 'local',
-    'max_kb' => (int) env('PSYCHOLOGIST_DOCUMENT_MAX_KB', 10240),
+    'max_kb' => (int) env('PSYCHOLOGIST_DOCUMENT_MAX_KB', 20480),
     'types' => [
         'diploma' => 'Диплом',
         'certificate' => 'Сертификат',
