@@ -1,326 +1,293 @@
-# Task: TASK-2026-10-03-02
+# Task: TASK-2026-10-06-01
 
 Status: planned
-Created from: 0aa8c06406361c954f01acc3bcf2e9361868329f (main)
+Created from: 60464736e1a6b7ea03ca02be5211cd4e79f4bcfe (main)
 
 ## Title
 
-Polish psychologist-facing copy, favicon and feedback icon
+Raise psychologist document upload limit to 20 MiB and align public form contract
 
 ## Goal
 
-Apply a small UI polish pass after manual testing.
+Fix the production issue found on the public psychologist application form where
+a user was shown a generic “check the form” error although the actual failure was
+a certificate file larger than the server-side 10 MiB limit.
 
-Three product requirements:
+Adopt one clear contract across the public form and Cabinet:
 
-1. review all user-facing messages in the psychologist Cabinet and remove technical implementation language;
-2. add a favicon for the Cabinet;
-3. replace the generic icon for “Сообщить об ошибке” with an appropriate icon.
+- maximum document size: **20 MiB per file**;
+- supported formats: **JPG/JPEG, PNG, PDF**;
+- WEBP is **not** supported in this task;
+- user-facing errors must distinguish file-size / unsupported-format failures from
+  missing-field failures.
 
-This is a presentation/copy task. Do not change accepted business workflows, external integrations or lifecycle semantics.
+The public page currently advertises “JPG, PNG, WEBP, PDF; до 50 МБ”, while both
+the supplied public handler and Cabinet actually accept only JPEG/PNG/PDF and
+10 MiB. Close this mismatch.
 
 ## Facts
 
-- Current main HEAD: 0aa8c06406361c954f01acc3bcf2e9361868329f.
-- Psychologist feedback currently exposes implementation details:
-  - success: “Сообщение принято и поставлено в очередь отправки.”;
-  - error/prototype error: “Не удалось поставить сообщение в очередь...”.
-- PsychologistCabinetPages includes navigation item “Сообщить об ошибке”.
-- navigation-link.blade.php maps known labels to Bootstrap Icons and currently falls back to circle for this new item.
-- Bootstrap Icons 1.13.1 are already local and approved.
-- Shared surface layout currently has no favicon link.
-- Admin UI may retain operational/technical terminology where genuinely needed.
-- Internal logs, queue/job names, class names, docs and integration code may keep technical terminology.
-- Do not touch production/private .env_save.
+Current accepted Cabinet HEAD:
+`60464736e1a6b7ea03ca02be5211cd4e79f4bcfe`.
 
-## A. Psychologist-facing language audit
+Cabinet currently has:
 
-Audit all real psychologist-facing Cabinet surfaces and directly surfaced server validation/flash messages.
+- `application/config/psychologist_documents.php`
+  - default `PSYCHOLOGIST_DOCUMENT_MAX_KB = 10240`;
+  - MIME list: `application/pdf`, `image/jpeg`, `image/png`.
+- `application/.env.example`
+  - `PSYCHOLOGIST_DOCUMENT_MAX_KB=10240`.
+- intake rejects files above configured max or outside configured MIME list.
+- public form handler supplied by product owner currently has:
+  - `MAX_FILE_SIZE = 10 * 1024 * 1024`;
+  - allowed MIME: JPEG/PNG/PDF;
+  - generic public validation response for all local validation errors.
+- live `https://gruppa.info/form` currently advertises:
+  `JPG, PNG, WEBP, PDF; размер — до 50 МБ.`
 
-The goal is not to remove useful state information. Explain the state in product language rather than implementation language.
+The public form/handler are external to this repository. Do not pretend to modify
+or commit them here. Repository changes must make Cabinet ready for the 20 MiB
+contract and documentation/report must provide the exact external operator changes.
 
-### A1. Remove internal implementation concepts from owner UI
+Do not read/modify/commit production private files including `.env_save`.
 
-Do not expose terms/concepts such as, where avoidable:
+## A. Cabinet file limit
 
-- queue / queued job / “поставлено в очередь”;
-- database;
-- worker / cron;
-- MODX;
-- Resource ID;
-- API;
-- transport;
-- SMTP/sendmail;
-- synchronization as an implementation mechanism;
-- publication revision;
-- internal conflict/error codes;
-- “trusted confirmation” / “доверенное подтверждение” as an engineering term;
-- “browser return does not confirm financial result” or other implementation explanations when simpler payment-state wording is sufficient.
+Change Cabinet's default psychologist document maximum from 10 MiB to 20 MiB:
 
-Do not mechanically replace every occurrence in the repository.
+- config default: 20480 KiB;
+- `.env.example`: `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480`.
 
-Scope is what an authenticated psychologist actually sees:
+Keep current MIME whitelist unchanged:
 
-- navigation;
-- psychologist group list/detail/form/extension;
-- psychologist applications;
-- psychologist payments;
-- psychologist profile;
-- feedback;
-- shared components when rendered in psychologist context;
-- validation and flash messages returned by psychologist controllers/services.
+- `application/pdf`;
+- `image/jpeg`;
+- `image/png`.
 
-Admin-only screens and operational documentation are out of this copy-cleanup scope.
+Do not add WEBP.
 
-### A2. Keep copy truthful and actionable
+Do not change group-cover limits.
 
-Preferred style:
+## B. Intake behavior
 
-- short;
-- plain Russian;
-- describes what happened / what user should do;
-- no promises of delivery before external delivery is known;
-- no technical cause unless the psychologist can act on it.
+Keep the same validation architecture and safe MIME detection.
 
-Feedback success recommended final copy:
-“Сообщение принято. Спасибо за обратную связь.”
+Add focused boundary tests proving:
 
-Feedback submission failure recommended final copy:
-“Не удалось отправить сообщение. Попробуйте ещё раз позже.”
+- 20 MiB file is accepted at the Cabinet intake boundary when PHP test upload
+  facilities permit construction of that fixture;
+- file larger than 20 MiB is rejected with `422 validation_failed`;
+- JPEG, PNG and PDF remain accepted;
+- WEBP remains rejected;
+- no document is persisted for rejected requests;
+- accepted existing-size documents continue to work.
 
-Do not mention a queue.
+Use efficient synthetic fixtures; do not store huge binaries in the repository.
 
-Payment pending:
-- say payment is still being confirmed and advise not to start another payment until status updates;
-- do not explain browser callbacks or “financial result”.
+No change to questionnaire business fields, idempotency semantics, transactions,
+document storage or Telegram/mail behavior.
 
-Group publication/republication:
-- say “Публикация выполняется”, “Не удалось опубликовать”, “Обратитесь к администратору”, etc.;
-- do not expose MODX/synchronization/revision terminology to psychologist.
+## C. Deployment / infrastructure contract
 
-Expired renewal:
-- avoid “синхронизированная группа”;
-- use product wording such as “Если группа уже публиковалась, после продления она будет опубликована автоматически.”
+Update current deployment/integration documentation to state:
 
-Awaiting payment:
-- replace “доверенное подтверждение оплаты” with plain “подтверждение оплаты”.
+- Cabinet per-file application limit is 20 MiB;
+- production `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480`;
+- PHP/web server `upload_max_filesize` must be at least 20M;
+- `post_max_size` must be comfortably larger than the largest expected complete
+  questionnaire because multiple files can be uploaded in one request;
+- recommend at least **128M** for `post_max_size` for the current form unless the
+  host has a stricter approved limit;
+- request/body limits in Apache/nginx/proxy must not be below the intended total
+  multipart size;
+- temporary upload storage must have enough space.
 
-### A3. Preserve technical truth
+Do not change production PHP settings automatically from application code.
 
-Do not hide real errors behind false success.
+Add/extend deployment preflight only if the existing preflight already safely
+checks upload limits without exposing private config. Otherwise document the
+operator check; do not broaden preflight unnecessarily.
 
-Do not change:
-- HTTP status codes;
-- authorization;
-- payment trust rules;
-- queue semantics;
-- MODX/publication state machine;
-- retry behavior;
-- validation constraints.
+## D. External public form/handler operator handoff
 
-Only change text/presentation unless a tiny presenter/context flag is required.
+The external public site is not in this repository.
 
-### A4. Context-aware shared views
+The final report must include exact manual changes for the operator.
 
-Some shared views render for both admin and psychologist.
+### D1. Public handler
 
-Do not remove admin operational details merely to simplify owner UI.
+Change:
 
-Use existing admin/realGroups/surface/context flags or a small explicit presentation flag where necessary.
+`const MAX_FILE_SIZE = 10 * 1024 * 1024;`
 
-Avoid branching on request paths inside shared components if a clean context value already exists.
+to:
 
-## B. Feedback page copy
+`const MAX_FILE_SIZE = 20 * 1024 * 1024;`
 
-At minimum update:
-- real success flash;
-- real queue-insertion failure;
-- prototype error state;
-- related tests/fixtures.
+Keep allowed MIME exactly:
 
-The successful message must not say that Telegram delivery is guaranteed.
+- `image/jpeg`;
+- `image/png`;
+- `application/pdf`.
 
-Keep:
-- text-only restriction;
-- 2800 character limit;
-- existing authentication/rate limiting;
-- database queue implementation;
-- Telegram delivery behavior.
+Do not add WEBP.
 
-## C. Feedback navigation icon
+### D2. Public form copy
 
-Update the icon for “Сообщить об ошибке”.
+Every psychologist document upload hint on `/form` must say:
 
-Use the already bundled Bootstrap Icons.
+`Допустимые форматы: JPG, PNG, PDF; размер — до 20 МБ.`
 
-Preferred icon: bug.
+Remove WEBP and 50 МБ from all diploma/certificate/license/registration hints.
 
-If bug is unavailable in the bundled version, use the closest existing semantic icon such as exclamation-triangle or chat-left-text.
+### D3. Public error messages
 
-Do not add another icon library.
+The supplied public handler currently maps all local `ValidationException` cases
+to:
 
-The icon remains decorative/accessible in the same manner as existing navigation icons.
+`Проверьте заполнение формы и попробуйте ещё раз.`
 
-Do not change the label.
+Improve the external handler so file errors are actionable.
 
-## D. Favicon
+Required public behavior:
 
-Add a Cabinet favicon and wire it into the shared head so it appears on:
-- psychologist pages;
-- admin pages;
-- public login/password pages;
-- prototype pages.
+- too-large file:
+  `Файл «<label>» слишком большой. Максимальный размер — 20 МБ.`
+- unsupported MIME:
+  `Формат файла «<label>» не поддерживается. Используйте JPG, PNG или PDF.`
+- missing required file:
+  `Загрузите файл «<label>».`
+- ordinary missing/invalid fields may continue to use:
+  `Проверьте заполнение формы и попробуйте ещё раз.`
 
-### D1. Asset
+Do not expose:
+- PHP upload error numbers;
+- temp paths;
+- MIME internals;
+- Cabinet/internal exception messages;
+- stack traces.
 
-Prefer a lightweight local SVG favicon in application/public/, e.g. favicon.svg.
+Internal logs may keep precise diagnostic categories.
 
-Design should match the existing Gruppa visual language:
-- simple;
-- readable at 16×16/32×32;
-- use existing orange/neutral brand palette;
-- no external fonts/assets;
-- no CDN;
-- no copied third-party logo.
+Prefer structured/local exception reason data rather than parsing English exception
+strings when modifying the external handler.
 
-A simple original “g.” / geometric Gruppa mark is acceptable.
+### D4. PHP upload failure handling
 
-Do not introduce a frontend build step.
+Explicitly distinguish PHP upload-limit failures such as
+`UPLOAD_ERR_INI_SIZE` / `UPLOAD_ERR_FORM_SIZE` from other upload failures and
+show the same safe “максимальный размер — 20 МБ” public message.
 
-### D2. HTML
+Remember: if PHP rejects the full multipart body because `post_max_size` is
+exceeded, `$_POST` / `$_FILES` can be incomplete/empty. Document and handle
+that case with a safe size-related form error where detectable.
 
-Add an explicit favicon link in the shared surface/public layout head, e.g.:
-<link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
+## E. Telegram behavior
 
-If there are multiple independent public layouts, ensure all real Cabinet pages ultimately include it without duplicating inconsistent markup.
+Do not redesign Telegram in this task.
 
-Favicon URL must obey existing production HTTPS/base-path generation.
+For psychologist applications:
 
-## E. Tests
+- Cabinet remains the primary destination;
+- Telegram remains secondary and must not make an already accepted Cabinet
+  submission fail.
 
-Add/update focused tests.
+Do not increase Telegram file limits or rely on Telegram as document storage.
 
-### Copy
+## F. Security note
 
-Render representative real psychologist pages/states and assert:
-- feedback success contains no “очеред”;
-- feedback failure contains no “очеред”;
-- owner payment pending copy does not contain the old browser/financial-result engineering explanation;
-- owner group awaiting-payment copy does not contain “доверенного”;
-- owner renewal/publication copy does not expose MODX, Resource ID, revision, or “синхронизирован”;
-- representative psychologist pages do not expose technical diagnostics/codes.
+The product-owner supplied external handler contains a real Telegram bot token.
 
-Do not assert ordinary product terms like “оплата”, “публикация”, “администратор” or “статус” disappear.
+Do not copy that token into repository files, task/report examples, tests or logs.
 
-### Icon
+The final report should remind the operator to rotate the exposed token and move
+the external handler credential to private configuration, but do not attempt to
+change external secrets from this repository.
 
-Assert rendered psychologist navigation for feedback uses the selected semantic Bootstrap icon and not the generic circle fallback.
+## Tests / Checks
 
-### Favicon
+Run and report exact results for:
 
-Assert representative psychologist, admin, and login/password/public HTML includes the favicon.
+1. focused psychologist intake upload-boundary tests;
+2. IntegrationIntakeTest;
+3. IntegrationConcurrencyTest;
+4. document/profile admin tests affected by configured max;
+5. DeploymentPreflightTest if touched;
+6. full MySQL suite;
+7. Pint;
+8. PHPStan;
+9. composer check-platform-reqs;
+10. composer validate --no-check-publish;
+11. artisan view:cache;
+12. artisan route:list;
+13. git diff --check;
+14. final staged/secret/artifact review.
 
-Under production URL generation, favicon href must be HTTPS and include /cabinet base path.
-
-Local/testing HTTP remains supported.
-
-### Regression
-
-Keep current PrototypeTest/current catalogue consistent if copy/fixtures change.
-
-## Documentation
-
-Update only current UI/project documentation that materially describes:
-- feedback success/error wording, if documented;
-- favicon;
-- feedback navigation/icon if catalogued.
-
-Do not perform broad historical documentation rewrites.
+No real external HTTP/Telegram/mail/MODX/payment requests.
 
 ## Out Of Scope
 
 Do NOT:
-- change Telegram delivery mechanics;
-- change feedback rate limits;
-- add feedback attachments;
-- change mail behavior;
-- change payment state machine;
-- change group lifecycle/publication logic;
-- change MODX integration;
-- change routes;
+
+- add WEBP support;
+- allow 50 MiB files;
+- change group-cover size limits;
+- redesign public questionnaire fields;
+- change intake authentication/idempotency;
+- change Telegram architecture;
+- change Cabinet business lifecycle;
 - add migrations;
 - add packages;
-- redesign navigation;
-- modify admin operational wording unless shared wording incorrectly leaks into psychologist UI;
-- read/change/commit .env_save;
-- make real Telegram/mail/MODX/payment calls;
-- run migrate:fresh;
-- create an accept: commit.
+- commit the external public handler into this repository merely to claim it was
+  deployed;
+- read/change/commit `.env_save`;
+- run `migrate:fresh`;
+- create an `accept:` commit.
 
 ## Acceptance Criteria
 
-1. Psychologist-facing feedback success/error messages contain no queue/job terminology.
-2. Representative psychologist-facing status/alert/validation copy is free of unnecessary implementation terminology and remains truthful/actionable.
-3. Admin operational UI is not unintentionally stripped of useful technical information.
-4. “Сообщить об ошибке” uses a semantic feedback/error icon, preferably Bootstrap bug, not the generic circle.
-5. All Cabinet surfaces include a local favicon.
-6. Favicon URL is HTTPS/base-path-safe in production.
-7. No business behavior, routes, database schema or external integration semantics change.
-8. Focused/full regressions pass.
-
-## Checks
-
-Run and report exact results for:
-1. focused copy/favicon/icon tests;
-2. CabinetImprovementsUiTest;
-3. ActionNotificationsTest;
-4. payment owner UI regressions;
-5. group owner UI/lifecycle presentation regressions;
-6. PrototypeTest;
-7. ProductionUrlGenerationTest;
-8. authentication/password public-layout tests;
-9. full MySQL suite;
-10. Pint;
-11. PHPStan;
-12. composer check-platform-reqs;
-13. composer validate --no-check-publish;
-14. artisan view:cache;
-15. artisan route:list;
-16. node --check application/public/ui.js if Node is available;
-17. git diff --check;
-18. final staged/secret/artifact review.
-
-No real external calls.
+1. Cabinet accepts psychologist documents up to and including 20 MiB subject to
+   supported MIME and infrastructure limits.
+2. Cabinet rejects files over 20 MiB.
+3. Cabinet supports JPG/JPEG, PNG and PDF only; WEBP remains rejected.
+4. Repository config/example/docs consistently state 20 MiB.
+5. External handoff precisely changes the public handler to 20 MiB.
+6. External handoff changes all public form hints to JPG/PNG/PDF and 20 MiB.
+7. External handoff provides clear safe file-size/format/missing-file messages.
+8. No business/integration semantics regress.
 
 ## Hard Workflow Gate
 
 Before editing:
-- run git log --oneline -5;
-- run git status --short;
-- confirm HEAD is this planner commit and parent is 0aa8c06406361c954f01acc3bcf2e9361868329f;
+
+- run `git log --oneline -5`;
+- run `git status --short`;
+- confirm HEAD is this planner commit and parent is
+  `60464736e1a6b7ea03ca02be5211cd4e79f4bcfe`;
 - read WORKFLOW.md, AGENTS.md, this task and current report;
-- inspect all psychologist-facing Blade views/shared context and owner controller flash/validation messages;
-- inspect navbar/navigation icon mapping;
-- inspect shared/public layout heads;
-- verify whether any favicon asset already exists before creating a new one;
+- inspect current psychologist document config, intake validation, tests and
+  deployment/integration docs;
 - verify clean/known local tree.
 
 During implementation:
-- work only on copy/favicon/icon;
-- do not edit .ai/task.md;
-- keep technical details in admin/logging where appropriate;
-- do not change business behavior to simplify wording;
-- avoid unrelated CSS/layout changes.
+
+- work only on Cabinet-side 20 MiB readiness and documentation/tests;
+- do not edit `.ai/task.md`;
+- do not claim external /form or handler was changed by this repository;
+- preserve MIME whitelist and security/idempotency behavior.
 
 Before commit:
+
 - run all required checks;
 - inspect full diff/staged files;
-- verify no production/private files/secrets/logs/cache/vendor/temp artifacts;
-- update .ai/report.md factually;
-- explicitly state no real external calls were made.
+- verify no real token/private env/production data/uploads/logs/cache/vendor/temp
+  artifacts are staged;
+- update `.ai/report.md` factually;
+- include the exact external operator handoff;
+- explicitly state external public form/handler still require separate deployment.
 
 If complete, commit with:
 
-codex: TASK-2026-10-03-02 polish psychologist copy and favicon
+`codex: TASK-2026-10-06-01 raise psychologist upload limit`
 
 Do not create an accept commit.
