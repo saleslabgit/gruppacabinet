@@ -1,315 +1,300 @@
-# Task: TASK-2026-10-08-01
+# Task: TASK-2026-10-08-02
 
 Status: planned
-Created from: 52454eeb5208b31a7246205e46c29cec49a3f54e (main)
+Created from: 825905cdd8ac3cb9792dfae93603ab474ca69acd (main)
 
 ## Title
 
-One-click WEBPAY checkout and production-readiness audit
+Auto-refresh psychologist payment status and simplify order details
 
 ## Goal
 
-Prepare Gruppa Cabinet's existing WEBPAY card integration for a later, separately
-authorized switch from sandbox credentials to real production credentials.
+Finish the confirmed live WEBPAY user journey in Gruppa Cabinet with two small,
+cohesive owner-facing improvements:
 
-Deliver two verifiable results in one payment-focused milestone:
+1. After WEBPAY sends the psychologist back to Cabinet, the "Оплата
+   подтверждается" screen should automatically notice a changed local payment
+   status and show the authoritative result, without asking the user to click
+   "Обновить страницу".
+2. Reduce technical clutter on psychologist payment result pages: keep the
+   current status, amount and useful next action prominent, but move the merchant
+   order number into accessible, initially collapsed "Детали платежа". Preserve
+   the complete order number for support and all existing admin accounting views.
 
-1. Remove the unnecessary second "Оплатить картой" click. Once a psychologist
-   explicitly clicks to pay on the Cabinet payment page, the prepared, signed
-   HTML POST form should automatically take the browser to WEBPAY.
-2. Audit the existing WEBPAY/payment code and operational runbook for live
-   acceptance. Produce a precise, honest GO / NO-GO checklist. Do not claim
-   that real payments work unless actual provider acceptance was performed.
+Do not modify financial confirmation semantics, provider protocol, payment
+attempt lifecycle or real merchant credentials.
 
-Do not deploy production credentials or make real provider/financial requests.
+## Confirmed context and repository facts
 
-## Current verified facts
+- Current accepted main HEAD:
+  825905cdd8ac3cb9792dfae93603ab474ca69acd.
+- The product owner has performed one live WEBPAY payment. They report that
+  payment confirmation arrived, and after clicking "Обновить страницу" the
+  Cabinet correctly showed a paid result and the new group became a draft.
+  This is a product-owner observation, not an automated external test.
+- Current psychologist payment result template:
+  application/resources/views/psychologist/payments/return.blade.php.
+  It renders pending/succeeded/failed/cancelled/refunded statuses and useful
+  actions; pending has a working manual refresh link.
+  It currently displays the full "Номер заказа" (merchant order_number,
+  typically GP-...) directly alongside the amount.
+  It is used by live pages and local/testing prototype variants.
+- application/app/Http/Controllers/Psychologist/PaymentController.php:
+  - GET /payments/{payment} is owner-scoped and renders local payment state;
+  - GET /payments/{payment}/return or /cancel uses PaymentRecovery::check
+    before rendering; this can eventually contact WEBPAY for a verified-bound
+    due recovery attempt, so do NOT use return/cancel URLs for automatic polling;
+  - owner-check helper resolves Payment by owner_id and calls Gate::authorize('view').
+- application/routes/web.php has existing payments owner group with
+  ['account', 'role:psychologist']; no lightweight local-status endpoint yet.
+- application/public/ui.js is the already approved local frontend entrypoint,
+  included by application/resources/views/layouts/surface.blade.php with a
+  filemtime-based cache-busting query; it already has the narrow WEBPAY form
+  auto-submit hook from TASK-2026-10-08-01.
+- application/app/Enums/PaymentStatus.php values:
+  created, pending, succeeded, failed, cancelled, refunded.
+- Admin payment detail uses application/resources/views/admin/payments/show.blade.php
+  and shared.payment-data. Admin order number and provider information must remain.
+- Prototype catalogue/fixtures use the real return view with $realPayments
+  unset/false. Prototype examples must stay inert and DB-independent.
+- WEBPAY notify/ConfirmPayment are responsible for trusted state changes.
+  PaymentRecovery's bounded provider check must not be triggered by polling.
+- Production is already receiving real payments. Never touch actual .env,
+  .env_save, live payment data or provider endpoints during implementation.
 
-- HEAD is the accepted 20 MiB upload change
-  52454eeb5208b31a7246205e46c29cec49a3f54e.
-- The psychologist creates a paid group and lands on
-  GET /payments/{payment}. It initially displays the owner-only CSRF POST
-  /payments/{payment}/start.
-- PaymentController::start calls PaymentAttempts::start, marks the existing
-  attempt pending under locks, generates the WEBPAY v2 signed form, then renders
-  the **same** psychologist/payments/placement.blade.php with providerForm.
-- That Blade form currently has a second manual submit button labeled
-  "Оплатить картой" to POST the signed fields to WEBPAY; it does not auto-submit.
-  This exactly explains the owner's observed double-click behavior. There is no
-  evidence of a second local payment record being created by this step.
-- The same start route also handles "Продолжить эту оплату" from pending and
-  applies to paid extensions.
-- WEBPAY provider config maps sandbox -> securesandbox.webpay.by, wsb_test=1;
-  production -> payment.webpay.by, wsb_test=0; API uses sandbox.webpay.by or
-  billing.webpay.by.
-- Payment form signs random seed, store ID, merchant order, test flag, BYN and
-  exact decimal amount using v2 SHA1 plus SecretKey. Production callbacks use
-  APP_URL=https://gruppa.info/cabinet.
-- The signed standard notify supplies trusted merchant-order binding. Browser
-  return/cancel never proves a financial outcome. There is bounded recovery
-  only for verified-bound pending attempts.
-- Existing docs/webpay.md says real Sandbox provider acceptance is NOT VERIFIED:
-  no real payment, signed notify delivery, get_transaction or refund test.
-- Existing deployment:preflight checks WEBPAY mode for being sandbox|production
-  and checks presence of four credentials. It does NOT prove keys are correct,
-  real API permission, routing or signed callback delivery. It can report
-  'WEBPAY environment' PASS even when APP_ENV=production and WEBPAY_ENV=sandbox.
-- In the current gp_payments schema, individual attempts do not store their
-  sandbox/production environment. Switching global keys/endpoints while older
-  sandbox created/pending attempts exist can make future continuation or
-  late notifications ambiguous. This needs an explicit safe cutover gate.
-- Official WEBPAY documentation requires real checkout from the contracted
-  domain, production Store ID and wsb_test=0, and gives support-only opt-in for
-  unsuccessful-operation notifications. WEBPAY get_transaction documents account
-  login and MD5(password); our PHP adapter hashes the ordinary configured
-  password itself.
-- Project code/tests/docs can be audited locally; private production .env,
-  real WEBPAY billing settings, hosting WAF, live queue, certificate/callback
-  delivery and bank processing cannot be inferred from repository source.
-- Current live /cabinet/login and /cabinet/webpay/notify could not be independently
-  inspected using the available web viewer. Do not treat this as proof of a
-  broken endpoint or of a working one.
+## A. Lightweight, owner-scoped, read-only status endpoint
 
-## A. Fix one-click checkout
+Implement a minimal JSON GET within the existing psychologist payment routes,
+e.g. GET /payments/{payment}/status, named
+psychologist.payments.status.
 
-Make a small, progressively enhanced change to the existing approved payment
-Blade and existing local UI JavaScript. Keep the approved component language.
+Required behavior:
 
-1. GET /payments/{id} for a newly created attempt still displays the owner's
-   deliberate "Оплатить картой" action, a CSRF POST to the existing start route.
-   Do NOT auto-start payments on page load / GET and do NOT POST to WEBPAY before
-   the user clicks the Cabinet payment action.
-2. When the authorized start POST succeeds and the response contains
-   providerForm, send **that exact** signed form to the provider automatically
-   from the browser (native HTML form POST, not AJAX or an invented redirect
-   URL). Use a narrowly scoped data attribute + local JS in application/public;
-   no inline JS/CDN/dependencies needed.
-3. The intermediate response should have clear short copy such as
-   "Переходим к оплате…" and an explicit manual "Перейти к оплате" fallback
-   button for disabled JS, JS errors or blocked navigation. Do not show the
-   original placement explanation and an apparently second "Оплатить картой"
-   action again. Avoid redesigning the approved payment page.
-4. Do not auto-submit provider forms on ordinary GET pages, prototype pages,
-   errors, terminal payments, or the pending status page without an explicit
-   start/continue POST. Manual fallback should remain an actual working POST
-   to the exact pre-approved WEBPAY form action.
-5. Preserve existing response Cache-Control no-store/private and
-   Referrer-Policy strict-origin-when-cross-origin. Never put SecretKey,
-   API password or other credentials in HTML/JS; derived signature and
-   merchant fields remain permitted. Never log full signed forms.
-6. Double-click/back/reload must not create another payment row, change the
-   order_number, apply product effects, or bypass the existing start/policy
-   checks. The same signed form/amount/order should be used for one response
-   regardless of whether auto-submit or fallback button is used.
-7. Cover paid new placements, paid active/expired extensions, pending "continue
-   this payment", retry after signed failure/cancellation, and owner authorization.
-   No new payment routes, business states, migrations or provider API contracts.
-8. Do not hide or redefine payment errors; preserve safe result copy.
+1. Use existing account + psychologist-role middleware, owner lookup and
+   PaymentPolicy::view authorization. No unrelated user may query another
+   owner's payment; an admin account must not access psychologist polling.
+   Preserve existing app conventions for absent/unauthorized users.
+2. Read ONLY persisted local payment status (e.g. {'status':'pending'}).
+   Do not return full Payment DTO, IDs, order number, personal data, signed
+   fields, provider_response, credentials, journal, timestamps or API status.
+3. Explicit JSON response and Cache-Control: private, no-store; no redirects to
+   WEBPAY, no Webpay::transaction, no PaymentRecovery::check, no DB writes,
+   no status transitions, no queue dispatch or external calls.
+4. Keep all existing start/retry/show/return/cancel/notify routes unchanged in
+   meaning and authorization. New GET is not an auth-free public callback.
+5. A terminal status must be authoritative from DB. Browser parameters, caller
+   hints and JS never mark payments paid or failed.
+6. Keep implementation local and simple; no new packages or schema migrations.
 
-## B. Payment production-readiness audit
+## B. Bounded auto-refresh on the real pending payment result page
 
-Inspect actual current code, configuration and tests for the full payment journey.
-At minimum:
+Change only the current psychologist payment result presentation and existing
+local ui.js, reusing the approved Blade/CSS/component style.
 
-- payment attempt creation for new paid group and paid extension;
-- tariff validation and amount snapshots (BYN minor units);
-- one-click provider form, signing and sandbox/production endpoints;
-- trusted standard notification signature, payment_method/currency/amount/
-  order/transaction consistency, duplicate/out-of-order callbacks;
-- browser return/cancel and unbound pending/manual review;
-- bounded get_transaction recovery, queue and scheduler;
-- succeeded/failed/cancelled/refunded status mapping;
-- group Draft transition for first successful paid placement;
-- active extension and expired renewal publication interaction;
-- administrative payment history, safe logs, external refund first plus local
-  accounting, and deletion safeguards;
-- owner role, CSRF and callback no-auth/no-CSRF split;
-- APP_URL/proxy/subdirectory HTTPS and Webpay production domain/Referer;
-- credential presence and preflight shortcomings;
-- the ability of a previously created sandbox attempt to survive into a
-  production configuration if not reconciled before switching.
+1. Render a narrowly scoped status-poll marker/config only when
+   ($realPayments ?? false) is true AND $payment['status'] === 'pending'.
+   This includes return, cancel and ordinary show URLs if pending; no polling on
+   created, succeeded, failed, cancelled, refunded, payment start form,
+   prototype, admin, errors, unrelated pages.
+2. JS checks the new SAME-ORIGIN, authenticated, local read-only status GET
+   **every 5 seconds**, for at most **2 minutes** from page initialization.
+   First scheduled check can be after 5 seconds. Stop after 120 seconds even
+   if the response stays pending or requests fail.
+3. Ensure only one in-flight request; use a safe bounded timer loop (setTimeout
+   rather than piling up overlapping intervals). Avoid fetch traffic while the
+   tab is hidden if practical; clean up on pagehide/navigation. Respect the
+   overall 120-second wall-clock budget regardless of tab visibility.
+4. When local status changes to succeeded/failed/cancelled/refunded, stop polling
+   and navigate/reload ONCE to the canonical owner-only
+   psychologist.payments.show URL. The server renders the authoritative
+   result, existing contextual copy and buttons. Do NOT navigate to
+   /return or /cancel automatically because those call PaymentRecovery::check.
+   Do not claim paid status solely from JS; no optimistic DOM mutation.
+5. If status stays pending past 2 minutes, stop background requests and leave
+   the existing manual "Обновить страницу" control. Optional short, truthful
+   hint such as "Если статус не обновился, попробуйте обновить страницу" is
+   acceptable; do not describe it as payment failure or auto-retry payment.
+6. On fetch errors, offline, timeout, non-JSON/unexpected response, 401/403/404,
+   or expired authentication: do not send payment/retry/start requests; handle
+   quietly, stop polling as appropriate, and keep manual refresh/link/navigation
+   usable. Never display technical error bodies or secrets.
+7. Disabled JavaScript retains existing page, status message and manual refresh.
+   The "Продолжить эту оплату" button must retain its existing explicit
+   owner-action semantics; JS must never click or auto-submit it.
+8. Keep JS confined to a distinct payment-result marker; no interference with
+   previous "data-webpay-auto-submit" checkout behavior, forms, prototypes or
+   shared select/editor interactions.
+9. Prefer native browser capabilities and already bundled libraries. Do not add
+   a new polling framework, dependency, background queue or unbounded live stream.
+10. The user-facing difference must work for initial paid placement and paid
+    active/expired extension; preserve the current success explanations.
 
-If a concrete security or financial correctness defect is found, identify
-the exact file/test/scenario. Fix focused low-risk defects necessary for this
-go-live milestone. If an architectural change, new schema, financial trust-rule
-change, migration, or provider protocol assumption is necessary, STOP and report
-it as blocked with alternatives rather than silently inventing a fix.
-Do not expand into unrelated UI, MODX, mail or Telegram code.
+## C. Simplify psychologist payment number display
 
-### B1. Read-only production readiness / preflight
+In psychologist/payments/return.blade.php only:
 
-Ensure the documented acceptance gate does not imply live readiness merely
-from having nonempty secrets.
+1. Retain visible status/alerts, amount and the appropriate action:
+   "Заполнить группу" for succeeded placement, "К группе" for successful
+   extension, "Повторить оплату" only where already permitted, pending refresh,
+   etc. No misleading promises about WEBPAY completion.
+2. Remove "Номер заказа" from the always-visible main detail grid.
+3. Keep the existing exact merchant order_number in a small, native,
+   keyboard-accessible and initially collapsed disclosure labeled
+   **"Детали платежа"**. It must reveal a human-readable "Номер заказа"
+   suitable for copying to support. Escape it as regular Blade text.
+   Prefer native <details>/<summary> with minimally necessary approved
+   styles, rather than a new JS dependency or modal. Long values must wrap on
+   narrow mobile screens.
+4. Ensure the order number is NOT removed from server-side data, provider
+   requests, admin views, history, exports (if any), confirmation binding,
+   journal or support/accounting. Payment ID in routes is unaffected.
+5. The shared prototype payment-result variants should render the same
+   disclosure normally, but remain purely demonstrative with no polling,
+   provider form or financial requests.
+6. Do not touch unrelated group pages, feedback UI, admin payment screens
+   or redefine payment IDs/transaction IDs.
 
-Inspect existing deployment:preflight:
-- it may be reasonable to add a clear production-mode check:
-  for APP_ENV=production, WEBPAY_ENV must equal production for *live*
-  readiness, while staging still supports sandbox;
-- any added check must be read-only, reveal at most environment and credential
-  PRESENCE, not values, and be covered by regression tests;
-- do not contact WEBPAY or modify business data from preflight.
-- independent external acceptance remains required even if all checks PASS.
+## D. Tests and verification
 
-### B2. Cutover risk: outstanding sandbox attempts
+Add focused deterministic tests, not just static text assertions.
 
-Before inserting production keys, the operator must inspect and reconcile
-existing 'created'/'pending' sandbox payment attempts in the retained DB.
+### PHP/HTTP
 
-Do not delete, expire, mark paid, refund, or close such attempts automatically.
-Do not invent manual mark-paid controls.
+1. Authenticated owner status GET returns exactly whitelisted status JSON for
+   pending, succeeded, failed, cancelled, refunded (created may also be tested).
+   Content-Type JSON, Cache-Control private/no-store.
+2. Another psychologist cannot see a payment (404/authorized application
+   convention), admin cannot query psychologist owner endpoint, guest/revoked
+   access follows the existing auth policy. No sensitive fields returned.
+3. Repeated status requests produce no changes to payment/group/history,
+   PaymentRecovery counters, transaction bindings, notification journal, jobs,
+   provider Http calls, mail or other external work.
+4. For real pending display, status-poll marker contains correct HTTPS-safe
+   /cabinet URLs for poll and canonical show when app.url is production;
+   manual refresh and "Продолжить" remain as before.
+5. For succeeded/failed/cancelled/refunded, created/checkout pages, all
+   prototype payment variants and admin pages: no polling marker. In real and
+   prototype owner result views, main amount/status remain, the full merchant
+   order number is ONLY inside initially collapsed "Детали платежа".
+6. Simulate trusted notification with existing signed fake fixtures: pending
+   owner status endpoint reports pending; after notify, endpoint reports
+   succeeded and full owner GET renders "Оплата подтверждена" with the correct
+   placement or extension action. No provider network access during polls.
+7. Confirm existing WebpayTest, WebpayConcurrencyTest and applicable group/payment
+   lifecycle/security tests continue to pass.
 
-Document how operators can inspect **counts and status/order IDs only** without
-printing personal data, secrets or payment payloads; coordinate a quiet cutover
-and preserve payment history. Existing attempts do not encode environment:
-describe the risk and a clear decision gate. If this cannot be handled safely
-with operational reconciliation, report a BLOCKER for explicit product/architecture
-decision rather than adding an environment-migration silently.
+### JavaScript
 
-### B3. External WEBPAY prerequisites (not verifiable in repository)
+8. Run node --check on updated ui.js; add an efficient Node VM fake-DOM/fake-
+   fetch/fake-timers scenario (or equivalent available local test harness)
+   proving: pending marker triggers bounded 5-second checks; max 120 seconds;
+   no overlapping requests; one canonical refresh on terminal; error/unknown
+   response fallback; no polling when absent; current WEBPAY auto-submit hook
+   unaffected. No real network or payment calls.
+9. If browser automation is available, test automatic transition and manual
+   fallback in a synthetic/sandbox-only environment. If unavailable, state
+   honestly that browser/live flow is not externally verified and requires
+   product-owner manual acceptance after deployment.
 
-Give the operator a safe checklist including:
+### Quality gates
 
-- contracted exact site origin/domain 'gruppa.info' and allowed callback
-  HTTPS host/path under /cabinet; referer not stripped;
-- separate REAL Store ID, REAL SecretKey (same in real billing and private env),
-  account login/password for get_transaction (unhashed in private env), and
-  confirmation that necessary API access is enabled; do not request actual values;
-- merchant configured for expected ordinary card/one-stage flow; no
-  card-inclusive notify signature mode, SOAP-only notify, unsupported method
-  or two-stage capture assumptions;
-- enable unsuccessful-operation signed notifications via WEBPAY support if
-  automatic failure/cancel recognition is required; otherwise document the
-  manual-review fallback as a business limitation;
-- queue/scheduler, database cache/locks, mail/operational logging, backups and
-  rollback runbook;
-- production setup: APP_URL=https://gruppa.info/cabinet,
-  WEBPAY_ENV=production, WEBPAY_STORE_ID, WEBPAY_SECRET_KEY,
-  WEBPAY_API_USERNAME, WEBPAY_API_PASSWORD, positive approved real tariffs;
-  separate environment values from actual secrets in output;
-- check generated action https://payment.webpay.by/ with wsb_test=0 and
-  return/cancel/notify HTTPS /cabinet URLs, never expose the full signed form;
-- realistic Sandbox end-to-end success, signed failure/cancel, duplicate notify,
-  return-before/after-notify, bounded recovery and refund acceptance before
-  authorizing the real merchant switch;
-- separately authorized low-amount LIVE acceptance (only after all gates);
-  verify exact bank debit, signed notify, local payment state, group effect,
-  and accounting. Refund via provider first, then local admin accounting.
-- public notify route must answer correct stateless HTTP 200 to valid signed
-  callbacks, reject invalid ones, allow inbound HTTPS 443 POST without
-  auth/CSRF/WAF challenge/redirect, and must remain up if browser never returns.
-
-Be precise about where "verified in code", "verified by fake tests",
-"requires operator live check", and "BLOCKED until acceptance" differ.
-
-## C. Automated checks
-
-Add/update relevant tests without real WEBPAY requests. At least:
-
-1. GET created payment has only the intentional local start form, NO
-   provider-auto-submit marker and no direct external provider form.
-2. Authenticated owner POST /payments/{id}/start produces the signed,
-   method=POST provider form with the one-click auto-submit hook and fallback.
-3. The provider fields/action differ correctly between sandbox and production:
-   sandbox URL + wsb_test=1, production URL + wsb_test=0, and exact HTTPS
-   callback URLs under /cabinet; same signed order/amount semantics.
-4. Pending "continue" POST gets the same transition hook, does not create a
-   new attempt or reset started_at.
-5. Signed failed/cancelled retry, new placement and paid extension remain
-   correct and single-effect.
-6. Untrusted browser-return/cancel never confirms payment.
-7. Owner/admin/other-user role and CSRF behavior unchanged; stateless signed
-   notify unaffected.
-8. If preflight changes, cover production live-mode gate vs sandbox staging.
-9. UI JS is syntax-valid and confined to expected form; if browser-level check
-   is unavailable, explicitly report that the real auto-navigation is still
-   awaiting manual user-browser acceptance. Never claim external redirect or
-   real provider traffic was exercised by feature tests.
-
-Run and report the exact results for:
-- focused payment/checkout tests and API/security regressions;
-- WebpayTest, WebpayConcurrencyTest, PaymentEraGroupsTest, GroupWorkflowTest,
-  GroupLifecycleTest, PrototypeTest, ProductionUrlGenerationTest,
-  DeploymentPreflightTest (if touched);
+Run and report exact results for:
+- focused new status/presentation/JS tests;
+- WebpayTest, WebpayConcurrencyTest, PaymentEraGroupsTest,
+  GroupWorkflowTest, GroupLifecycleTest, PrototypeTest,
+  ProductionUrlGenerationTest, AuthenticationTest and other affected tests;
 - full MySQL suite;
-- Pint, PHPStan, composer check-platform-reqs, composer validate;
-- artisan view:cache, route:list, schedule:list;
-- node --check on changed JS if Node available;
-- git diff --check and staged/secret review.
+- Pint and PHPStan;
+- composer check-platform-reqs and composer validate --no-check-publish;
+- artisan view:cache and route:list (include new owner GET);
+- node --check application/public/ui.js;
+- git diff --check and staged/private/secret review.
 
-No real provider, financial, mail, Telegram or MODX requests in automated checks.
+## E. Documentation and deployment handoff
 
-## D. Documentation and report
+Update only relevant current documentation:
+- docs/webpay.md: local pending status polling, 5 s / 120 s, server-only trust,
+  manual fallback, no provider API calls from polling;
+- docs/ui-pages.md: existing owner payment result interaction and collapsed
+  order number;
+- docs/deployment.md only if needed to note new read-only owner route and
+  release of application/public/ui.js to separately copied public /cabinet.
 
-Update:
-- docs/webpay.md: exact one-click flow, safeguards, non-verified external
-  acceptance, production readiness gates, staged->live cutover risk;
-- docs/deployment.md: exact safe go-live/checklist and rollback;
-- docs/ui-pages.md only for actual changed checkout interaction.
+In .ai/report.md describe exactly what changed, tests actually run, limits and
+steps to verify the real browser after deploying the new code and public ui.js.
 
-In .ai/report.md include:
-- observed root cause and implementation summary;
-- precise code-audit findings, any blockers/risks, evidence/tests;
-- concise GO/NO-GO table distinguishing static readiness vs external checks;
-- operator-ready deployment/smoke checklist;
-- an explicit statement if provider acceptance remains unverified.
+Manual production smoke (not to be performed by Codex):
+- after separately authorized REAL payment that requires confirmation,
+  see pending page, allow notification, observe automatic result update
+  within a few polling intervals, check draft/group effect;
+- verify 2-minute pending fallback, no-JS manual refresh, denied owner IDOR,
+  and admin unchanged;
+- verify order visible only when expanding details on owner pages.
+Do NOT conduct another charge just for a test without operator approval.
+A visible JS polling success is NOT proof of financial confirmation; only
+trusted WEBPAY notify/recovery determines the persisted status.
 
-Do not mark Sandbox/production tests verified without running them.
+## Hard constraints / out of scope
 
-## Hard constraints
-
-- Do NOT access/print/commit real merchant/API credentials, secret-bearing
-  forms, production private .env or .env_save, personal/payment data or logs.
-- Do NOT call actual provider endpoints, trigger a real payment, refund or
-  signed notify, or alter production configuration.
-- Do NOT weaken signature, order binding, replay, amount, or trusted-notify
-  requirements just to ease a test or unbound recovery.
-- Do NOT redirect with GET carrying payment parameters; use a signed POST form.
-- Do NOT add packages, routes or schema migrations unless a blocker is
-  escalated for a separate user decision.
-- Do NOT change unrelated MODX workflow, mail/Telegram, historical 405 or
-  HTTPS redirect internals; no payment deletion or automatic refunds.
-- Do NOT touch untracked production .env_save or run migrate:fresh.
-- Do NOT create an accept: commit.
+- Do NOT touch production .env, private .env_save, real merchant credentials,
+  payments, database records, bank accounts or user data. No real WEBPAY,
+  Telegram, mail, MODX requests, charges, refunds or provider probes.
+- Do NOT modify Webpay, signed notify verification, ConfirmPayment,
+  PaymentRecovery behavior, PaymentAttempts, tariffs, order IDs, product
+  effects, refund/delete policy, worker/scheduler logic or payment methods.
+- Do NOT change old sandbox/production attempt handling, require cleanup,
+  archive test payments, rotate secrets or introduce environment migration.
+- Do NOT add migrations, packages, queues, persistent polling or third-party
+  browser APIs.
+- Do NOT replace the accepted UI design or create parallel payment pages;
+  minimal structural changes in the current Blade are allowed.
+- Do NOT run migrate:fresh or create an accept: commit.
+- Keep production URL generation HTTPS and /cabinet-safe.
+- If implementing local polling requires weakening financial-trust rules or
+  broad architecture changes, stop and report a blocker instead.
 
 ## Acceptance criteria
 
-1. One click from the existing owner payment screen initiates WEBPAY navigation
-   through an automatically submitted signed POST; non-JS fallback works.
-2. No duplicate local attempt/order or speculative paid status.
-3. Existing WEBPAY callbacks, amount/signature verification, retry,
-   idempotency, security and group lifecycle remain intact.
-4. Tests for checkout, production/sandbox form flags and relevant payment
-   security flows pass, with limitations stated.
-5. Readiness audit and docs enumerate **real** outside-provider, hosting and
-   cutover gates. No claim of live readiness without live acceptance.
-6. No production keys or external financial calls were used.
+1. While real owner payment status is pending, JS polls local DB-only status
+   every 5 s, at most 120 s, with one in-flight check.
+2. When server status is terminal, the browser navigates once to canonical
+   owned payment show and displays truthful existing server-rendered result.
+3. On 120 s timeout, JS disabled/offline/errors, manual refresh remains usable.
+   Nothing auto-pays, retries, contacts WEBPAY or alters money/group status.
+4. The full merchant order number is outside the main owner payment details,
+   but accessible by expanding "Детали платежа"; admin unchanged.
+5. Authorization, HTTPS path, CSRF on actions and external signed notify trust
+   remain intact. No extra financial API requests.
+6. Relevant synthetic tests and quality gates pass; browser/live limitations
+   documented; no migrations or production credentials/actions.
 
 ## Codex workflow gate
 
 Before editing:
 - git log --oneline -5; git status --short;
-- confirm HEAD is this planner commit, parent is
-  52454eeb5208b31a7246205e46c29cec49a3f54e;
-- read WORKFLOW.md, AGENTS.md, .ai/task.md, current .ai/report.md;
-- inspect existing approved placement/return Blade, surface layout,
-  existing ui.js and docs/ui-pages.md;
-- inspect payment controllers/attempts/provider/notify/confirmation/recovery,
-  policy, tests, deployment preflight and official WEBPAY docs linked
-  in docs/webpay.md;
-- verify known/clean local tree.
+- confirm HEAD is this planner commit and parent is
+  825905cdd8ac3cb9792dfae93603ab474ca69acd;
+- read WORKFLOW.md, AGENTS.md, this .ai/task.md, .ai/report.md;
+- inspect the approved psychologist/payments/return and placement Blade,
+  layouts, styles, local ui.js and docs/ui-pages.md;
+- inspect PaymentController, routes, PaymentPolicy, PaymentStatus, PaymentPages,
+  PaymentRecovery and provider-notify tests;
+- verify clean/known local tree and preserve unknown changes.
 
-During work:
-- use the smallest faithful change; no unrelated refactors;
-- do not edit .ai/task.md;
-- if real financial safety ambiguity appears, stop and report blocker.
+During:
+- make the smallest safe owner-status + presentation/JS change;
+- no external financial calls;
+- do not edit .ai/task.md.
 
 Before commit:
-- run checks, inspect diff and staged files;
-- ensure no secrets, credentials, production data, vendor/cache/log artifacts;
-- update .ai/report.md factually, including all unverified gates.
+- run applicable checks and record results truthfully in .ai/report.md;
+- inspect full diff/staged files for secrets, credentials, production data,
+  generated artifacts, logs, caches, vendor or unrelated modifications;
+- stage only task files, keep .ai/task.md untouched;
+- if blocked, report status rather than pretending completion.
 
-If complete commit:
+If complete, commit:
 
-codex: TASK-2026-10-08-01 one-click WEBPAY checkout and launch audit
+codex: TASK-2026-10-08-02 auto-refresh payment result and hide order details
 
 Do not create an accept commit.
