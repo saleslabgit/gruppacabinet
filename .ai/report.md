@@ -1,198 +1,162 @@
-# Report: TASK-2026-10-08-01
+# Report: TASK-2026-10-08-02
 
 Status: done
 
 ## Summary
 
-Причина второго клика подтверждена: owner start POST уже подготавливал подписанную
-форму, но placement Blade показывал ещё одну ручную «Оплатить картой».
-В ответе на start теперь есть «Переходим к оплате…», native POST auto-submit
-через узкий `data-webpay-auto-submit` hook в локальном ui.js и рабочий submit
-fallback «Перейти к оплате». Начальный GET по-прежнему требует явного действия.
-Существующие подписи, обработка notify, бизнес-переходы и схемы не менялись.
+Добавлен owner-only GET `/payments/{payment}/status` (`psychologist.payments.status`).
+Используются существующие account/psychologist middleware, owner lookup и policy.
+Ответ — только `{"status":"..."}` из сохранённого enum, JSON с
+`Cache-Control: private, no-store`. Endpoint не вызывает recovery, WEBPAY,
+переходы статусов или jobs и не изменяет бизнес-данные.
 
-Добавлен read-only gate `WEBPAY production live mode`: APP_ENV=production требует
-WEBPAY_ENV=production; staging допускает sandbox. PASS не доказывает работоспособность
-ключей, API, hosting или банка. Написаны runbook безопасного cutover и rollback,
-GO/NO-GO gates и read-only SQL только для counts/status/order IDs.
+В real pending result view добавлен отдельный polling marker с URL status и
+canonical show. Локальный ui.js начинает через 5 секунд и повторяет проверку
+через 5 секунд после предыдущего pending-ответа, не более 120 секунд от
+инициализации. Один запрос одновременно, request timeout 5 секунд. Скрытая
+вкладка пропускает проверки без продления бюджета; pagehide останавливает
+таймеры и abort текущего запроса. При terminal status выполняется одна навигация
+на canonical show, где сервер отображает фактический результат. `/return` и
+`/cancel` автоматически не вызываются. Нет optimistic UI/auto-retry/auto-start.
+
+При offline, timeout, HTTP/auth ошибке, redirect, неверном JSON/статусе polling
+тихо прекращается. Manual refresh и явное «Продолжить эту оплату» сохраняются.
+Без JS всё работает вручную. Checkout auto-submit из предыдущей задачи не менялся.
+
+На owner result страницах статус/сумма/действия остаются видимыми, merchant order
+находится только в нативном изначально закрытом `<details>` «Детали платежа».
+Обычное Blade escaping сохранено; номер можно раскрыть клавиатурой и скопировать.
+Перенос длинных значений использует существующее `dd { overflow-wrap:anywhere }`
+из общего selector; CSS не менялся. Prototype показывает тот же disclosure без
+polling; admin, provider fields, история и binding не менялись.
 
 ## Changed Files
 
-- `application/resources/views/psychologist/payments/placement.blade.php` — состояние
-  перехода и fallback в той же подписанной форме.
-- `application/public/ui.js` — native submit только формы с payment hook.
-- `application/app/Support/DeploymentPreflight.php` — production live-mode gate.
-- `application/tests/Feature/WebpayTest.php` — sandbox/production rendered forms,
-  HTTPS callbacks, подпись/поля, pending continuation, ошибки, retries размещения
-  и active/expired продлений, terminal callbacks, owner/admin boundaries.
-- `application/tests/Feature/DeploymentPreflightTest.php` — production/sandbox gate,
-  безопасный вывод и отсутствие внешних запросов.
-- `application/tests/Feature/PrototypeTest.php` — ни один prototype не auto-submits.
-- `docs/webpay.md` — точный checkout, ограничения, audit/cutover gates и исправление
-  устаревшего описания удаления групп.
-- `docs/deployment.md` — последовательность внешней приёмки, provision и rollback.
-- `docs/ui-pages.md` — только фактически изменённое взаимодействие checkout.
+- `application/app/Http/Controllers/Psychologist/PaymentController.php` — status JSON.
+- `application/routes/web.php` — один authenticated owner GET.
+- `application/resources/views/psychologist/payments/return.blade.php` — real pending
+  marker, native disclosure; остальные статусы/действия сохранены.
+- `application/public/ui.js` — ограниченный same-origin polling.
+- `application/tests/Feature/PaymentStatusTest.php` — HTTP/authorization/read-only,
+  presentation/escaping, HTTPS URLs, signed fake notify→local result.
+- `application/tests/Feature/PrototypeTest.php` — все prototypes без polling,
+  owner result variants имеют закрытый disclosure с полным номером.
+- `application/tests/JavaScript/payment-status.test.cjs` — deterministic Node VM
+  fake DOM/fetch/timers, без зависимостей и реальной сети.
+- `docs/webpay.md`, `docs/ui-pages.md` — реализованное поведение и пределы.
+- `docs/deployment.md` — совместный release route/view/public ui.js и smoke.
 - `.ai/report.md` — этот отчёт.
-
-## Code Audit Findings
-
-| Область | Проверенные файлы / сценарий | Вывод |
-|---|---|---|
-| Создание и тариф | GroupWorkflow::create, GroupCovers::persist, PaymentAttempts, SettingService | Платная группа/attempt создаются транзакционно; цены положительные, BYN integer minor units; существующая попытка сохраняет сумму; retry получает новый order/актуальную цену |
-| Checkout | PaymentController::start, placement Blade, ui.js, Webpay::form | Marker только после owner CSRF POST; native signed POST; GET/pending/result/prototype/error не auto-start; no-store/private и Referrer-Policy сохранены |
-| Повторный start | PaymentAttempts::start | Блокировки payment/group; созданная запись становится pending; repeated start не создаёт строку, не меняет order и started_at, не применяет продуктовый эффект; новый response может иметь новый seed |
-| Подпись / endpoint | Webpay::configuration/form/notify | Фиксированные sandbox/production URL; test 1/0; SHA1 v2; стандартный MD5 notify и hash_equals; card-inclusive mode отклоняется |
-| Финансовое доверие | ConfirmPayment::apply, Webpay::verify | Проверки merchant order, cc, BYN, точной суммы, transaction/provider order, cross-payment reuse; unique transaction DB constraint и locks; browser параметры не связывают платёж |
-| Повторы / порядок | ConfirmPayment, WebpayConcurrencyTest, WebpayTest | Duplicate success не повторяет эффект; failure/void не понижают succeeded/refunded; failed/cancelled не превращаются в success от позднего conflicting callback |
-| API / recovery | Webpay::transaction, PaymentRecovery, CheckPayment, QueuePaymentChecks | TLS, redirects off, bounded timeout/XML, safe fields; API применим только к trusted binding; 20 минут до начала, до 4 вызовов, окно 1 час; unbound — ручная проверка, без произвольного mark-paid |
-| Статусы / продукт | ProviderResult, ConfirmPayment, GroupLifecycleService | 1/4→succeeded, 2/8→failed, 7→cancelled для pending; прочие типы не применяются. Placement→draft; active extension добавляет snapshot days; expired→approved и ожидает publication confirmation |
-| Admin / refund | Admin PaymentController, PaymentPolicy, PaymentRefundRequest | Просмотр local history, safe journal; refund сначала у провайдера, затем locked local accounting, без provider call; повтор запрещён |
-| Удаление | GroupPolicy::delete, GroupWorkflow::delete, PaymentEraGroupsTest, актуальный SPEC | Старое docs/webpay.md ошибочно обещало запрет удаления при succeeded. Сейчас owner скрывает, admin soft-deletes независимо от платежа; история сохраняется, автоматического refund нет. Документация приведена к текущему коду/ТЗ |
-| Удаление до notify | ConfirmPayment::apply | Success для admin-deleted группы сохраняет trusted binding/pending для ручной проверки, не восстанавливает группу; нужен operator разбор |
-| Роли / CSRF | routes/web.php, bootstrap/app.php, RequireRole, PaymentPolicy | Owner lookup и account/psychologist middleware; другой owner 404, admin start 403; start требует CSRF; notify вне auth/session/CSRF, signed bytes не trim/normalize |
-| HTTPS / base path | AppServiceProvider, surface layout, ProductionUrlGenerationTest | Production forceScheme HTTPS; /cabinet callback generation; фактический proxy/host/Referer/WAF проверяется оператором |
-| Preflight | DeploymentPreflight / DeploymentPreflightTest | Исправлен ложный live PASS при production+sandbox. Ключи проверяются только на наличие. Новый gate не пишет данные; существующие disposable cache/lock probes сохранены |
-| Cutover | gp_payments schema, PaymentAttempts, Webpay, PaymentRecovery | Среда не сохраняется. Старые created/pending могут получить новые endpoints/keys; late notify — неверный secret. Это обязательный внешний NO-GO gate, не повод для скрытой миграции |
-
-Новых подтверждённых дефектов финансового trust-flow, требующих изменения протокола
-или схемы, при инспекции не выявлено. Это не доказательство внешней готовности.
-Если retained sandbox created/pending/session невозможно сверить текущими trusted
-путями, переключение BLOCKED: сохранить sandbox и отдельно спроектировать привязку
-среды либо audited retirement никогда не начатых attempts. SQL-закрытие/удаление,
-подмена статуса и очистка истории не разрешены.
 
 ## Checks
 
-Проверки выполняются в одноразовых `cabinet-webpay-php` / `cabinet-webpay-mysql`,
-PHP 8.2.32 / MySQL 8.4, Docker internal network без выхода наружу. Исходники и
-vendor скопированы по allowlist; `.env`, `.env_save`, storage/cache/logs источника
-не копировались. В тестовой копии создан пустой `.env`; DB/APP/MAIL settings
-синтетические, переданы окружением, включая subprocess tests. Только dedicated
-`gruppa_cabinet_test`; тестовые migrations управляются suite. Команда
-migrate:fresh на retained/production DB не выполнялась.
+Проверки выполняются в одноразовых `cabinet-status-php` / `cabinet-status-mysql`,
+PHP 8.2.32 / MySQL 8.4, internal Docker network без выхода наружу. Только
+синтетическая `gruppa_cabinet_test`. Код/vendor копировались по allowlist из
+read-only source; private .env/.env_save, исходные storage/cache/logs не читались
+и не копировались. В тестовой копии пустой .env и явные synthetic env settings,
+также для subprocess tests. Миграциями тестовой БД управляет suite; отдельная
+команда migrate:fresh на retained/production DB не запускалась.
 
-- `php artisan test --compact --filter="WebpayTest|WebpayConcurrencyTest|PaymentEraGroupsTest|GroupWorkflowTest|GroupLifecycleTest|PrototypeTest|ProductionUrlGenerationTest|DeploymentPreflightTest|AuthenticationTest|IntegrationIntakeTest|IntegrationConcurrencyTest" --log-junit=/tmp/webpay-focused-final.xml`:
-  **209 passed, 4645 assertions**, 106.53 s.
-- `php artisan test --compact --filter=test_late_callbacks --log-junit=/tmp/webpay-terminal.xml`:
-  **1 passed, 23 assertions**, 6.94 s (добавлен после целевого прогона).
-- `php artisan test --compact --log-junit=/tmp/webpay-full.xml`: **799 passed,
-  9579 assertions**, 411.14 s; JUnit failures/errors/skips: **0/0/0**.
-- `vendor/bin/pint --test`: **PASS, 225 files**, включая финальную версию tests.
+- Первый `php artisan test --compact --filter="PaymentStatusTest|PrototypeTest" --log-junit=/tmp/status-new.xml`:
+  **31 passed, 2352 assertions**, 10.28 s (до дополнительного escaping case).
+- `php artisan test --compact --filter="PaymentStatusTest|WebpayTest|WebpayConcurrencyTest|PaymentEraGroupsTest|GroupWorkflowTest|GroupLifecycleTest|PrototypeTest|ProductionUrlGenerationTest|AuthenticationTest" --log-junit=/tmp/status-focused.xml`:
+  **175 passed, 4316 assertions**, 77.60 s.
+- `php artisan test --compact --log-junit=/tmp/status-full.xml`: **821 passed,
+  10135 assertions**, 373.59 s; JUnit failures/errors/skips: **0/0/0**.
+- `node --check application/public/ui.js`: **PASS**.
+- `node application/tests/JavaScript/payment-status.test.cjs`: **18 passed**, no
+  failures/cancellations/skips. `node --test application/tests/JavaScript/payment-status.test.cjs`
+  тоже завершился успешно; прямой запуск показывает все 18 named cases.
+- JS cases: первый check на 5 s, 23 checks на 5..115 s и остановка на 120 s;
+  четыре terminal statuses→один canonical show; не более одного in-flight;
+  abort timeout; offline/non-JSON/bad JSON/unknown/401/403/404/500; hidden tab,
+  задержанные timers и поздний response; pagehide cleanup; отсутствие marker,
+  cross-origin guard и неизменный checkout form submit.
+- `vendor/bin/pint --test`: **PASS, 226 files**.
 - `vendor/bin/phpstan analyse --no-progress --memory-limit=512M`: **No errors**.
 - `composer check-platform-reqs`: все требования **success**.
 - `composer validate --no-check-publish`: **composer.json valid**.
-- `VIEW_COMPILED_PATH=/tmp/webpay-cli-views php artisan view:cache`: **success**;
-  отдельный каталог не мешает компиляции views в тестах.
-- `php artisan route:list`: **success, 130 routes**; `php artisan schedule:list`: **success**,
-  в том числе recovery каждые 5 минут. Задания не исполнялись этими проверками.
-- `node --check application/public/ui.js`: **PASS**.
-- Node VM smoke с полным ui.js: **PASS**, только marker вызывает submit, та же
-  форма и поля, никаких browser/network запросов.
+- `VIEW_COMPILED_PATH=/tmp/status-cli-views php artisan view:cache`: **success**,
+  отдельный CLI cache не мешает тестам.
+- `php artisan route:list` (**131 routes**) и `php artisan route:list --path=payments`: **success**;
+  новый GET|HEAD `payments/{payment}/status` → psychologist.payments.status.
 - `git diff --check`: **PASS**.
-- `git diff --cached --check` и staged review: **PASS**; ровно 10 файлов задачи,
-  diff просмотрен, credential-pattern scan пройден; секретов, private env,
-  production data, vendor/storage/cache/log/temp artifacts и посторонних файлов нет.
-- `diff -qr` для app/config/database/public/resources/routes/tests: тестовая
-  копия соответствует финальным исходникам, расхождений нет.
+- `git diff --cached --check`, staged/private/secret review: **PASS**;
+  ровно 11 файлов задачи, diff просмотрен, credential-pattern scan пройден.
+  Private env, production data, logs/cache/vendor/generated artifacts и
+  посторонних изменений нет.
+- `diff -qr` app/routes/resources/public/tests: финальные исходники совпадают
+  с тестовой копией, расхождений нет.
 
 Обязательные классы в полном suite:
 
 | Класс | Tests | Assertions | Failures/errors/skips |
 |---|---:|---:|---|
+| PaymentStatusTest | 22 | 275 | 0/0/0 |
 | WebpayTest | 32 | 507 | 0/0/0 |
-| WebpayConcurrencyTest | 6 | 155 | 0/0/0 |
+| WebpayConcurrencyTest | 6 | 142 | 0/0/0 |
 | PaymentEraGroupsTest | 4 | 55 | 0/0/0 |
 | GroupWorkflowTest | 53 | 697 | 0/0/0 |
 | GroupLifecycleTest | 20 | 325 | 0/0/0 |
-| PrototypeTest | 10 | 1774 | 0/0/0 |
+| PrototypeTest | 10 | 2080 | 0/0/0 |
 | ProductionUrlGenerationTest | 3 | 33 | 0/0/0 |
-| DeploymentPreflightTest | 23 | 170 | 0/0/0 |
+| AuthenticationTest | 25 | 208 | 0/0/0 |
 
-Диагностика первого прогона: два новых checkout cases получили 404 из-за
-forceRootUrl с /cabinet в Laravel test request; исправлено использованием explicit
-http://localhost request, как в ProductionUrlGenerationTest. 146 предупреждений
-объяснены отсутствующим /app/.env в одноразовой копии. Создан пустой файл;
-приватная конфигурация не использовалась. Затем новые checkout и extension retry
-сценарии подтвердили 146 assertions; предупреждения до исправления окружения
-не скрывались и код приложения для них не менялся.
-
-Браузерная проверка попыталась запустить Playwright, но Chromium executable
-отсутствует. Реальная auto-navigation, no-JS fallback и responsive/browser
-acceptance **не проверены браузером**. Node VM smoke исполнил весь ui.js с DOM
-stub: без marker нет submit, с marker ровно один вызов на той же форме, поля
-сохранены. Это не browser test и не запрос к провайдеру.
-
-## GO / NO-GO
-
-| Gate | Решение / доказательство |
-|---|---|
-| Статическая реализация и синтетические регрессии | GO к review: целевые и полный MySQL suite, Pint/PHPStan/Composer/Blade/JS checks прошли |
-| Реальная browser auto-navigation / no-JS | NOT VERIFIED; ручная приёмка обязательна |
-| WEBPAY Sandbox success/notify/API/refund | NOT VERIFIED; внешняя приёмка обязательна |
-| Retained sandbox inventory / late sessions | NOT VERIFIED; NO-GO до сверки, BLOCKED при неразрешимых попытках |
-| Production secrets/merchant mode/API permissions | NOT VERIFIED; только private operator/provider check |
-| Hosting HTTPS/Referer/notify/queue/cron/locks/mail/backups | NOT VERIFIED на целевом сервере |
-| LIVE launch | NO-GO до всех gates и отдельно разрешённой low-amount приёмки |
-
-## Operator Deployment / Smoke Checklist
-
-Подробная последовательность: `docs/deployment.md`, раздел «WEBPAY live cutover
-and acceptance»; SQL inventory и blocker alternatives: `docs/webpay.md`,
-«Retained database: sandbox-to-production cutover».
-
-1. Пройти Sandbox: размещение/продления/retry, auto-POST и fallback, повторные
-   действия, success/signed decline/cancel, duplicate/return ordering, bounded
-   recovery/manual-review, provider refund + local accounting.
-2. С WEBPAY подтвердить contracted origin gruppa.info, обычный one-stage cc flow,
-   standard signed notify, unsuccessful-notify support opt-in и API доступ.
-3. Закрыть новые payment entry points, оставить notify доступным, сверить только
-   counts/status/order IDs старых попыток и outstanding sessions/late delivery.
-   Не менять keys при неразрешённых attempts; никакого manual mark-paid/close.
-4. Backups и rollback, queue/scheduler/shared locks/mail/logging; drain/pause
-   старых jobs и повторная сверка перед cutover.
-5. Только затем privately provision REAL store/secret/login/unhashed password;
-   APP_ENV=production, WEBPAY_ENV=production, APP_URL=https://gruppa.info/cabinet,
-   positive approved prices; rebuild caches/restart workers.
-6. Preflight/route/schedule checks и отдельная hosting проверка. Сверить только
-   action https://payment.webpay.by/, test=0 и HTTPS /cabinet callbacks, без dump
-   подписанной формы. Notify: inbound 443 POST, без redirect/auth/CSRF/WAF,
-   valid signed→stateless 200; работает без browser return.
-7. Отдельно разрешить low-amount LIVE test: exact bank debit, signed notify,
-   local state, один group effect, accounting/refund. Только после этого launch.
-8. Rollback после LIVE попытки не возвращает sandbox keys/старую БД автоматически:
-   сохранить live notify/history и сверить финансовые события; предпочтителен
-   совместимый code/UI rollback.
+Playwright попытался запустить browser, но отсутствует Chromium executable
+(`/home/admin1/.cache/ms-playwright/chromium_headless_shell-1217/...`). Поэтому
+реальный browser polling/navigation, native disclosure/mobile и no-JS flow
+**не проверены браузером**. Node VM не выдаётся за browser/live acceptance.
 
 ## Facts
 
-- Стартовый HEAD `09b11eb` — актуальный planner; parent
-  `52454eeb5208b31a7246205e46c29cec49a3f54e`; начальное дерево чистое.
-- WORKFLOW/AGENTS/task/предыдущий report, approved Blade/layout/CSS/catalog,
-  payment services/controllers/policies/schema/tests и runbook прочитаны.
-- Официальные WEBPAY docs сверены через Context7 и docs.webpay.by: environment,
-  form fields/signature, standard notify, get_transaction, API prerequisites.
-  Transaction-types page недоступна web viewer; текущий mapping описан по коду,
-  success 1/4 также подтверждён страницами notify/verification.
-- Production private env/ключи/платёжные данные/логи не читались и не менялись.
-  Реальных WEBPAY/payment/refund/notify/mail/Telegram/MODX запросов не выполнялось.
-- `.ai/task.md` не изменена. Новых routes/packages/migrations нет.
+- Начальный HEAD `e434f4b` — planner этой задачи; parent точно
+  `825905cdd8ac3cb9792dfae93603ab474ca69acd`. Начальное дерево чистое.
+- Прочитаны WORKFLOW, AGENTS, task, предыдущий report, актуальные payment
+  views/layout/CSS/catalog, controller/routes/policy/enum/PaymentPages/recovery
+  и provider tests/fixtures. `.ai/task.md` не менялась.
+- Laravel JSON/header/test API сверены через Context7; итоговая совместимость
+  проверяется на зависимостях репозитория.
+- Polling читает сохранённый статус. Подписи, notify, ConfirmPayment,
+  PaymentRecovery, PaymentAttempts, тарифы, refund/delete, worker/scheduler и
+  product effects не менялись. Миграций/пакетов/очередей не добавлено.
+- User-reported LIVE payment и последующий Draft — наблюдение владельца из
+  task, не проведённая Codex внешняя проверка. Реальных финансовых/provider,
+  mail/Telegram/MODX запросов в этой задаче не было.
+- Production env/данные/keys не читались и не менялись. Старые sandbox попытки
+  и процедуры cutover не менялись и не являются условием этого UI release.
+- Одноразовые тестовые контейнеры, синтетические данные и internal-сеть удалены.
 
 ## Assumptions
 
-Production cutover будет отдельно разрешён и выполнен оператором. Фактический
-состав retained DB и merchant configuration неизвестен; отсутствие outstanding
-attempts не предполагается. Наличие credentials не равно acceptance.
+Route/controller/view и публичный ui.js будут развернуты совместно обычной
+процедурой. Same-origin generated URLs и действующая owner session необходимы;
+при их отсутствии сохраняется ручной сценарий. Пять секунд отсчитываются от
+завершения предыдущего запроса, поэтому медленный ответ не создаёт overlap.
 
 ## Unknowns
 
-Реальные billing permissions, provider mode, deployed config, hosting WAF/proxy,
-callback delivery, bank processing и retained sandbox reconciliation. Реальная
-браузерная навигация и no-JS fallback ещё требуют ручной проверки.
+Фактическая версия файлов/caches на production, доступность JS в браузере,
+реальная browser навигация и responsive/no-JS приёмка после deployment.
+Состояние банковских операций не устанавливалось этой задачей.
 
 ## Risks / Next Step
 
-Provider acceptance остаётся **NOT VERIFIED**: ни реальный Sandbox payment,
-notify/get_transaction/refund, ни LIVE debit/refund не выполнялись.
-Локальная проверка не разрешает смену ключей. Cutover с неразрешимыми старыми
-попытками требует отдельного продуктового/архитектурного решения.
-Одноразовые тестовые контейнеры, их данные и internal-сеть удалены после проверок.
+После deployment выполнить вручную (Codex не выполнял):
+
+1. Развернуть private controller/routes/Blade и обновить отдельно скопированный
+   `application/public/ui.js` в public `/cabinet`; rebuild route/view cache.
+   Проверить загрузку нового filemtime URL скрипта и новый authenticated GET.
+2. Для отдельно разрешённой REAL оплаты, попавшей на pending, дождаться trusted
+   notify: GET status меняется, браузер за несколько polling intervals открывает
+   canonical show с правильным действием для placement/active/expired extension.
+   Проверить локальный group effect. Не проводить новое списание только ради
+   smoke без отдельного разрешения оператора.
+3. При длительном pending проверить прекращение polling после 120 секунд и
+   рабочую «Обновить страницу». Отдельно проверить no-JS, offline/expired auth;
+   «Продолжить эту оплату» должно оставаться только явным действием.
+4. Проверить другой owner ID (отказ), admin без owner polling и неизменённые
+   admin order details. Номер на owner страницах виден только после раскрытия
+   «Детали платежа»; проверить клавиатуру, копирование и узкий мобильный экран.
+
+JS-навигация не доказывает оплату: результат определяется исключительно
+сохранённым состоянием после trusted WEBPAY notify/recovery.

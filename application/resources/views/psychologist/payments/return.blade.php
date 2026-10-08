@@ -7,6 +7,9 @@
 @if($realPayments ?? false)<x-validation-summary :errors="$errors" />@endif
 @if($payment['status'] === 'pending' && ($payment['manual_review'] ?? false))<x-alert tone="warning">Требуется ручная проверка в платёжном сервисе. Оплата пока не подтверждена. Обратитесь к администратору.</x-alert>@endif
 @if($payment['status'] === 'pending')
+@if($realPayments ?? false)
+<div data-payment-status-poll data-status-url="{{ route('psychologist.payments.status', $payment['id']) }}" data-show-url="{{ route('psychologist.payments.show', $payment['id']) }}"></div>
+@endif
 <x-alert tone="warning" title="Оплата подтверждается">
 <p>Ожидается подтверждение оплаты. Не повторяйте оплату, пока статус не обновится.</p>
 </x-alert>
@@ -23,16 +26,21 @@
 @endif
 <dl class="detail-grid mb-4">
 <div>
-<dt>Номер заказа</dt>
-<dd>{{ $payment['order_number'] }}</dd>
-</div>
-<div>
 <dt>{{ ($realPayments ?? false) ? 'Сумма' : 'Демонстрационная сумма' }}</dt>
 <dd>
 <x-money :value="$payment['amount']" />
 </dd>
 </div>
 </dl>
+<details class="mb-4">
+<summary class="meta">Детали платежа</summary>
+<dl class="detail-grid mt-2">
+<div>
+<dt>Номер заказа</dt>
+<dd>{{ $payment['order_number'] }}</dd>
+</div>
+</dl>
+</details>
 <div class="actions">
 @if($payment['status'] === 'pending')
 <x-button :href="url()->current()">Обновить страницу</x-button>

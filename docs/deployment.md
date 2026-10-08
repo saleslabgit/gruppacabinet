@@ -282,6 +282,20 @@ context tables/columns. Do not drop history or restore DB without reconciliation
 of acknowledged financial events. Backups and restore testing are required before
 any deployment, not performed by preflight.
 
+## Payment result auto-refresh release
+
+For the payment-result auto-refresh release, deploy the new authenticated
+`GET /payments/{payment}/status` route/controller and owner return Blade to the
+private application. In the same release copy `application/public/ui.js` to the
+separately copied public `/cabinet` directory. Rebuild route/view caches using the normal deployment procedure;
+the surface layout uses filemtime cache busting for ui.js. Verify the deployed
+script loads and owner status responses are private/no-store. This release
+does not require credentials, database cleanup, migrations or another charge.
+After deployment, an operator can observe a separately authorized payment's
+pending→result transition, test the 120-second/manual/no-JS fallback and expand
+“Детали платежа”; verify another owner is denied and admin details are unchanged.
+Do not trigger a REAL payment solely for smoke without separate approval.
+
 ## WEBPAY live cutover and acceptance
 
 **Current external decision: NO-GO until acceptance evidence exists.** Repository

@@ -659,6 +659,16 @@ configured price, unfinished attempt, free extension or paid action. Success
 wording distinguishes active extension and expired/republication via the saved
 effect. Pending/manual-review never claims a completed payment.
 
+Real owner pending result pages now check only the local owner status endpoint
+every 5 seconds (after the previous check), for up to 120 seconds. A terminal
+DB status causes one navigation to canonical owner show, preserving existing
+placement/active-extension/expired-extension success explanations. Errors,
+timeout or disabled JS leave manual refresh and explicit continuation usable.
+Prototype, terminal and admin pages do not poll. On all owner result variants,
+amount/status/actions stay visible while the full merchant order is in native,
+initially collapsed “Детали платежа”. Keyboard disclosure and existing `dd`
+overflow wrapping support long order values on mobile. Admin views are unchanged.
+
 Admin payments/index now has working local filters/search/pagination;
 payments/show displays real details, safe notification journal, provider summary
 and existing refund confirmation form/modal. Refund wording remains “Отметить

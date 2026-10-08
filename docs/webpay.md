@@ -128,6 +128,33 @@ for binding, storage and API selection. Return/cancel routes require ownership.
 They render local state and may run a due, trusted-bound recovery check; merely
 opening either route never declares a financial outcome.
 
+### Local pending status refresh
+
+Real owner pending pages (show, return and cancel) use local `ui.js` to GET
+`/payments/{payment}/status` after 5 seconds and then 5 seconds after each
+completed pending check, for at most 120 seconds from initialization. There is
+only one request in flight, with a 5-second request timeout. Hidden tabs skip
+checks without extending the overall budget; pagehide stops polling and aborts
+any request. Authentication/HTTP/network/JSON errors or unexpected status stop
+quietly; the manual “Обновить страницу” and explicit “Продолжить эту оплату”
+remain available. Disabled JS keeps the same manual controls.
+
+The endpoint uses existing account/psychologist middleware and owner policy,
+returns only persisted `{"status":"pending"}` (or another local enum value),
+and sets `Cache-Control: private, no-store`. It never invokes PaymentRecovery,
+WEBPAY, transitions or jobs. Browser hints have no financial authority.
+Polling accepts only same-origin URLs, requests JSON without following redirects,
+and on succeeded/failed/cancelled/refunded navigates once to canonical owner
+show `/payments/{payment}`. It never polls or automatically navigates to
+return/cancel, which can run provider recovery. Existing trusted notify/recovery
+remain the only sources of financial confirmation.
+
+Created/checkout, terminal, prototype and admin pages do not poll. Owner result
+pages retain visible status, amount and contextual next actions; the exact
+merchant order is escaped inside initially collapsed native “Детали платежа”.
+It remains copyable for support. Admin details, provider fields and history are
+unchanged. Repeated GETs neither create a payment nor retry/start one.
+
 ## State mapping and effects
 
 | Provider type | Pending local payment |

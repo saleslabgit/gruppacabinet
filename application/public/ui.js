@@ -3,6 +3,57 @@ document.querySelectorAll('form[data-webpay-auto-submit]').forEach(form => {
     HTMLFormElement.prototype.submit.call(form);
 });
 
+// Poll local state only; return/cancel routes can run provider recovery.
+document.querySelectorAll('[data-payment-status-poll]').forEach(marker => {
+    const statusUrl = new URL(marker.dataset.statusUrl, window.location.href);
+    const showUrl = new URL(marker.dataset.showUrl, window.location.href);
+    if (statusUrl.origin !== window.location.origin || showUrl.origin !== window.location.origin) return;
+    const deadline = Date.now() + 120000;
+    let stopped = false;
+    let timer;
+    let requestTimer;
+    let request;
+    const stop = () => {
+        stopped = true;
+        clearTimeout(timer);
+        clearTimeout(requestTimer);
+        clearTimeout(budgetTimer);
+        request?.abort();
+        window.removeEventListener('pagehide', stop);
+    };
+    const budgetTimer = setTimeout(stop, 120000);
+    window.addEventListener('pagehide', stop, {once: true});
+    const poll = async () => {
+        if (stopped || Date.now() >= deadline) { stop(); return; }
+        if (document.hidden) { timer = setTimeout(poll, 5000); return; }
+        request = new AbortController();
+        requestTimer = setTimeout(() => request.abort(), 5000);
+        try {
+            const response = await fetch(statusUrl.href, {
+                method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+                headers: {'Accept': 'application/json'}, signal: request.signal
+            });
+            if (!response.ok || !response.headers.get('Content-Type')?.includes('application/json')) { stop(); return; }
+            const result = await response.json();
+            if (stopped || Date.now() >= deadline) { stop(); return; }
+            if (['succeeded', 'failed', 'cancelled', 'refunded'].includes(result?.status)) {
+                stop();
+                window.location.assign(showUrl.href);
+            } else if (result?.status === 'pending') {
+                timer = setTimeout(poll, 5000);
+            } else {
+                stop();
+            }
+        } catch {
+            // Manual refresh remains available for expired auth, offline or invalid responses.
+            stop();
+        } finally {
+            clearTimeout(requestTimer);
+        }
+    };
+    timer = setTimeout(poll, 5000);
+});
+
 document.querySelectorAll('form[data-prototype-form]').forEach(form => {
     form.addEventListener('submit', event => event.preventDefault());
 });

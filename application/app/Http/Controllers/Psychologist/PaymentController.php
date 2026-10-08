@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Payments\PaymentAttempts;
 use App\Payments\PaymentRecovery;
 use App\Support\PaymentPages;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
@@ -35,6 +36,12 @@ class PaymentController extends Controller
         $recovery->check($model->id);
 
         return $this->show($request, $payment);
+    }
+
+    public function status(Request $request, string $payment): JsonResponse
+    {
+        return response()->json(['status' => $this->owned($request, $payment)->status->value])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function start(Request $request, string $payment, PaymentAttempts $attempts)

@@ -35,7 +35,18 @@ class PrototypeTest extends TestCase
                 if ($variant === 'permission') {
                     $expectedView = 'errors.403';
                 }
-                $this->get('http://localhost'.$path)->assertOk()->assertViewIs($expectedView)->assertDontSee('WEBPAY')->assertDontSee('data-webpay-auto-submit');
+                $response = $this->get('http://localhost'.$path)->assertOk()->assertViewIs($expectedView)->assertDontSee('WEBPAY')
+                    ->assertDontSee('data-webpay-auto-submit')->assertDontSee('data-payment-status-poll');
+                if ($expectedView === 'psychologist.payments.return') {
+                    $document = new \DOMDocument;
+                    @$document->loadHTML('<?xml encoding="UTF-8">'.$response->getContent());
+                    $xpath = new \DOMXPath($document);
+                    $details = $xpath->query('//details[summary="Детали платежа"]');
+                    $this->assertSame(1, $details->length);
+                    $this->assertFalse($details->item(0)->hasAttribute('open'));
+                    $this->assertSame($response->viewData('payment')['order_number'], $xpath->query('.//dd', $details->item(0))->item(0)->textContent);
+                    $this->assertSame(0, $xpath->query('//dl[not(ancestor::details)]//dt[text()="Номер заказа"]')->length);
+                }
             }
         }
     }

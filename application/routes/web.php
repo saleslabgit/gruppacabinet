@@ -142,6 +142,7 @@ if (app()->environment(['local', 'testing'])) {
 Route::middleware(['account', 'role:psychologist'])->prefix('payments')->name('psychologist.payments.')->group(function (): void {
     $controller = App\Http\Controllers\Psychologist\PaymentController::class;
     Route::get('/{payment}', [$controller, 'show'])->name('show');
+    Route::get('/{payment}/status', [$controller, 'status'])->name('status');
     Route::get('/{payment}/return', [$controller, 'result'])->name('return');
     Route::get('/{payment}/cancel', [$controller, 'result'])->name('cancel');
     Route::post('/{payment}/start', [$controller, 'start'])->name('start');
