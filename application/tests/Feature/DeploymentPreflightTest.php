@@ -27,7 +27,7 @@ class DeploymentPreflightTest extends TestCase
             'session.driver' => 'database', 'queue.default' => 'database', 'cache.default' => 'database',
             'mail.default' => 'smtp', 'mail.mailers.smtp.host' => 'synthetic.invalid',
             'mail.mailers.smtp.password' => $this->secret,
-            'webpay.environment' => 'sandbox', 'webpay.store_id' => $this->secret,
+            'webpay.environment' => 'production', 'webpay.store_id' => $this->secret,
             'webpay.secret_key' => $this->secret, 'webpay.api_username' => $this->secret, 'webpay.api_password' => $this->secret]);
         Mail::fake();
         Http::preventStrayRequests();
@@ -37,6 +37,25 @@ class DeploymentPreflightTest extends TestCase
     public static function timeoutCapabilities(): array
     {
         return ['native' => [null], 'available' => [true], 'unavailable' => [false]];
+    }
+
+    public static function paymentEnvironments(): array
+    {
+        return [['production', 'sandbox', 1], ['production', 'production', 0], ['staging', 'sandbox', 0]];
+    }
+
+    #[DataProvider('paymentEnvironments')]
+    public function test_live_mode_gate_allows_sandbox_only_outside_production(string $appEnvironment, string $webpayEnvironment, int $exit): void
+    {
+        $this->app['env'] = $appEnvironment;
+        config(['webpay.environment' => $webpayEnvironment]);
+        $this->assertSame($exit, Artisan::call('deployment:preflight'));
+        $output = Artisan::output();
+        $this->assertStringContainsString(($exit === 0 ? 'PASS' : 'FAIL').' WEBPAY production live mode', $output);
+        $this->assertStringContainsString('external acceptance still required', $output);
+        $this->assertStringNotContainsString($this->secret, $output);
+        Http::assertNothingSent();
+        Mail::assertNothingSent();
     }
 
     private function provideTimeoutCapability(bool $available): void

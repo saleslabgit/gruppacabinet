@@ -129,6 +129,64 @@ class WebpayTest extends TestCase
         $this->assertDatabaseCount('gp_payments', 0);
     }
 
+    public static function checkoutEnvironments(): array
+    {
+        return [['sandbox', 'https://securesandbox.webpay.by/', '1'], ['production', 'https://payment.webpay.by/', '0']];
+    }
+
+    #[DataProvider('checkoutEnvironments')]
+    public function test_one_click_checkout_uses_exact_signed_post_only_after_owner_start(string $environment, string $action, string $test): void
+    {
+        config(['webpay.environment' => $environment]);
+        URL::forceRootUrl('https://gruppa.info/cabinet');
+        URL::forceScheme('https');
+        $payment = $this->placement(false);
+        $url = '/payments/'.$payment->id;
+        $requestUrl = 'http://localhost'.$url;
+        $this->actingAs($this->owner)->get($requestUrl)->assertOk()
+            ->assertSee('Оплатить картой')->assertSee('name="_token"', false)
+            ->assertDontSee('data-webpay-auto-submit')->assertDontSee('wsb_signature')
+            ->assertDontSee($action, false);
+        $response = $this->post($requestUrl.'/start')->assertOk()
+            ->assertSee('Переходим к оплате…')->assertSee('Перейти к оплате')
+            ->assertDontSee('Оплатить картой')->assertDontSee('Форма группы откроется')
+            ->assertDontSee('synthetic-secret')->assertDontSee('synthetic-password')
+            ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        $this->assertStringContainsString('private', $response->headers->get('Cache-Control'));
+        $document = new \DOMDocument;
+        @$document->loadHTML('<?xml encoding="UTF-8">'.$response->getContent());
+        $xpath = new \DOMXPath($document);
+        $forms = $xpath->query('//form[@data-webpay-auto-submit]');
+        $this->assertSame(1, $forms->length);
+        $form = $forms->item(0);
+        $this->assertSame('POST', $form->getAttribute('method'));
+        $this->assertSame($action, $form->getAttribute('action'));
+        $fields = [];
+        foreach ($xpath->query('.//input', $form) as $input) {
+            $this->assertSame('hidden', $input->getAttribute('type'));
+            $fields[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
+        $this->assertSame(app(Webpay::class)->form($payment, $fields['wsb_seed'])['fields'], $fields);
+        $this->assertSame($test, $fields['wsb_test']);
+        $this->assertSame($payment->order_number, $fields['wsb_order_num']);
+        $this->assertSame('50.01', $fields['wsb_total']);
+        $this->assertSame('https://gruppa.info/cabinet'.$url.'/return', $fields['wsb_return_url']);
+        $this->assertSame('https://gruppa.info/cabinet'.$url.'/cancel', $fields['wsb_cancel_return_url']);
+        $this->assertSame('https://gruppa.info/cabinet/webpay/notify', $fields['wsb_notify_url']);
+        $this->assertSame(1, $xpath->query('.//button[@type="submit"]', $form)->length);
+        $started = $payment->fresh()->started_at;
+        $this->travel(2)->minutes();
+        $this->get($requestUrl)->assertOk()->assertSee('Продолжить эту оплату')->assertDontSee('data-webpay-auto-submit');
+        $this->post($requestUrl.'/start')->assertOk()->assertSee('data-webpay-auto-submit');
+        $this->assertTrue($started->equalTo($payment->fresh()->started_at));
+        $this->assertSame($payment->order_number, $payment->fresh()->order_number);
+        $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
+        $this->assertSame(GroupStatus::AwaitingPayment, $payment->group->fresh()->status);
+        $this->assertDatabaseCount('gp_payments', 1);
+        Http::assertNothingSent();
+    }
+
     public function test_placement_http_flow_notify_duplicate_retry_and_browser_trust(): void
     {
         $this->actingAs($this->owner)->post('/groups')->assertRedirect();
@@ -142,8 +200,8 @@ class WebpayTest extends TestCase
         $this->assertSame(PaymentStatus::Pending, $payment->fresh()->status);
         $this->post('/payments/'.$payment->id.'/start')->assertOk();
         $this->assertDatabaseCount('gp_payments', 1);
-        $this->get('/payments/'.$payment->id.'/return?wsb_tid=999')->assertOk()->assertSee('Оплата подтверждается');
-        $this->get('/payments/'.$payment->id.'/cancel')->assertOk();
+        $this->get('/payments/'.$payment->id.'/return?wsb_tid=999')->assertOk()->assertSee('Оплата подтверждается')->assertDontSee('data-webpay-auto-submit');
+        $this->get('/payments/'.$payment->id.'/cancel')->assertOk()->assertDontSee('data-webpay-auto-submit');
         $this->assertNull($payment->fresh()->transaction_id);
         Http::assertNothingSent();
         $this->post('/payments/'.$payment->id.'/retry')->assertStatus(409);
@@ -154,11 +212,49 @@ class WebpayTest extends TestCase
         $this->assertSame(2, $payment->group->statusHistory()->count());
         $this->assertNotNull($payment->fresh()->binding_verified_at);
         $this->get('/payments/'.$payment->id.'/return')->assertOk()->assertSee('Оплата подтверждена');
+        $this->post('/payments/'.$payment->id.'/start')->assertStatus(409)->assertDontSee('data-webpay-auto-submit');
         $this->assertDatabaseCount('gp_payment_notifications', 2);
         $journal = json_encode(PaymentNotification::all()->toArray());
         $this->assertStringNotContainsString('wsb_signature', $journal);
         $this->assertStringNotContainsString('synthetic-secret', $journal);
         $this->assertStringNotContainsString('555444333222', $journal);
+    }
+
+    public function test_start_configuration_error_never_renders_provider_transition(): void
+    {
+        $payment = $this->placement(false);
+        config(['webpay.secret_key' => null]);
+        $this->actingAs($this->owner)->from('/payments/'.$payment->id)
+            ->post('/payments/'.$payment->id.'/start')->assertRedirect('/payments/'.$payment->id)
+            ->assertSessionHasErrors('payment')->assertDontSee('data-webpay-auto-submit');
+        $this->get('/payments/'.$payment->id)->assertOk()->assertSee('Оплата картой не настроена.')
+            ->assertDontSee('data-webpay-auto-submit');
+        $this->assertSame(PaymentStatus::Created, $payment->fresh()->status);
+        $this->assertNull($payment->fresh()->started_at);
+        $this->assertDatabaseCount('gp_payments', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_late_callbacks_never_downgrade_success_or_refund_or_repeat_effect(): void
+    {
+        $payment = $this->placement();
+        $this->post('/webpay/notify', WebpayFixture::notify($payment, ['payment_type' => '4']))->assertOk();
+        foreach (['1', '2', '7', '8'] as $type) {
+            $this->post('/webpay/notify', WebpayFixture::notify($payment, ['payment_type' => $type]))->assertOk();
+            $this->assertSame(PaymentStatus::Succeeded, $payment->fresh()->status);
+            $this->assertSame(2, $payment->group->statusHistory()->count());
+        }
+        $this->actingAs($this->admin)->post('/admin/payments/'.$payment->id.'/refund', [
+            'refund_comment' => 'Synthetic external refund accounting', 'confirmed' => '1',
+        ])->assertRedirect();
+        foreach (['1', '7'] as $type) {
+            $this->post('/webpay/notify', WebpayFixture::notify($payment, ['payment_type' => $type]))->assertOk();
+            $this->assertSame(PaymentStatus::Refunded, $payment->fresh()->status);
+        }
+        $this->actingAs($this->owner)->get('/payments/'.$payment->id)->assertOk()->assertDontSee('data-webpay-auto-submit');
+        $this->assertSame(GroupStatus::Draft, $payment->group->fresh()->status);
+        $this->assertSame(2, $payment->group->statusHistory()->count());
+        Http::assertNothingSent();
     }
 
     public static function invalidNotifications(): array
@@ -216,6 +312,15 @@ class WebpayTest extends TestCase
         $this->assertSame(999, $next->amount);
         $this->assertFalse($next->group->free);
         $this->post('/payments/'.$payment->id.'/retry')->assertRedirect();
+        $this->assertDatabaseCount('gp_payments', 2);
+        $this->get('/payments/'.$payment->id)->assertOk()->assertDontSee('data-webpay-auto-submit');
+        $this->get('/payments/'.$next->id)->assertOk()->assertDontSee('data-webpay-auto-submit');
+        $this->post('/payments/'.$next->id.'/start')->assertOk()->assertSee('data-webpay-auto-submit');
+        $payload = WebpayFixture::notify($next, ['transaction_id' => '987655']);
+        $this->post('/webpay/notify', $payload)->assertOk();
+        $this->post('/webpay/notify', $payload)->assertOk();
+        $this->assertSame(PaymentStatus::Succeeded, $next->fresh()->status);
+        $this->assertSame(2, $next->group->statusHistory()->count());
         $this->assertDatabaseCount('gp_payments', 2);
     }
 
@@ -286,7 +391,10 @@ class WebpayTest extends TestCase
             $payment = app(PaymentAttempts::class)->extend($group, $this->owner);
             $this->assertInstanceOf(Payment::class, $payment);
             $this->assertSame($before, $group->fresh()->expires_at->toDateTimeString());
-            app(PaymentAttempts::class)->start($payment);
+            $this->actingAs($this->owner)->get('/payments/'.$payment->id)->assertOk()->assertDontSee('data-webpay-auto-submit');
+            $this->post('/payments/'.$payment->id.'/start')->assertOk()->assertSee('data-webpay-auto-submit')
+                ->assertSee('Перейти к оплате')->assertDontSee('Продление применяется только');
+            $this->assertSame($before, $group->fresh()->expires_at->toDateTimeString());
             $this->travel(5)->minutes();
             $payload = WebpayFixture::notify($payment, ['transaction_id' => (string) (987654 + $index)]);
             $this->post('/webpay/notify', $payload)->assertOk();
@@ -331,6 +439,40 @@ class WebpayTest extends TestCase
         $this->assertTrue($paidSnapshot->fresh()->expires_at->equalTo($paidSnapshot->expires_at->copy()->addDays(17)));
     }
 
+    public static function extensionRetries(): array
+    {
+        return [['active', '2'], ['expired', '7']];
+    }
+
+    #[DataProvider('extensionRetries')]
+    public function test_extension_retry_checkout_reuses_new_attempt_and_applies_once(string $status, string $failure): void
+    {
+        $group = $this->active();
+        if ($status === 'expired') {
+            $group->update(['status' => 'expired', 'expires_at' => now()->subDay()]);
+        }
+        $expiry = $group->expires_at->copy();
+        $payment = app(PaymentAttempts::class)->extend($group, $this->owner);
+        $this->actingAs($this->owner)->post('/payments/'.$payment->id.'/start')->assertOk()->assertSee('data-webpay-auto-submit');
+        $this->post('/webpay/notify', WebpayFixture::notify($payment, ['payment_type' => $failure]))->assertOk();
+        $this->post('/payments/'.$payment->id.'/retry')->assertRedirect();
+        $next = Payment::latest('id')->firstOrFail();
+        $this->assertNotSame($payment->order_number, $next->order_number);
+        $this->post('/payments/'.$payment->id.'/retry')->assertRedirect('/payments/'.$next->id);
+        $this->post('/payments/'.$next->id.'/start')->assertOk()->assertSee('data-webpay-auto-submit');
+        $this->assertTrue($group->fresh()->expires_at->equalTo($expiry));
+        $payload = WebpayFixture::notify($next, ['transaction_id' => '987655']);
+        $this->post('/webpay/notify', $payload)->assertOk();
+        $this->post('/webpay/notify', $payload)->assertOk();
+        $this->assertDatabaseCount('gp_payments', 2);
+        $this->assertSame(PaymentStatus::Succeeded, $next->fresh()->status);
+        $this->assertSame('extension-'.$status, $next->fresh()->product_effect);
+        $this->assertTrue($group->fresh()->expires_at->equalTo($status === 'active' ? $expiry->addDays(17) : $expiry));
+        $this->assertSame($status === 'active' ? GroupStatus::Active : GroupStatus::Approved, $group->fresh()->status);
+        $this->assertSame($status === 'active' ? 0 : 1, $group->statusHistory()->count());
+        Http::assertNothingSent();
+    }
+
     public function test_unbound_recovery_no_http_manual_review_and_access_controls(): void
     {
         $payment = $this->placement();
@@ -344,9 +486,10 @@ class WebpayTest extends TestCase
         $this->assertSame(0, $payment->fresh()->status_check_attempts);
         $other = User::create(['email' => 'other-payment@example.test', 'status' => 'approved']);
         $this->actingAs($other)->get('/payments/'.$payment->id)->assertNotFound();
-        $this->post('/payments/'.$payment->id.'/start')->assertNotFound();
+        $this->post('/payments/'.$payment->id.'/start')->assertNotFound()->assertDontSee('data-webpay-auto-submit');
         $this->get('/payments/'.$payment->id.'/return')->assertNotFound();
         $this->get('/admin/payments')->assertForbidden();
+        $this->actingAs($this->admin)->post('/payments/'.$payment->id.'/start')->assertForbidden()->assertDontSee('data-webpay-auto-submit');
         $this->actingAs($this->owner)->get('/payments/'.$payment->id)->assertOk()->assertSee('ручная проверка');
     }
 

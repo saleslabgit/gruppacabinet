@@ -10,7 +10,10 @@
 <p class="mb-4">
 <x-money :value="$payment['amount']" />
 </p>
-@if($payment['type'] === 'extension')
+@if(($realPayments ?? false) && isset($providerForm))
+<p role="status">Переходим к оплате…</p>
+<p class="meta">Если переход не произошёл, нажмите «Перейти к оплате».</p>
+@elseif($payment['type'] === 'extension')
 <x-alert>Продление применяется только после подтверждения оплаты платёжным сервисом.</x-alert>
 @else
 <x-alert>Форма группы откроется после подтверждения оплаты платёжным сервисом. Срок размещения начнётся после ручной публикации администратором.</x-alert>
@@ -18,9 +21,9 @@
 <div class="actions">
 @if($realPayments ?? false)
 @if(isset($providerForm))
-<form method="POST" action="{{ $providerForm['url'] }}">
+<form method="POST" action="{{ $providerForm['url'] }}" data-webpay-auto-submit>
 @foreach($providerForm['fields'] as $name => $value)<input type="hidden" name="{{ $name }}" value="{{ $value }}">@endforeach
-<x-button type="submit">Оплатить картой</x-button>
+<x-button type="submit">Перейти к оплате</x-button>
 </form>
 @else
 <form method="POST" action="{{ route('psychologist.payments.start', $payment['id']) }}">@csrf<x-button type="submit">Оплатить картой</x-button></form>

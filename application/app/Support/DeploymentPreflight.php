@@ -61,6 +61,8 @@ class DeploymentPreflight
         $environment = config('webpay.environment');
         $add('WEBPAY environment', in_array($environment, ['sandbox', 'production'], true),
             in_array($environment, ['sandbox', 'production'], true) ? $environment : 'invalid');
+        $add('WEBPAY production live mode', ! app()->environment('production') || $environment === 'production',
+            'production APP_ENV requires production WEBPAY_ENV; external acceptance still required');
         foreach (['store_id', 'secret_key', 'api_username', 'api_password'] as $field) {
             $add('WEBPAY '.$field, ! $deployment || $this->configured('webpay.'.$field), $this->presence('webpay.'.$field));
         }

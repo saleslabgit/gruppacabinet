@@ -649,7 +649,12 @@ CSS и иерархия действий сохранены; новый ката
 Existing psychologist payments/placement and payments/return now show real
 owner-scoped attempts at `/payments/{payment}`, `/return`, `/cancel`; start and
 retry are CSRF POST actions. The same placement panel renders the signed
-provider form after start. Existing groups/extension shows current tariff,
+provider form after start. Only this authorized POST response shows
+“Переходим к оплате…” and auto-submits the signed form through local `ui.js`,
+with a real “Перейти к оплате” POST fallback. The placement explanation and
+second “Оплатить картой” action are omitted during transition. Ordinary GET,
+pending/result and prototype pages never auto-submit. Pending continuation
+uses the same explicit start POST. Existing groups/extension shows current tariff,
 configured price, unfinished attempt, free extension or paid action. Success
 wording distinguishes active extension and expired/republication via the saved
 effect. Pending/manual-review never claims a completed payment.

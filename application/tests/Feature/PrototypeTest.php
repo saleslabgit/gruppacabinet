@@ -35,7 +35,7 @@ class PrototypeTest extends TestCase
                 if ($variant === 'permission') {
                     $expectedView = 'errors.403';
                 }
-                $this->get('http://localhost'.$path)->assertOk()->assertViewIs($expectedView)->assertDontSee('WEBPAY');
+                $this->get('http://localhost'.$path)->assertOk()->assertViewIs($expectedView)->assertDontSee('WEBPAY')->assertDontSee('data-webpay-auto-submit');
             }
         }
     }

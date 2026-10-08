@@ -1,186 +1,198 @@
-# Report: TASK-2026-10-06-01
+# Report: TASK-2026-10-08-01
 
 Status: done
 
 ## Summary
 
-- Cabinet: default и `.env.example` переведены на 20480 KiB (20 MiB) на файл.
-  MIME whitelist сохранён: `application/pdf`, `image/jpeg`, `image/png`.
-  WEBP не добавлен; лимит обложек групп не изменён.
-- Добавлены intake boundary tests с реальными временными файлами: 10 MiB,
-  ровно 20 MiB, 20 MiB + 1 байт; WEBP с именем `.pdf` отклоняется по содержимому.
-  Fixture увеличивается через `ftruncate`, большие бинарники в Git не добавлены.
-  При отклонении второго файла первый тоже не сохраняется; нет документов,
-  пользователя, idempotency journal и Telegram jobs.
-- Локальные PHP/nginx лимиты приведены к контракту: 20M на файл, 128M на POST/body.
-  Это устраняет прежний локальный инфраструктурный потолок 10M/12M.
-  Production-конфигурация автоматически не меняется.
-- Обновлены deployment/development/integration docs и текущий project status.
-  Preflight не проверяет upload limits, поэтому не расширялся.
-- Внешние `/form` и handler **не изменены и требуют отдельного deployment**.
-  Точный handoff оператору приведён ниже и в `docs/integration.md`.
+Причина второго клика подтверждена: owner start POST уже подготавливал подписанную
+форму, но placement Blade показывал ещё одну ручную «Оплатить картой».
+В ответе на start теперь есть «Переходим к оплате…», native POST auto-submit
+через узкий `data-webpay-auto-submit` hook в локальном ui.js и рабочий submit
+fallback «Перейти к оплате». Начальный GET по-прежнему требует явного действия.
+Существующие подписи, обработка notify, бизнес-переходы и схемы не менялись.
+
+Добавлен read-only gate `WEBPAY production live mode`: APP_ENV=production требует
+WEBPAY_ENV=production; staging допускает sandbox. PASS не доказывает работоспособность
+ключей, API, hosting или банка. Написаны runbook безопасного cutover и rollback,
+GO/NO-GO gates и read-only SQL только для counts/status/order IDs.
 
 ## Changed Files
 
-- `application/config/psychologist_documents.php` — default 20480.
-- `application/.env.example` — `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480`.
-- `application/tests/Feature/IntegrationIntakeTest.php` — 4 новых boundary/MIME cases.
-- `docker/php/uploads.ini`, `docker/nginx/default.conf` — локальная инфраструктура.
-- `docs/deployment.md` — production upload limits и ручная проверка обеих сторон.
-- `docs/development.md` — актуальные local limits и перезапуск сервисов.
-- `docs/integration.md` — контракт intake и внешний operator handoff.
-- `docs/project-status.md` — актуальный потолок документов.
-- `.ai/report.md` — результаты и handoff.
+- `application/resources/views/psychologist/payments/placement.blade.php` — состояние
+  перехода и fallback в той же подписанной форме.
+- `application/public/ui.js` — native submit только формы с payment hook.
+- `application/app/Support/DeploymentPreflight.php` — production live-mode gate.
+- `application/tests/Feature/WebpayTest.php` — sandbox/production rendered forms,
+  HTTPS callbacks, подпись/поля, pending continuation, ошибки, retries размещения
+  и active/expired продлений, terminal callbacks, owner/admin boundaries.
+- `application/tests/Feature/DeploymentPreflightTest.php` — production/sandbox gate,
+  безопасный вывод и отсутствие внешних запросов.
+- `application/tests/Feature/PrototypeTest.php` — ни один prototype не auto-submits.
+- `docs/webpay.md` — точный checkout, ограничения, audit/cutover gates и исправление
+  устаревшего описания удаления групп.
+- `docs/deployment.md` — последовательность внешней приёмки, provision и rollback.
+- `docs/ui-pages.md` — только фактически изменённое взаимодействие checkout.
+- `.ai/report.md` — этот отчёт.
+
+## Code Audit Findings
+
+| Область | Проверенные файлы / сценарий | Вывод |
+|---|---|---|
+| Создание и тариф | GroupWorkflow::create, GroupCovers::persist, PaymentAttempts, SettingService | Платная группа/attempt создаются транзакционно; цены положительные, BYN integer minor units; существующая попытка сохраняет сумму; retry получает новый order/актуальную цену |
+| Checkout | PaymentController::start, placement Blade, ui.js, Webpay::form | Marker только после owner CSRF POST; native signed POST; GET/pending/result/prototype/error не auto-start; no-store/private и Referrer-Policy сохранены |
+| Повторный start | PaymentAttempts::start | Блокировки payment/group; созданная запись становится pending; repeated start не создаёт строку, не меняет order и started_at, не применяет продуктовый эффект; новый response может иметь новый seed |
+| Подпись / endpoint | Webpay::configuration/form/notify | Фиксированные sandbox/production URL; test 1/0; SHA1 v2; стандартный MD5 notify и hash_equals; card-inclusive mode отклоняется |
+| Финансовое доверие | ConfirmPayment::apply, Webpay::verify | Проверки merchant order, cc, BYN, точной суммы, transaction/provider order, cross-payment reuse; unique transaction DB constraint и locks; browser параметры не связывают платёж |
+| Повторы / порядок | ConfirmPayment, WebpayConcurrencyTest, WebpayTest | Duplicate success не повторяет эффект; failure/void не понижают succeeded/refunded; failed/cancelled не превращаются в success от позднего conflicting callback |
+| API / recovery | Webpay::transaction, PaymentRecovery, CheckPayment, QueuePaymentChecks | TLS, redirects off, bounded timeout/XML, safe fields; API применим только к trusted binding; 20 минут до начала, до 4 вызовов, окно 1 час; unbound — ручная проверка, без произвольного mark-paid |
+| Статусы / продукт | ProviderResult, ConfirmPayment, GroupLifecycleService | 1/4→succeeded, 2/8→failed, 7→cancelled для pending; прочие типы не применяются. Placement→draft; active extension добавляет snapshot days; expired→approved и ожидает publication confirmation |
+| Admin / refund | Admin PaymentController, PaymentPolicy, PaymentRefundRequest | Просмотр local history, safe journal; refund сначала у провайдера, затем locked local accounting, без provider call; повтор запрещён |
+| Удаление | GroupPolicy::delete, GroupWorkflow::delete, PaymentEraGroupsTest, актуальный SPEC | Старое docs/webpay.md ошибочно обещало запрет удаления при succeeded. Сейчас owner скрывает, admin soft-deletes независимо от платежа; история сохраняется, автоматического refund нет. Документация приведена к текущему коду/ТЗ |
+| Удаление до notify | ConfirmPayment::apply | Success для admin-deleted группы сохраняет trusted binding/pending для ручной проверки, не восстанавливает группу; нужен operator разбор |
+| Роли / CSRF | routes/web.php, bootstrap/app.php, RequireRole, PaymentPolicy | Owner lookup и account/psychologist middleware; другой owner 404, admin start 403; start требует CSRF; notify вне auth/session/CSRF, signed bytes не trim/normalize |
+| HTTPS / base path | AppServiceProvider, surface layout, ProductionUrlGenerationTest | Production forceScheme HTTPS; /cabinet callback generation; фактический proxy/host/Referer/WAF проверяется оператором |
+| Preflight | DeploymentPreflight / DeploymentPreflightTest | Исправлен ложный live PASS при production+sandbox. Ключи проверяются только на наличие. Новый gate не пишет данные; существующие disposable cache/lock probes сохранены |
+| Cutover | gp_payments schema, PaymentAttempts, Webpay, PaymentRecovery | Среда не сохраняется. Старые created/pending могут получить новые endpoints/keys; late notify — неверный secret. Это обязательный внешний NO-GO gate, не повод для скрытой миграции |
+
+Новых подтверждённых дефектов финансового trust-flow, требующих изменения протокола
+или схемы, при инспекции не выявлено. Это не доказательство внешней готовности.
+Если retained sandbox created/pending/session невозможно сверить текущими trusted
+путями, переключение BLOCKED: сохранить sandbox и отдельно спроектировать привязку
+среды либо audited retirement никогда не начатых attempts. SQL-закрытие/удаление,
+подмена статуса и очистка истории не разрешены.
 
 ## Checks
 
-Проверки выполняются в одноразовых `cabinet-upload-php` / `cabinet-upload-mysql`,
-PHP 8.2.32 / MySQL 8.4, Docker internal network без доступа наружу.
-Исходники и vendor скопированы по явному списку из read-only mount в `/tmp/check`;
-private env, storage и cache не копировались. Тестовый `.env` пуст, DB-переменные
-явно переданы также subprocess-тестам. MySQL содержит только синтетическую
-`gruppa_cabinet_test`; оптимизация fsync применяется только к этой одноразовой БД.
+Проверки выполняются в одноразовых `cabinet-webpay-php` / `cabinet-webpay-mysql`,
+PHP 8.2.32 / MySQL 8.4, Docker internal network без выхода наружу. Исходники и
+vendor скопированы по allowlist; `.env`, `.env_save`, storage/cache/logs источника
+не копировались. В тестовой копии создан пустой `.env`; DB/APP/MAIL settings
+синтетические, переданы окружением, включая subprocess tests. Только dedicated
+`gruppa_cabinet_test`; тестовые migrations управляются suite. Команда
+migrate:fresh на retained/production DB не выполнялась.
 
-- `php artisan test --filter='document_upload|document_content_size_types_and_validation' --log-junit=/tmp/upload-focused.xml`:
-  **5 passed, 97 assertions**, 7.25 s. Включает JPEG/PNG/PDF во всех document parts.
-- `php artisan test --filter='IntegrationIntakeTest|IntegrationConcurrencyTest|PsychologistDocumentTest|PsychologistProfileTest|PsychologistAdminTest' --log-junit=/tmp/upload-related.xml`:
-  **77 passed, 1418 assertions**, 39.09 s.
-- Первый `php artisan test --log-junit=/tmp/upload-full.xml`: **789 passed,
-  1 failed, 9027 assertions**, 383.70 s. `PasswordRecoveryTest` /
-  `test_public_result_is_identical_for_ineligible_or_unknown_email`, dataset #1
-  (pending): ожидался 200 после `travel(61)`, получен 429. Этот код не менялся.
-- Диагностический повтор `php artisan test --filter='PasswordRecoveryTest|PasswordRecoveryTimingTest' --log-junit=/tmp/upload-recovery.xml`:
-  **44 passed, 607 assertions**, 8.32 s. Сбой не воспроизвёлся, причина не
-  установлена; код/тесты восстановления пароля не менялись.
-- Финальный `php artisan test --log-junit=/tmp/upload-full-final.xml`: **790 passed,
-  9031 assertions**, 373.37 s; JUnit failures/errors/skips: **0/0/0**.
-  Повтор выполнен без изменения кода или ослабления тестов.
-- `vendor/bin/pint --test`: **PASS, 225 files**.
+- `php artisan test --compact --filter="WebpayTest|WebpayConcurrencyTest|PaymentEraGroupsTest|GroupWorkflowTest|GroupLifecycleTest|PrototypeTest|ProductionUrlGenerationTest|DeploymentPreflightTest|AuthenticationTest|IntegrationIntakeTest|IntegrationConcurrencyTest" --log-junit=/tmp/webpay-focused-final.xml`:
+  **209 passed, 4645 assertions**, 106.53 s.
+- `php artisan test --compact --filter=test_late_callbacks --log-junit=/tmp/webpay-terminal.xml`:
+  **1 passed, 23 assertions**, 6.94 s (добавлен после целевого прогона).
+- `php artisan test --compact --log-junit=/tmp/webpay-full.xml`: **799 passed,
+  9579 assertions**, 411.14 s; JUnit failures/errors/skips: **0/0/0**.
+- `vendor/bin/pint --test`: **PASS, 225 files**, включая финальную версию tests.
 - `vendor/bin/phpstan analyse --no-progress --memory-limit=512M`: **No errors**.
-- `composer check-platform-reqs`: все требования success.
-- `composer validate --no-check-publish`: composer.json valid.
-- `nginx -t` с изменённым local config: syntax ok, test successful.
-- PHP с изменённым `uploads.ini`: `upload_max_filesize=20M`, `post_max_size=128M`.
-- `DeploymentPreflightTest` отдельно не запускался: preflight не менялся;
-  входит в полный suite.
-- `php artisan view:cache`: Blade templates cached successfully; использован
-  отдельный `VIEW_COMPILED_PATH=/tmp/upload-cli-views`, не мешающий suite.
-- `php artisan route:list`: успешно, **130 маршрутов**.
-- `git diff --check`, финальный staged review и `git diff --cached --check`: успешно.
-  Только 10 файлов задачи; полный diff просмотрен, секретов/private env,
-  uploads/logs/cache/vendor/temp artifacts и посторонних файлов нет.
-- Сравнение `diff -qr` app/config/database/public/resources/routes/tests в
-  тестовой копии с read-only source: расхождений нет.
+- `composer check-platform-reqs`: все требования **success**.
+- `composer validate --no-check-publish`: **composer.json valid**.
+- `VIEW_COMPILED_PATH=/tmp/webpay-cli-views php artisan view:cache`: **success**;
+  отдельный каталог не мешает компиляции views в тестах.
+- `php artisan route:list`: **success, 130 routes**; `php artisan schedule:list`: **success**,
+  в том числе recovery каждые 5 минут. Задания не исполнялись этими проверками.
+- `node --check application/public/ui.js`: **PASS**.
+- Node VM smoke с полным ui.js: **PASS**, только marker вызывает submit, та же
+  форма и поля, никаких browser/network запросов.
+- `git diff --check`: **PASS**.
+- `git diff --cached --check` и staged review: **PASS**; ровно 10 файлов задачи,
+  diff просмотрен, credential-pattern scan пройден; секретов, private env,
+  production data, vendor/storage/cache/log/temp artifacts и посторонних файлов нет.
+- `diff -qr` для app/config/database/public/resources/routes/tests: тестовая
+  копия соответствует финальным исходникам, расхождений нет.
 
-Обязательные классы в финальном полном suite:
+Обязательные классы в полном suite:
 
 | Класс | Tests | Assertions | Failures/errors/skips |
 |---|---:|---:|---|
-| IntegrationIntakeTest | 31 | 674 | 0/0/0 |
-| IntegrationConcurrencyTest | 3 | 67 | 0/0/0 |
-| PsychologistDocumentTest | 8 | 111 | 0/0/0 |
-| PsychologistProfileTest | 20 | 303 | 0/0/0 |
-| PsychologistAdminTest | 15 | 263 | 0/0/0 |
-| DeploymentPreflightTest | 20 | 152 | 0/0/0 |
+| WebpayTest | 32 | 507 | 0/0/0 |
+| WebpayConcurrencyTest | 6 | 155 | 0/0/0 |
+| PaymentEraGroupsTest | 4 | 55 | 0/0/0 |
+| GroupWorkflowTest | 53 | 697 | 0/0/0 |
+| GroupLifecycleTest | 20 | 325 | 0/0/0 |
+| PrototypeTest | 10 | 1774 | 0/0/0 |
+| ProductionUrlGenerationTest | 3 | 33 | 0/0/0 |
+| DeploymentPreflightTest | 23 | 170 | 0/0/0 |
+
+Диагностика первого прогона: два новых checkout cases получили 404 из-за
+forceRootUrl с /cabinet в Laravel test request; исправлено использованием explicit
+http://localhost request, как в ProductionUrlGenerationTest. 146 предупреждений
+объяснены отсутствующим /app/.env в одноразовой копии. Создан пустой файл;
+приватная конфигурация не использовалась. Затем новые checkout и extension retry
+сценарии подтвердили 146 assertions; предупреждения до исправления окружения
+не скрывались и код приложения для них не менялся.
+
+Браузерная проверка попыталась запустить Playwright, но Chromium executable
+отсутствует. Реальная auto-navigation, no-JS fallback и responsive/browser
+acceptance **не проверены браузером**. Node VM smoke исполнил весь ui.js с DOM
+stub: без marker нет submit, с marker ровно один вызов на той же форме, поля
+сохранены. Это не browser test и не запрос к провайдеру.
+
+## GO / NO-GO
+
+| Gate | Решение / доказательство |
+|---|---|
+| Статическая реализация и синтетические регрессии | GO к review: целевые и полный MySQL suite, Pint/PHPStan/Composer/Blade/JS checks прошли |
+| Реальная browser auto-navigation / no-JS | NOT VERIFIED; ручная приёмка обязательна |
+| WEBPAY Sandbox success/notify/API/refund | NOT VERIFIED; внешняя приёмка обязательна |
+| Retained sandbox inventory / late sessions | NOT VERIFIED; NO-GO до сверки, BLOCKED при неразрешимых попытках |
+| Production secrets/merchant mode/API permissions | NOT VERIFIED; только private operator/provider check |
+| Hosting HTTPS/Referer/notify/queue/cron/locks/mail/backups | NOT VERIFIED на целевом сервере |
+| LIVE launch | NO-GO до всех gates и отдельно разрешённой low-amount приёмки |
+
+## Operator Deployment / Smoke Checklist
+
+Подробная последовательность: `docs/deployment.md`, раздел «WEBPAY live cutover
+and acceptance»; SQL inventory и blocker alternatives: `docs/webpay.md`,
+«Retained database: sandbox-to-production cutover».
+
+1. Пройти Sandbox: размещение/продления/retry, auto-POST и fallback, повторные
+   действия, success/signed decline/cancel, duplicate/return ordering, bounded
+   recovery/manual-review, provider refund + local accounting.
+2. С WEBPAY подтвердить contracted origin gruppa.info, обычный one-stage cc flow,
+   standard signed notify, unsuccessful-notify support opt-in и API доступ.
+3. Закрыть новые payment entry points, оставить notify доступным, сверить только
+   counts/status/order IDs старых попыток и outstanding sessions/late delivery.
+   Не менять keys при неразрешённых attempts; никакого manual mark-paid/close.
+4. Backups и rollback, queue/scheduler/shared locks/mail/logging; drain/pause
+   старых jobs и повторная сверка перед cutover.
+5. Только затем privately provision REAL store/secret/login/unhashed password;
+   APP_ENV=production, WEBPAY_ENV=production, APP_URL=https://gruppa.info/cabinet,
+   positive approved prices; rebuild caches/restart workers.
+6. Preflight/route/schedule checks и отдельная hosting проверка. Сверить только
+   action https://payment.webpay.by/, test=0 и HTTPS /cabinet callbacks, без dump
+   подписанной формы. Notify: inbound 443 POST, без redirect/auth/CSRF/WAF,
+   valid signed→stateless 200; работает без browser return.
+7. Отдельно разрешить low-amount LIVE test: exact bank debit, signed notify,
+   local state, один group effect, accounting/refund. Только после этого launch.
+8. Rollback после LIVE попытки не возвращает sandbox keys/старую БД автоматически:
+   сохранить live notify/history и сверить финансовые события; предпочтителен
+   совместимый code/UI rollback.
 
 ## Facts
 
-- Стартовый HEAD `93ccb5c` — актуальный planner; parent точно
-  `60464736e1a6b7ea03ca02be5211cd4e79f4bcfe`; рабочее дерево было чистым.
-- Прочитаны WORKFLOW, AGENTS, task, предыдущий report, intake validator/service,
-  документные тесты, настройки и deployment/integration docs.
-- Intake уже проверял фактический размер через `getSize()` и MIME через
-  `getMimeType()`. Архитектура валидации, хранение, транзакции, идемпотентность,
-  анкета, mail и Telegram business behavior не менялись.
-- PHP upload/body semantics сверены через Context7 с PHP Manual; ссылки есть
-  в `docs/integration.md`.
-- `.ai/task.md` прочитана как контракт и не изменена. Private env, включая
-  `.env_save`, не читались, не менялись и не копировались.
-- Реальных HTTP/Telegram/mail/MODX/payment запросов не выполнялось.
-- Runtime-проверка выполнена на Laravel HTTP intake boundary с фактическими
-  файлами и MySQL; реальные production PHP/proxy и внешний frontend не проверялись.
+- Стартовый HEAD `09b11eb` — актуальный planner; parent
+  `52454eeb5208b31a7246205e46c29cec49a3f54e`; начальное дерево чистое.
+- WORKFLOW/AGENTS/task/предыдущий report, approved Blade/layout/CSS/catalog,
+  payment services/controllers/policies/schema/tests и runbook прочитаны.
+- Официальные WEBPAY docs сверены через Context7 и docs.webpay.by: environment,
+  form fields/signature, standard notify, get_transaction, API prerequisites.
+  Transaction-types page недоступна web viewer; текущий mapping описан по коду,
+  success 1/4 также подтверждён страницами notify/verification.
+- Production private env/ключи/платёжные данные/логи не читались и не менялись.
+  Реальных WEBPAY/payment/refund/notify/mail/Telegram/MODX запросов не выполнялось.
+- `.ai/task.md` не изменена. Новых routes/packages/migrations нет.
 
 ## Assumptions
 
-Локальные Docker upload/body ceilings должны позволять проверить новый контракт;
-поэтому они повышены вместе с application default. Это не меняет отдельный
-application limit обложек групп и не является изменением production settings.
+Production cutover будет отдельно разрешён и выполнен оператором. Фактический
+состав retained DB и merchant configuration неизвестен; отсутствие outstanding
+attempts не предполагается. Наличие credentials не равно acceptance.
 
 ## Unknowns
 
-Текущие effective web PHP/proxy limits и deployment внешнего сайта неизвестны.
-Исходный внешний handler не хранится в репозитории; точные номера строк/имена
-его методов не заявляются. Его изменения ниже — инструкция оператору.
-
-## Exact External Operator Handoff
-
-1. Внешний handler: заменить
-   `const MAX_FILE_SIZE = 10 * 1024 * 1024;`
-   на `const MAX_FILE_SIZE = 20 * 1024 * 1024;`.
-   Ровно 20971520 байт допустимо; отклонять `> MAX_FILE_SIZE`.
-   Оставить только `image/jpeg`, `image/png`, `application/pdf`, с определением
-   MIME по содержимому. WEBP не добавлять.
-2. Все подсказки diploma/certificate/license/registration на `/form`, включая
-   динамические блоки сертификатов, заменить на точный текст:
-   `Допустимые форматы: JPG, PNG, PDF; размер — до 20 МБ.`
-   Удалить WEBP и 50 МБ. Если есть HTML `accept`, выставить
-   `.jpg,.jpeg,.png,.pdf`; JS size validation и hidden `MAX_FILE_SIZE`, если они
-   есть, согласовать с 20971520. Серверная проверка остаётся обязательной.
-3. Заменить общий catch локального `ValidationException` на mapping по
-   структурированным причинам и утверждённому label, без парсинга английского
-   текста исключений. Сохранить текущие response envelope/status и field rules.
-   Frontend должен показать безопасный message из ответа.
-
-| Причина | Точное публичное сообщение |
-|---|---|
-| Размер файла | `Файл «<label>» слишком большой. Максимальный размер — 20 МБ.` |
-| Неподдерживаемый формат | `Формат файла «<label>» не поддерживается. Используйте JPG, PNG или PDF.` |
-| Нет обязательного файла | `Загрузите файл «<label>».` |
-| Обычные поля | `Проверьте заполнение формы и попробуйте ещё раз.` |
-| Прочий upload failure | `Не удалось загрузить файл «<label>». Попробуйте ещё раз.` |
-| Превышен общий body | `Общий размер файлов слишком большой. Уменьшите размер или количество файлов и попробуйте ещё раз. Максимальный размер одного файла — 20 МБ.` |
-
-`<label>` брать из известных полей: Диплом, Сертификат, Лицензия / членство,
-Свидетельство о государственной регистрации; не из имени файла/ввода клиента.
-Экранировать при HTML-выводе или использовать `textContent`.
-
-4. До чтения temp file/MIME проверять PHP upload error:
-   `UPLOAD_ERR_INI_SIZE` и `UPLOAD_ERR_FORM_SIZE` → сообщение размера 20 МБ;
-   `UPLOAD_ERR_NO_FILE` / отсутствие part → missing-file только для уже обязательного
-   поля (не делать optional files обязательными); другие non-OK → upload failure.
-   После `UPLOAD_ERR_OK` проверять upload, фактический размер, затем MIME.
-5. До required-field checks обнаруживать oversized multipart body, когда возможно:
-   numeric `CONTENT_LENGTH` больше effective positive `post_max_size` (перевести
-   K/M/G в байты) → сообщение общего размера, даже при пустых `$_POST`/`$_FILES`.
-   Пустой POST сам по себе не доказательство превышения. При отсутствующем или
-   ненадёжном Content-Length причина может быть неразличима. Для proxy HTTP 413
-   обеспечить такое же безопасное сообщение; handler до PHP тогда не вызывается.
-   Не раскрывать номера PHP errors, temp paths, MIME internals, Cabinet/internal
-   exception messages или stack traces. Диагностические категории допустимы
-   только во внутренних логах.
-6. На production Cabinet установить `PSYCHOLOGIST_DOCUMENT_MAX_KB=20480`
-   и пересобрать config cache обычной процедурой deployment. На **обеих** сторонах
-   проверить effective web PHP `upload_max_filesize >= 20M`, `post_max_size`
-   с запасом на всю анкету и все файлы: рекомендуется минимум **128M**, если
-   hosting не имеет более строгого согласованного лимита. Apache/nginx/proxy body
-   limit должен быть не ниже выбранного общего размера; обеспечить writable
-   upload temp storage, свободное место и достаточный `max_file_uploads`.
-   CLI-настройки не доказывают web-настройки. Не менять лимиты через runtime ini_set.
-7. Cabinet — основной получатель. Сбой вторичного Telegram после принятия Cabinet
-   не должен возвращать ошибку уже принятой анкеты. Telegram file limits
-   не повышать, Telegram не использовать как document storage.
-8. **Ротировать раскрытый Telegram bot token**, новый вынести в приватную
-   конфигурацию внешнего handler. Значение токена нигде не копировалось.
-   Ротация и внешнее развёртывание из этого репозитория не выполнялись.
-
-После отдельного deployment оператору проверить в staging все форматы, границы,
-отсутствующий required file/обычное поле, PHP file/body errors, proxy 413,
-multi-file request и вторичный Telegram failure после успеха Cabinet (через stubs).
+Реальные billing permissions, provider mode, deployed config, hosting WAF/proxy,
+callback delivery, bank processing и retained sandbox reconciliation. Реальная
+браузерная навигация и no-JS fallback ещё требуют ручной проверки.
 
 ## Risks / Next Step
 
-Готово к приёмке. Первый одиночный 429 в PasswordRecoveryTest не воспроизвёлся
-ни в диагностическом, ни в повторном полном прогоне; его причина не установлена.
-Одноразовые тестовые контейнеры, данные и сеть удалены после проверок.
-Внешние `/form`/handler и production upload settings требуют отдельного deployment
-оператором; без него исходная публичная ошибка может сохраняться.
+Provider acceptance остаётся **NOT VERIFIED**: ни реальный Sandbox payment,
+notify/get_transaction/refund, ни LIVE debit/refund не выполнялись.
+Локальная проверка не разрешает смену ключей. Cutover с неразрешимыми старыми
+попытками требует отдельного продуктового/архитектурного решения.
+Одноразовые тестовые контейнеры, их данные и internal-сеть удалены после проверок.

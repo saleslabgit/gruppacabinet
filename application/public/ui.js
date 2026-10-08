@@ -1,3 +1,8 @@
+// Only the response to an authorized payment start POST carries this marker.
+document.querySelectorAll('form[data-webpay-auto-submit]').forEach(form => {
+    HTMLFormElement.prototype.submit.call(form);
+});
+
 document.querySelectorAll('form[data-prototype-form]').forEach(form => {
     form.addEventListener('submit', event => event.preventDefault());
 });

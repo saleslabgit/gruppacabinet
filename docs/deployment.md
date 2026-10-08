@@ -195,7 +195,10 @@ approved procedure. Configure approved prices in admin settings.
 Preflight exits nonzero for blockers. It checks CLI PHP and production dependency
 extensions, MySQL identity, required tables, writable directories, configured
 sessions/queue/cache, HTTPS /cabinet, debug, mail delivery configuration and
-secret presence. It performs only disposable technical cache/lock probes (removed afterward); no mail, provider
+secret presence. `WEBPAY production live mode` additionally fails when
+APP_ENV=production and WEBPAY_ENV is not production; staging supports sandbox.
+This is a live-readiness gate, not proof of bank/provider acceptance. It performs
+only disposable technical cache/lock probes (removed afterward); no mail, provider
 requests or business writes. It prints neither credentials nor connection strings.
 It cannot prove web PHP compatibility, credentials' validity, actual delivery,
 cron operation, routing or external access. Verify these on the target separately.
@@ -278,6 +281,104 @@ code/config and rebuild caches. Prefer retaining additive cache and payment
 context tables/columns. Do not drop history or restore DB without reconciliation
 of acknowledged financial events. Backups and restore testing are required before
 any deployment, not performed by preflight.
+
+## WEBPAY live cutover and acceptance
+
+**Current external decision: NO-GO until acceptance evidence exists.** Repository
+tests use synthetic configuration and HTTP fakes. They do not verify real keys,
+provider delivery, hosting, browser navigation or bank processing. Deployment
+and financial acceptance require separate authorization; the launch-audit task
+does not perform them.
+
+1. **Before keys:** complete realistic Sandbox acceptance and record results:
+   paid placement, active and expired extension; one Cabinet click produces a
+   native provider POST, plus no-JS/manual fallback; double-click/back/reload
+   reuse the local order and do not duplicate bank processing/product effects;
+   signed success/failure/cancel and retry; duplicate/out-of-order notify;
+   browser return before/after notify and no browser return; bounded bound-only
+   get_transaction and unbound manual review; provider refund first, then local
+   admin accounting. Feature tests do not exercise external browser redirects.
+2. Confirm exact contracted origin `https://gruppa.info` (not an unapproved
+   subdomain), allowed HTTPS callbacks under `/cabinet`, a valid certificate,
+   correct web-server/proxy base-path handling, and preserved browser Referer.
+   The response policy sends the origin cross-site; verify actual provider
+   acceptance and hosting headers. See the official
+   [environment requirements](https://docs.webpay.by/generalInfo/devEnvironment/).
+3. Confirm ordinary card/one-stage merchant configuration and standard signed
+   POST notifications: no card-inclusive signature, SOAP-only mode, unsupported
+   payment method or two-stage capture dependency. Obtain support enablement
+   for unsuccessful-operation notifications and verify signed decline/cancel
+   delivery if automatic retry recognition is required. Without these, browser
+   cancel remains pending/unbound and reaches manual review; get_transaction
+   cannot establish missing merchant-order binding. Accept that business
+   limitation explicitly or keep NO-GO. See
+   [notification prerequisites](https://docs.webpay.by/paymentIntegration/cardIntegration/paymentNotification/).
+4. Complete the [retained sandbox cutover gate](webpay.md#retained-database-sandbox-to-production-cutover):
+   private read-only counts and status/order IDs, quiet entry points, old
+   sessions/notifications reconciled, history retained. Do not change keys with
+   unresolved created/pending attempts. Unclosable created rows or unbound
+   pending rows are a BLOCKER for a separate decision; no manual paid/close SQL.
+5. Verify backups/recovery, shared database cache/locks, DB sessions/queue,
+   finite worker execution, scheduler, operational mail and safe logging.
+   Drain old in-flight jobs, pause workers/cron briefly for the switch, repeat
+   the inventory and preserve old private configuration securely. Keep notify
+   available throughout; a blanket maintenance/WAF/auth challenge is unsuitable.
+6. Provision private real configuration only after these gates:
+
+   ```dotenv
+   APP_ENV=production
+   APP_DEBUG=false
+   APP_URL=https://gruppa.info/cabinet
+   WEBPAY_ENV=production
+   ```
+
+   Supply `WEBPAY_STORE_ID`, `WEBPAY_SECRET_KEY`, `WEBPAY_API_USERNAME` and
+   `WEBPAY_API_PASSWORD` privately. Use the REAL Store ID, the same REAL SecretKey
+   configured in real billing, and an authorized billing account login and
+   ordinary **unhashed** password. The PHP adapter computes MD5 itself for
+   get_transaction; storing MD5 in env would double-hash it. Confirm necessary
+   API permission with support. Do not request/paste values in chat, reports,
+   screenshots or shell history. Nonempty values do not prove correctness.
+   Configure approved positive real placement/extension prices in admin settings.
+7. Rebuild runtime configuration/views and restart workers using the existing
+   deployment procedure. Run `php artisan deployment:preflight`,
+   `php artisan schedule:list`, `php artisan route:list --path=webpay -vv`.
+   Require production live-mode PASS; do not switch keys just to remove a FAIL
+   before cutover approval. Check target PHP/web/proxy separately. Preflight
+   neither contacts WEBPAY nor resolves business rows.
+8. During separately authorized acceptance, inspect only the generated action
+   `https://payment.webpay.by/`, `wsb_test=0`, and the exact HTTPS URLs
+   `https://gruppa.info/cabinet/payments/{id}/return`,
+   `https://gruppa.info/cabinet/payments/{id}/cancel`,
+   `https://gruppa.info/cabinet/webpay/notify`. Never dump the full signed form
+   or secrets. Verify CSRF on owner actions and no unauthorized checkout.
+9. Confirm inbound HTTPS 443 POST to notify has no redirect, session/login,
+   CSRF or WAF challenge. Valid signed provider callbacks must get stateless
+   HTTP 200; invalid signatures must be rejected, with safe technical journal
+   entries only. Verify actual delivery even when the payer closes the browser.
+   A reachable GET/login or route listing is insufficient evidence.
+10. After explicit authorization, perform a low-amount LIVE payment at the
+    approved tariff. Verify exact bank debit, signed notify, local succeeded
+    state and a single group effect (placement → draft; active extension adds
+    days; expired renewal → approved until publication confirmation). Verify
+    accounting and refund physically through WEBPAY first, then use local
+    admin “Отметить возврат выполненным в WEBPAY”. Record acceptance without
+    card/personal data or raw forms. Open user payment entry points only after
+    the evidence is accepted.
+
+### Payment rollback boundary
+
+If acceptance fails, close new payment entry points and investigate while
+keeping the current notify receiver and required workers operational. Before
+any LIVE form/attempt exists and after the cutover gate, a compatible code/config
+rollback may be coordinated with the same quiet-window checks. Once a LIVE
+attempt exists, **do not simply restore sandbox keys or an older DB snapshot**:
+late live notifications/recovery still need live credentials and all financial
+history must survive. Prefer reverting compatible UI/code while retaining live
+payment config/schema/history; reconcile with WEBPAY before any environment
+change. No automatic refund, deletion, status reset, migration rollback or
+credential fallback is provided. A required cross-environment rollback is a
+separate operator/architecture decision.
 
 ## Sendmail configuration and staging verification
 

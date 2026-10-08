@@ -5,7 +5,7 @@ NOT VERIFIED. No credentials or external payments are required by local tests.
 The architecture correction in the task is authoritative: a completely lost
 notify cannot be reconstructed safely by the documented get_transaction.
 
-## Provider contract checked 2026-09-22
+## Provider contract reviewed 2026-10-08
 
 Official sources:
 
@@ -16,6 +16,12 @@ Official sources:
 - [Transaction verification](https://docs.webpay.by/paymentIntegration/cardIntegration/paymentVerification/)
 - [Transaction types](https://docs.webpay.by/paymentIntegration/cardIntegration/transactionTypes/)
 - [API prerequisites](https://docs.webpay.by/API/operations/)
+
+The environment, form/signature, standard notify, verification and API access
+pages were re-read for the launch audit (Context7 plus official pages). The
+transaction-types page could not be fetched on this date; its mapping below
+describes current code, not a newly verified provider capability. Merchant
+configuration and actual deliveries still require provider acceptance.
 
 Environment selection is fixed in `App\Payments\Webpay`; no request-supplied
 provider URLs or TLS overrides are accepted.
@@ -37,9 +43,27 @@ There are no default business prices.
 ## Form
 
 The existing placement Blade view first submits an owner-only CSRF POST
-`/payments/{payment}/start`; this starts the same attempt and renders a standard
-HTML POST form to WEBPAY with a “Перейти в WEBPAY” button. No automatic external
-request is made by application code. Refresh does not create another attempt.
+`/payments/{payment}/start` after the owner clicks “Оплатить картой”. This starts
+the same attempt and renders a standard signed HTML POST form to WEBPAY.
+The response says “Переходим к оплате…”; local `public/ui.js` submits only
+`form[data-webpay-auto-submit]` through native form submission. The same form
+has a working “Перейти к оплате” submit button if JS/navigation fails or JS is
+disabled. Neither path changes its action, signed fields, amount or order.
+The original placement explanation and second “Оплатить картой” are omitted
+on this intermediate response. No AJAX, payment GET redirect or server-side
+provider request is used to start checkout.
+
+Ordinary GET, pending/terminal/result/error and prototype pages carry no
+auto-submit marker. Pending “Продолжить эту оплату” uses the same authorized
+CSRF start POST. New placements, active/expired extensions and new attempts
+after signed failure/cancellation share this view. Repeating start does not
+create a row, change the order, reset started_at or apply product effects;
+each new response may get a fresh seed/signature for that same order. Back or
+reload can repeat provider submission, so do not claim browser navigation
+guarantees a single bank debit: verify provider duplicate-order behavior in
+Sandbox. Local product confirmation remains locked and idempotent.
+The start response retains `Cache-Control: no-store, private` and
+`Referrer-Policy: strict-origin-when-cross-origin`. Never log/export signed forms.
 
 Fields: `*scart` (empty), `wsb_version=2`, `wsb_storeid`, opaque `wsb_order_num`
 (`GP-` plus 32 random hexadecimal characters), `wsb_test`, `wsb_currency_id=BYN`,
@@ -180,8 +204,14 @@ choose “Отметить возврат выполненным в WEBPAY”, e
 (up to 16000 characters), and confirm the modal. The CSRF-protected admin-policy
 POST locks the payment, changes it to refunded, records UTC refunded_at and
 minimal payment.refunded audit metadata. No provider call occurs. A repeat is
-rejected. Existing group deletion rules still apply; succeeded unrefunded
-payments block deletion, including soft-deleted historical payments.
+rejected. Current group deletion rules allow removal even with succeeded,
+unrefunded payments: owner deletion hides the group, admin deletion soft-deletes
+it. Payment/notification history is retained and deletion does not change the
+financial state or issue a refund (`GroupWorkflow::delete`, `PaymentEraGroupsTest`).
+Investigate paid deleted groups through admin payment history and perform any
+required external refund before local accounting. A trusted success for an
+admin-deleted group stays pending with verified binding/manual review; it does
+not resurrect the group (`ConfirmPayment`).
 
 ## Local verification and external acceptance
 
@@ -215,12 +245,89 @@ Production switch checklist:
 - Complete and record Sandbox acceptance first; follow docs/deployment.md.
 - Confirm merchant contract/domain `gruppa.info`, allowed callback host and
   `/cabinet` base path, production API permissions and notification mode.
+- Complete the retained-database cutover gate below **before** inserting keys.
 - Securely provision production credentials, set WEBPAY_ENV=production,
   approved real prices and public HTTPS APP_URL; rebuild config cache/restart
   workers. Inspect production action URL and wsb_test=0 without exposing keys.
 - Back up DB/files/config, verify scheduler/queue/SMTP/logging/rollback plan,
   and perform separately authorized production acceptance. This task does
   not deploy or make any production transaction.
+
+## Live readiness decision gates
+
+Code inspection and fake tests cannot establish provider or hosting acceptance.
+Record evidence, date and responsible operator for each external gate.
+
+| Gate | Repository evidence / limitation | GO condition |
+|---|---|---|
+| Checkout and financial invariants | `PaymentAttempts`, `Webpay`, `ConfirmPayment`; synthetic WebpayTest and WebpayConcurrencyTest | Required local checks pass; browser auto-POST and no-JS fallback accepted |
+| Production mode | Preflight now fails APP_ENV=production with WEBPAY_ENV=sandbox | APP_ENV=production and WEBPAY_ENV=production; staging can remain sandbox |
+| Credentials | Preflight checks presence only | Operator verifies real store, matching real billing SecretKey, account login/password and permitted get_transaction access |
+| Retained sandbox attempts | No environment column; global config is used at start, notify and recovery | Quiet cutover and reconciliation below; otherwise BLOCKED |
+| Merchant configuration | Code accepts ordinary `cc` standard POST notify; types 1/4 are success | Confirm ordinary one-stage flow; no two-stage capture, card-inclusive signature, SOAP-only notify or unsupported method |
+| External Sandbox acceptance | NOT VERIFIED by repository tests | Success, signed decline/cancel, duplicate notify, return ordering, recovery and refund accepted with provider |
+| Hosting | Routes and URL generation can be checked locally | Contracted origin, HTTPS/certificate, inbound notify, browser Referer, workers/cron/locks verified on target |
+| Real financial acceptance | NOT VERIFIED; not authorized by this task | Separate low-amount LIVE authorization and exact debit/state/effect/accounting checks |
+
+Preflight PASS is only a configuration gate. Its new live-mode check reads
+configuration only, prints no credential values and performs no provider call.
+Existing preflight also performs disposable technical cache/lock probes; it
+does not mutate business data. It does not identify outstanding attempts,
+validate keys/API permissions, inspect WAF, prove callback delivery or approve
+bank processing. Run the separate operator checklist in [deployment.md](deployment.md#webpay-live-cutover-and-acceptance).
+
+### Retained database: sandbox-to-production cutover
+
+`gp_payments` does not encode environment. A sandbox `created` row can start
+against production after a global switch. A pending continuation can be signed
+with new keys, recovery can target the wrong API, and a late old callback will
+be checked with the new secret. Counts alone cannot tell which environment a
+row belongs to. Include retained soft-deleted rows; do not filter them out.
+
+An operator may run only these read-only SQL queries through an already
+authenticated private DB client (do not put credentials on a command line):
+
+```sql
+SELECT status, COUNT(*) AS attempt_count
+FROM gp_payments
+GROUP BY status
+ORDER BY status;
+
+SELECT id, status, order_number
+FROM gp_payments
+WHERE status IN ('created', 'pending')
+ORDER BY id;
+```
+
+Keep outputs private: counts/status/local IDs/merchant order IDs only; no
+SELECT *, owner joins, provider payloads, credentials, personal fields or logs.
+These queries are instructions, not checks run against production in this task.
+
+1. While old sandbox configuration remains active, coordinate a quiet window:
+   stop new group/payment creation, extension, retry and start/continue entry
+   points for users/admins at the hosting layer. Keep notify reachable. Do not
+   use blanket maintenance that makes notify return 503. Let in-flight requests
+   finish and account for already issued browser forms/provider sessions.
+2. Inventory unfinished rows and reconcile each with WEBPAY/support under the
+   old environment. Only existing trusted confirmation paths can resolve
+   pending attempts. A browser cancellation, elapsed time or verbal operator
+   assessment cannot close an attempt. An unused created attempt has no
+   supported administrative close operation. Never automatically expire/delete,
+   mark paid, refund or SQL-update financial states to make the count zero.
+3. Require zero unresolved created/pending rows and provider/operator agreement
+   about outstanding sessions and late sandbox notifications. Zero is necessary
+   but does not prove no late traffic. Confirm with support that old deliveries
+   no longer need processing; retain history and record the decision. A short
+   quiet period alone does not establish this.
+4. If any row/session/delivery cannot be safely reconciled, **NO-GO / BLOCKER**:
+   keep sandbox configuration and request a separately approved design, such
+   as environment-aware attempts/callback credential handling or an explicit
+   audited retirement workflow for never-started attempts. Neither is
+   implemented here. Do not use an empty replacement DB to discard history.
+5. Once the gate passes, finish in-flight old jobs, pause workers/scheduler,
+   repeat the read-only inventory, back up retained DB/private configuration,
+   then follow the production switch/restart checklist. Keep user entry points
+   closed until smoke acceptance; notify must remain available.
 
 ## Notification-mode prerequisite
 
@@ -239,6 +346,6 @@ notification delivery; do not manually change financial status or bypass binding
 This safe fallback applies if the provider cannot enable the requested mode.
 
 Admin abandoned groups include both awaiting_payment and draft at the configured
-age threshold. Successful-unrefunded payment history still prevents deletion.
+age threshold. Deletion preserves payment history but does not require a refund.
 The admin successful-payment yes/no filter uses succeeded plus refunded_at null,
 including retained soft-deleted payment history, and composes with other filters.
